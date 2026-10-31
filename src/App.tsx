@@ -27,6 +27,20 @@ type Summary = {
 };
 type Progress = { scan_id: string; scanned: number; clean: number; infected: number; unknown: number; errors: number; skipped: number; cancelled_files: number; latest: ScanResult };
 type SelectedTarget = { id: string; path: string };
+type Theme = "light" | "dark";
+
+const THEME_KEY = "zonendpoint-theme";
+
+function loadTheme(): Theme {
+  let theme: Theme = "light";
+  try {
+    theme = window.localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
+  } catch {
+    // Keep the default theme if WebView storage is unavailable.
+  }
+  document.documentElement.dataset.theme = theme;
+  return theme;
+}
 
 const labels: Record<Status, string> = {
   CLEAN: "Clean in this scan",
@@ -38,6 +52,7 @@ const labels: Record<Status, string> = {
 };
 
 function App() {
+  const [theme, setTheme] = useState<Theme>(loadTheme);
   const [selectedTarget, setSelectedTarget] = useState<SelectedTarget | null>(null);
   const [scanId, setScanId] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -101,9 +116,35 @@ function App() {
 
   const latest = progress?.latest;
   const engineOffline = latest?.status === "ERROR" && /clamd|timed out|connect/i.test(latest.reason ?? "");
+  const nextTheme: Theme = theme === "light" ? "dark" : "light";
+
+  function toggleTheme() {
+    document.documentElement.dataset.theme = nextTheme;
+    try {
+      window.localStorage.setItem(THEME_KEY, nextTheme);
+    } catch {
+      // The current choice still applies for this session.
+    }
+    setTheme(nextTheme);
+  }
 
   return (
     <main className="app-shell">
+      <div className="topbar">
+        <button
+          className="theme-toggle"
+          type="button"
+          title={`Switch to ${nextTheme} theme`}
+          aria-label={`Switch to ${nextTheme} theme`}
+          onClick={toggleTheme}
+        >
+          {theme === "light" ? (
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20.1 15.1A8.3 8.3 0 0 1 8.9 3.9 8.5 8.5 0 1 0 20.1 15.1Z" /></svg>
+          ) : (
+            <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
+          )}
+        </button>
+      </div>
       <header>
         <p className="eyebrow">ZONENDPOINT · ON-DEMAND SCANNING</p>
         <h1>Scan files and folders</h1>
