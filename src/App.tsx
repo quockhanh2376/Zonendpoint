@@ -29,12 +29,12 @@ type Progress = { scan_id: string; scanned: number; clean: number; infected: num
 type SelectedTarget = { id: string; path: string };
 
 const labels: Record<Status, string> = {
-  CLEAN: "Sạch theo lần quét này",
-  INFECTED: "Phát hiện mối đe dọa",
-  UNKNOWN: "Chưa rõ",
-  ERROR: "Lỗi quét",
-  SKIPPED: "Đã bỏ qua",
-  CANCELLED: "Đã hủy",
+  CLEAN: "Clean in this scan",
+  INFECTED: "Threat detected",
+  UNKNOWN: "Unknown",
+  ERROR: "Scan error",
+  SKIPPED: "Skipped",
+  CANCELLED: "Cancelled",
 };
 
 function App() {
@@ -105,40 +105,40 @@ function App() {
   return (
     <main className="app-shell">
       <header>
-        <p className="eyebrow">ZONENDPOINT · QUÉT BỔ SUNG</p>
-        <h1>Quét tệp và thư mục</h1>
-        <p className="intro">Kết quả phản ánh phạm vi quét của ClamAV ở thời điểm này; không thay thế Defender hoặc phần mềm bảo vệ endpoint hiện có.</p>
+        <p className="eyebrow">ZONENDPOINT · ON-DEMAND SCANNING</p>
+        <h1>Scan files and folders</h1>
+        <p className="intro">Results show what ClamAV detected during this scan. Zonendpoint does not replace Defender or other endpoint protection.</p>
       </header>
 
-      <section className="panel" aria-label="Chọn nội dung quét">
+      <section className="panel" aria-label="Scan selection">
         <div className="actions">
-          <button onClick={() => void select("file")} disabled={!!scanId}>Chọn tệp</button>
-          <button onClick={() => void select("folder")} disabled={!!scanId}>Chọn thư mục</button>
-        <button className="primary" onClick={() => void startScan()} disabled={!selectedTarget || !!scanId}>Bắt đầu quét</button>
-          {scanId && <button className="danger" onClick={() => void cancelScan()}>Hủy quét</button>}
+          <button onClick={() => void select("file")} disabled={!!scanId}>Select file</button>
+          <button onClick={() => void select("folder")} disabled={!!scanId}>Select folder</button>
+          <button className="primary" onClick={() => void startScan()} disabled={!selectedTarget || !!scanId}>Start scan</button>
+          {scanId && <button className="danger" onClick={() => void cancelScan()}>Cancel scan</button>}
         </div>
-        <p className="selected-path">{selectedTarget?.path || "Chưa chọn tệp hoặc thư mục"}</p>
-        <p className="guard-note">Bảo vệ thời gian thực chưa được bật trong lát cắt MVP này.</p>
-        <p className="guard-note">ClamAV phải ở loopback hoặc mạng riêng/VPN tin cậy; app không gửi tệp ra dịch vụ công cộng.</p>
+        <p className="selected-path">{selectedTarget?.path || "No file or folder selected"}</p>
+        <p className="guard-note">Real-time protection is not enabled in this MVP.</p>
+        <p className="guard-note">ClamAV must run on loopback or a trusted private/VPN network. Files are not sent to public services.</p>
       </section>
 
       {error && <p role="alert" className="notice error">{error}</p>}
-      {engineOffline && <p role="status" className="notice warning">Không kết nối được ClamAV. Kết quả lỗi/không quét được không được xem là sạch.</p>}
+      {engineOffline && <p role="status" className="notice warning">Could not connect to ClamAV. Errors or unscanned results must not be treated as clean.</p>}
 
       {scanId && (
         <section className="panel" aria-live="polite">
-          <h2>Đang quét</h2>
-          <p>Đã xử lý {progress?.scanned ?? 0} mục · sạch {progress?.clean ?? 0} · phát hiện {progress?.infected ?? 0} · lỗi {progress?.errors ?? 0} · bỏ qua {progress?.skipped ?? 0}</p>
+          <h2>Scanning</h2>
+          <p>Processed {progress?.scanned ?? 0} items · clean {progress?.clean ?? 0} · threats {progress?.infected ?? 0} · unknown {progress?.unknown ?? 0} · errors {progress?.errors ?? 0} · skipped {progress?.skipped ?? 0} · cancelled {progress?.cancelled_files ?? 0}</p>
           {latest && <p className={`status ${latest.status.toLowerCase()}`}>{labels[latest.status]} — {latest.path}</p>}
         </section>
       )}
 
       {summary && (
         <section className="panel" aria-live="polite">
-          <h2>{summary.cancelled ? "Đã hủy quét" : summary.complete ? "Quét hoàn tất" : "Quét chưa đầy đủ"}</h2>
-          <p>Đã xử lý {summary.scanned} mục · sạch {summary.clean} · phát hiện {summary.infected} · chưa rõ {summary.unknown} · lỗi {summary.errors} · bỏ qua {summary.skipped} · đã hủy {summary.cancelled_files}</p>
-          {!summary.complete && <p className="notice warning">Không xem phạm vi chưa hoàn tất là sạch.</p>}
-          {summary.details_truncated && <p>Danh sách chi tiết đã giới hạn để giữ mức dùng bộ nhớ ổn định.</p>}
+          <h2>{summary.cancelled ? "Scan cancelled" : summary.complete ? "Scan complete" : "Scan incomplete"}</h2>
+          <p>Processed {summary.scanned} items · clean {summary.clean} · threats {summary.infected} · unknown {summary.unknown} · errors {summary.errors} · skipped {summary.skipped} · cancelled {summary.cancelled_files}</p>
+          {!summary.complete && <p className="notice warning">Do not treat an incomplete scan as clean.</p>}
+          {summary.details_truncated && <p>Result details are limited to keep memory use bounded.</p>}
           <ul className="results">
             {summary.results.slice(-50).map((item, index) => (
               <li key={`${item.path}-${index}`}>
