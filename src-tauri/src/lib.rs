@@ -17,17 +17,100 @@ use tokio::sync::{Semaphore, watch};
 use watcher::Guard;
 
 struct ScanManager {
-    active: Mutex<HashMap<String, watch::Sender<bool>>>,
+    active: Mutex<Option<ActiveScan>>,
     selected: Mutex<HashMap<String, (Instant, PathBuf)>>,
     semaphore: Arc<Semaphore>,
+}
+
+struct ActiveScan {
+    scan_id: String,
+    cancel: watch::Sender<bool>,
+    state: ScanLifecycle,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ScanLifecycle {
+    Scanning,
+    Cancelling,
+    Idle,
+}
+
+#[derive(Clone, Serialize)]
+struct ScanStateEvent {
+    scan_id: String,
+    state: ScanLifecycle,
 }
 
 impl ScanManager {
     fn new() -> Self {
         Self {
-            active: Mutex::new(HashMap::new()),
+            active: Mutex::new(None),
             selected: Mutex::new(HashMap::new()),
             semaphore: Arc::new(Semaphore::new(2)),
+        }
+    }
+
+    fn begin_scan(&self, scan_id: String) -> Result<watch::Receiver<bool>, String> {
+        let mut active = self
+            .active
+            .lock()
+            .map_err(|_| "scan state is unavailable")?;
+        if active.is_some() {
+            return Err("another scan is still active".into());
+        }
+        let (cancel, receiver) = watch::channel(false);
+        *active = Some(ActiveScan {
+            scan_id,
+            cancel,
+            state: ScanLifecycle::Scanning,
+        });
+        Ok(receiver)
+    }
+
+    fn selected_path(&self, target_id: &str) -> Result<PathBuf, String> {
+        let mut selected = self
+            .selected
+            .lock()
+            .map_err(|_| "selection state is unavailable")?;
+        let Some((created, path)) = selected.get(target_id) else {
+            return Err("target must be selected in the native picker".into());
+        };
+        if created.elapsed() >= Duration::from_secs(300) {
+            selected.remove(target_id);
+            return Err("file selection expired; choose it again".into());
+        }
+        Ok(path.clone())
+    }
+
+    fn request_cancel(&self, scan_id: &str) -> bool {
+        let Ok(mut active) = self.active.lock() else {
+            return false;
+        };
+        let Some(active) = active.as_mut() else {
+            return false;
+        };
+        if active.scan_id != scan_id || active.state != ScanLifecycle::Scanning {
+            return false;
+        }
+        if active.cancel.send(true).is_err() {
+            return false;
+        }
+        active.state = ScanLifecycle::Cancelling;
+        true
+    }
+
+    fn finish_scan(&self, scan_id: &str) -> Result<bool, String> {
+        let mut active = self
+            .active
+            .lock()
+            .map_err(|_| "scan state is unavailable")?;
+        if active.as_ref().is_some_and(|scan| scan.scan_id == scan_id) {
+            Ok(active
+                .take()
+                .is_some_and(|scan| scan.state == ScanLifecycle::Cancelling))
+        } else {
+            Ok(false)
         }
     }
 }
@@ -108,30 +191,16 @@ async fn scan_path(
     if scan_id.is_empty() || scan_id.len() > 80 {
         return Err("invalid scan identifier".into());
     }
-    let target = {
-        let mut selections = manager
-            .selected
-            .lock()
-            .map_err(|_| "selection state is unavailable")?;
-        let (created, path) = selections
-            .remove(&target_id)
-            .ok_or("target must be selected in the native picker")?;
-        if created.elapsed() >= Duration::from_secs(300) {
-            return Err("file selection expired; choose it again".into());
-        }
-        path
-    };
-    let (cancel_tx, cancel_rx) = watch::channel(false);
-    {
-        let mut active = manager
-            .active
-            .lock()
-            .map_err(|_| "scan state is unavailable")?;
-        if active.contains_key(&scan_id) {
-            return Err("scan identifier is already active".into());
-        }
-        active.insert(scan_id.clone(), cancel_tx);
-    }
+    let target = manager.selected_path(&target_id)?;
+    let cancel_rx = manager.begin_scan(scan_id.clone())?;
+    let _ = app.emit(
+        "scan-state",
+        ScanStateEvent {
+            scan_id: scan_id.clone(),
+            state: ScanLifecycle::Scanning,
+        },
+    );
+    let cancellation_path = target.clone();
     let result = async {
         let cache_path = cache::default_path().map_err(|error| error.to_string())?;
         let addr = scanner::configured_clamd_addr();
@@ -182,20 +251,79 @@ async fn scan_path(
         }
     }
     .await;
-    if let Ok(mut active) = manager.active.lock() {
-        active.remove(&scan_id);
-    }
+    let cancelled = manager.finish_scan(&scan_id)?;
+    let result = match (result, cancelled) {
+        (Ok(mut summary), true) => {
+            mark_user_cancelled(&mut summary, &cancellation_path);
+            Ok(summary)
+        }
+        (Err(_), true) => {
+            let mut summary = ScanSummary::default();
+            summary.record(scanner::ScanResult::new(
+                &cancellation_path,
+                scanner::ScanStatus::Cancelled,
+                None,
+                Some("cancelled by user".into()),
+                0,
+            ));
+            Ok(summary)
+        }
+        (result, false) => result,
+    };
+    let _ = app.emit(
+        "scan-state",
+        ScanStateEvent {
+            scan_id,
+            state: ScanLifecycle::Idle,
+        },
+    );
     result
 }
 
+fn mark_user_cancelled(summary: &mut ScanSummary, path: &std::path::Path) {
+    summary.cancelled = true;
+    summary.complete = false;
+    if summary.scanned != 1 || summary.results.len() != 1 {
+        return;
+    }
+
+    let result = &mut summary.results[0];
+    if result.status == scanner::ScanStatus::Cancelled {
+        return;
+    }
+    match result.status {
+        scanner::ScanStatus::Clean => summary.clean = summary.clean.saturating_sub(1),
+        scanner::ScanStatus::Infected => summary.infected = summary.infected.saturating_sub(1),
+        scanner::ScanStatus::Unknown => summary.unknown = summary.unknown.saturating_sub(1),
+        scanner::ScanStatus::Error => summary.errors = summary.errors.saturating_sub(1),
+        scanner::ScanStatus::Skipped => summary.skipped = summary.skipped.saturating_sub(1),
+        scanner::ScanStatus::Cancelled => unreachable!(),
+    }
+    result.path = path.to_string_lossy().into_owned();
+    result.sha256 = None;
+    result.status = scanner::ScanStatus::Cancelled;
+    result.reason = Some("cancelled by user".into());
+    result.bytes_scanned = 0;
+    summary.cancelled_files = summary.cancelled_files.saturating_add(1);
+}
+
 #[tauri::command]
-fn cancel_scan(manager: tauri::State<'_, ScanManager>, scan_id: String) -> bool {
-    manager
-        .active
-        .lock()
-        .ok()
-        .and_then(|active| active.get(&scan_id).cloned())
-        .is_some_and(|sender| sender.send(true).is_ok())
+fn cancel_scan(
+    app: tauri::AppHandle,
+    manager: tauri::State<'_, ScanManager>,
+    scan_id: String,
+) -> bool {
+    let accepted = manager.request_cancel(&scan_id);
+    if accepted {
+        let _ = app.emit(
+            "scan-state",
+            ScanStateEvent {
+                scan_id,
+                state: ScanLifecycle::Cancelling,
+            },
+        );
+    }
+    accepted
 }
 
 #[tauri::command]
@@ -261,4 +389,58 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scanner::ScanStatus;
+
+    #[test]
+    fn cancellation_keeps_the_backend_busy_until_the_worker_finishes() {
+        let manager = ScanManager::new();
+        let cancel = manager.begin_scan("first".into()).unwrap();
+
+        assert!(manager.begin_scan("second".into()).is_err());
+        assert!(manager.request_cancel("first"));
+        assert!(*cancel.borrow());
+        assert!(!manager.request_cancel("first"));
+        assert!(manager.finish_scan("first").unwrap());
+
+        assert!(manager.begin_scan("second".into()).is_ok());
+    }
+
+    #[test]
+    fn accepted_cancel_does_not_return_a_single_file_as_clean() {
+        let mut summary = ScanSummary::default();
+        summary.record(scanner::ScanResult::new(
+            "sample.txt",
+            ScanStatus::Clean,
+            Some("abc".into()),
+            None,
+            6,
+        ));
+
+        mark_user_cancelled(&mut summary, std::path::Path::new("sample.txt"));
+
+        assert!(summary.cancelled);
+        assert!(!summary.complete);
+        assert_eq!(summary.clean, 0);
+        assert_eq!(summary.cancelled_files, 1);
+        assert_eq!(summary.results[0].status, ScanStatus::Cancelled);
+    }
+
+    #[test]
+    fn selected_target_can_be_scanned_again_until_its_expiry() {
+        let manager = ScanManager::new();
+        let path = PathBuf::from("fixture.txt");
+        manager
+            .selected
+            .lock()
+            .unwrap()
+            .insert("target".into(), (Instant::now(), path.clone()));
+
+        assert_eq!(manager.selected_path("target").unwrap(), path);
+        assert_eq!(manager.selected_path("target").unwrap(), path);
+    }
 }

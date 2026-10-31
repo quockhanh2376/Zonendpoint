@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import "./App.css";
@@ -27,6 +28,8 @@ type Summary = {
 };
 type Progress = { scan_id: string; scanned: number; clean: number; infected: number; unknown: number; errors: number; skipped: number; cancelled_files: number; latest: ScanResult };
 type SelectedTarget = { id: string; path: string };
+type ScanLifecycle = "scanning" | "cancelling" | "idle";
+type ScanStateEvent = { scan_id: string; state: ScanLifecycle };
 type Theme = "light" | "dark";
 
 const THEME_KEY = "zonendpoint-theme";
@@ -55,24 +58,51 @@ function App() {
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [selectedTarget, setSelectedTarget] = useState<SelectedTarget | null>(null);
   const [scanId, setScanId] = useState<string | null>(null);
+  const [scanState, setScanState] = useState<ScanLifecycle>("idle");
+  const [scanEventsReady, setScanEventsReady] = useState(false);
+  const [startPending, setStartPending] = useState(false);
+  const [cancelPending, setCancelPending] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState("");
+  const activeScanId = useRef<string | null>(null);
+  const startPendingRef = useRef(false);
+  const cancelPendingRef = useRef(false);
+  const terminalScanId = useRef<string | null>(null);
+  const stoppingVisibleUntil = useRef(0);
 
   useEffect(() => {
     let disposed = false;
-    let unlisten: UnlistenFn | undefined;
-    void listen<Progress>("scan-progress", ({ payload }) => {
-      if (payload.scan_id === scanId) setProgress(payload);
-    }).then((stop) => {
-      if (disposed) stop();
-      else unlisten = stop;
-    }).catch((reason: unknown) => setError(String(reason)));
+    let unlistenProgress: UnlistenFn | undefined;
+    let unlistenState: UnlistenFn | undefined;
+    void Promise.all([
+      listen<Progress>("scan-progress", ({ payload }) => {
+        if (payload.scan_id === activeScanId.current) setProgress(payload);
+      }),
+      listen<ScanStateEvent>("scan-state", ({ payload }) => {
+        if (payload.scan_id !== activeScanId.current) return;
+        setScanState(payload.state);
+        if (payload.state === "scanning") setStartPending(false);
+        if (payload.state === "idle") terminalScanId.current = payload.scan_id;
+      }),
+    ]).then(([stopProgress, stopState]) => {
+      if (disposed) {
+        stopProgress();
+        stopState();
+      } else {
+        unlistenProgress = stopProgress;
+        unlistenState = stopState;
+        setScanEventsReady(true);
+      }
+    }).catch((reason: unknown) => {
+      if (!disposed) setError(String(reason));
+    });
     return () => {
       disposed = true;
-      unlisten?.();
+      unlistenProgress?.();
+      unlistenState?.();
     };
-  }, [scanId]);
+  }, []);
 
   async function select(kind: "file" | "folder") {
     setError("");
@@ -89,34 +119,91 @@ function App() {
   }
 
   async function startScan() {
-    if (!selectedTarget || scanId) return;
+    if (!selectedTarget || activeScanId.current || startPendingRef.current) return;
     const id = crypto.randomUUID();
+    activeScanId.current = id;
+    terminalScanId.current = null;
+    startPendingRef.current = true;
+    cancelPendingRef.current = false;
     setScanId(id);
+    setScanState("idle");
+    setStartPending(true);
+    setCancelPending(false);
     setError("");
     setSummary(null);
     setProgress(null);
     try {
       const result = await invoke<Summary>("scan_path", { scanId: id, targetId: selectedTarget.id });
-      setSummary(result);
+      if (activeScanId.current === id) setSummary(result);
     } catch (reason) {
-      setError(String(reason));
+      if (activeScanId.current === id) setError(String(reason));
     } finally {
-      setScanId(null);
+      if (activeScanId.current === id) {
+        const remaining = stoppingVisibleUntil.current - performance.now();
+        if (remaining > 0) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
+        }
+        activeScanId.current = null;
+        startPendingRef.current = false;
+        cancelPendingRef.current = false;
+        stoppingVisibleUntil.current = 0;
+        setScanId(null);
+        setScanState("idle");
+        setStartPending(false);
+        setCancelPending(false);
+      }
     }
   }
 
-  async function cancelScan() {
-    if (!scanId) return;
+  async function toggleScan() {
+    if (!scanId) {
+      await startScan();
+      return;
+    }
+    const id = activeScanId.current;
+    if (!id || scanState !== "scanning" || cancelPendingRef.current) return;
+    cancelPendingRef.current = true;
+    stoppingVisibleUntil.current = performance.now() + 250;
+    const cancellation = invoke<boolean>("cancel_scan", { scanId: id }).then(
+      (accepted) => ({ accepted }),
+      (reason: unknown) => ({ reason }),
+    );
+    flushSync(() => setCancelPending(true));
     try {
-      await invoke<boolean>("cancel_scan", { scanId });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const outcome = await cancellation;
+      if ("reason" in outcome) throw outcome.reason;
+      const accepted = outcome.accepted;
+      if (activeScanId.current === id && terminalScanId.current !== id) {
+        if (accepted) setScanState("cancelling");
+        else {
+          cancelPendingRef.current = false;
+          setCancelPending(false);
+        }
+      }
     } catch (reason) {
-      setError(String(reason));
+      if (activeScanId.current === id && terminalScanId.current !== id) {
+        cancelPendingRef.current = false;
+        setCancelPending(false);
+        setError(String(reason));
+      }
     }
   }
 
   const latest = progress?.latest;
   const engineOffline = latest?.status === "ERROR" && /clamd|timed out|connect/i.test(latest.reason ?? "");
   const nextTheme: Theme = theme === "light" ? "dark" : "light";
+  const scanButtonLabel = scanState === "cancelling" || cancelPending
+    ? "Stopping…"
+    : scanState === "scanning"
+      ? "Stop"
+      : startPending
+        ? "Starting…"
+        : "Start scan";
+  const scanButtonDisabled = scanState === "cancelling"
+    || cancelPending
+    || startPending
+    || (scanState === "idle" && (!!scanId || !selectedTarget || !scanEventsReady));
 
   function toggleTheme() {
     document.documentElement.dataset.theme = nextTheme;
@@ -155,8 +242,7 @@ function App() {
         <div className="actions">
           <button onClick={() => void select("file")} disabled={!!scanId}>Select file</button>
           <button onClick={() => void select("folder")} disabled={!!scanId}>Select folder</button>
-          <button className="primary" onClick={() => void startScan()} disabled={!selectedTarget || !!scanId}>Start scan</button>
-          {scanId && <button className="danger" onClick={() => void cancelScan()}>Cancel scan</button>}
+          <button className="primary" onClick={() => void toggleScan()} disabled={scanButtonDisabled}>{scanButtonLabel}</button>
         </div>
         <p className="selected-path">{selectedTarget?.path || "No file or folder selected"}</p>
         <p className="guard-note">Real-time protection is not enabled in this MVP.</p>
