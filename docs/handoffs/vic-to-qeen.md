@@ -3,7 +3,8 @@
 ## Snapshot
 
 - Branch: `vic/mvp-first-scan`
-- Exact code snapshot to review: `48c616733f3ae4bee035a8e6cdc78d2a837e6b97`
+- Exact code snapshot to review: `e3ed872ddfd4a95d9bb28a3cc6da53a656e0b0ae`
+- This includes the prior unified scan lifecycle snapshot `48c616733f3ae4bee035a8e6cdc78d2a837e6b97` plus the branding integration below.
 - Previous UI theme snapshot: `cef0d9cb0ed35171e93f45680288e152d2df5178`
 - This follow-up handoff is a documentation-only commit; retest the code SHA above, not the handoff commit.
 - Parent MVP baseline: `2db42a8124f19384d154588fac41d7bab791bb97`
@@ -66,3 +67,13 @@ Environment: Windows 11 Enterprise x64, Rust/Cargo 1.98, Node 26.13, npm 11.20.
 ## Host security status observed (read-only)
 
 `Get-MpComputerStatus` returned `AntivirusEnabled=True`, `RealTimeProtectionEnabled=False`, `BehaviorMonitorEnabled=False`, `IoavProtectionEnabled=False`. No Defender/Sophos policy or machine security setting was changed.
+
+## ZonEndpoint icon and logo integration in `e3ed872`
+
+- Source assets were copied from `E:\Zonendpoint\src-tauri\icons` into this worktree only. The original checkout and source files were left untouched. The light root icon is the green/orange shield; `dark` is the green/purple variant. The two selected UI logos were checked as RGBA PNGs with transparent corners.
+- UI mapping: `public/brand/logo-light-slogan-transparent.png` for Light and `public/brand/logo-dark-slogan-transparent.png` for Dark. Vite emits these under `dist/brand/`; the UI uses relative public paths, with no drive-specific reference. Logos are constrained with `object-fit: contain`; the native screenshot showed no clipping or distortion on either background.
+- Fixed bundle mapping remains the Tauri `bundle.icon` list in `src-tauri/tauri.conf.json`, now populated by the source Light icon set: `icons/icon.ico`, `icons/icon.png`, 32/128/128@2x PNGs and square Windows PNGs. `icons/icon.icns` was already identical to the source asset. The ICO/PNG has transparency and is suitable over either app theme. Windows packaging and installer/shortcut output: NOT RUN.
+- Runtime window mapping: `icons/icon.png` for Light and `icons/dark/icon.png` for Dark, embedded with `include_bytes!`. The Tauri `set_window_theme_icon` command accepts only `light`/`dark` and calls the main window's `set_icon`; the React theme state invokes it on startup and whenever the persisted theme changes. No external E-drive path is used at runtime.
+- Native verification on Windows: opened this worktree with `npm run tauri dev`; switched Light → Dark → Light and saw matching wordmarks and window icon updates (the Windows `WM_GETICON/ICON_SMALL` handle changed when switching). Closed and reopened the app after choosing Dark; Dark and its logo restored from localStorage. The app was left open in Light theme. Scan controls and scan logic were not changed.
+- `npm run build`: PASS; `dist/brand/` contains both PNGs. `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`: PASS. `cargo check --manifest-path src-tauri/Cargo.toml`: PASS. `cargo test --manifest-path src-tauri/Cargo.toml`: PASS, 19 passed. `git diff --check`: PASS.
+- Native runtime tested; Windows installer/shortcut and packaged binary: NOT RUN. Runtime theme changes apply to the Tauri window icon only; the bundled executable/installer/shortcut icon is the fixed Light asset and does not change with theme. Real ClamAV integration remains NOT RUN.
