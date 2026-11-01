@@ -72,6 +72,12 @@ function App() {
   const stoppingVisibleUntil = useRef(0);
 
   useEffect(() => {
+    void invoke("set_window_theme_icon", { theme }).catch((reason) => {
+      console.error("Could not update the window icon", reason);
+    });
+  }, [theme]);
+
+  useEffect(() => {
     let disposed = false;
     let unlistenProgress: UnlistenFn | undefined;
     let unlistenState: UnlistenFn | undefined;
@@ -218,6 +224,11 @@ function App() {
   return (
     <main className="app-shell">
       <div className="topbar">
+        <img
+          className="brand-logo"
+          src={theme === "dark" ? "/brand/logo-dark-slogan-transparent.png" : "/brand/logo-light-slogan-transparent.png"}
+          alt="ZonEndpoint"
+        />
         <button
           className="theme-toggle"
           type="button"

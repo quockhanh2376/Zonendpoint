@@ -78,7 +78,8 @@ button, input, select, textarea { font: inherit; }
 input, select, textarea { color: var(--text); background: var(--panel-bg); border: 1px solid var(--button-border); }
 progress { accent-color: var(--primary-bg); }
 .app-shell { width: min(920px, 100%); margin: 0 auto; padding: 40px 28px; }
-.topbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.brand-logo { display: block; width: min(220px, calc(100% - 60px)); max-height: 150px; object-fit: contain; object-position: left center; }
 .theme-toggle { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--button-border); border-radius: 10px; color: var(--button-text); background: var(--button-bg); cursor: pointer; }
 .theme-toggle svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .eyebrow { margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .12em; }

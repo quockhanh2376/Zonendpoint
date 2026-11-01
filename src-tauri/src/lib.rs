@@ -333,6 +333,20 @@ fn cache_stats() -> Result<cache::CacheStats, String> {
 }
 
 #[tauri::command]
+fn set_window_theme_icon(app: tauri::AppHandle, theme: String) -> Result<(), String> {
+    let bytes: &[u8] = match theme.as_str() {
+        "light" => include_bytes!("../icons/icon.png"),
+        "dark" => include_bytes!("../icons/dark/icon.png"),
+        _ => return Err("unsupported theme".into()),
+    };
+    let icon = tauri::image::Image::from_bytes(bytes).map_err(|error| error.to_string())?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    window.set_icon(icon).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn set_guard(
     app: tauri::AppHandle,
     manager: tauri::State<'_, ScanManager>,
@@ -385,7 +399,8 @@ pub fn run() {
             scan_path,
             cancel_scan,
             cache_stats,
-            set_guard
+            set_guard,
+            set_window_theme_icon
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
