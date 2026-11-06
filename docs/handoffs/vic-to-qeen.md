@@ -1,3 +1,9 @@
+# Latest UI handoff — d694f4f
+
+Code snapshot: d694f4f547c46755dbf4fcf41a7195b0b83fd99c. Compact UI approved by Zon; viewport feedback and folder-test fixes included. Current mock 9/9 and real benign 4/4 PASS. See ../qa/report-d694f4f.md and ../project-status.md for commands, evidence and remaining acceptance. Qeen runtime acceptance pending. Historical handoffs follow unchanged.
+
+---
+
 # Native automation handoff — dc57a52
 
 Code snapshot: dc57a523b26d9090bfe20ef4441cc57973787ce0, branch vic/mvp-first-scan, E:\Zonendpoint-restored\Zonendpoint-vic. Base: restored handoff 2487664. Author CheKi; independent Qeen acceptance PENDING.
@@ -102,3 +108,4 @@ Environment: Windows 11 Enterprise x64, Rust/Cargo 1.98, Node 26.13, npm 11.20.
 - Native verification on Windows: opened this worktree with `npm run tauri dev`; switched Light → Dark → Light and saw matching wordmarks and window icon updates (the Windows `WM_GETICON/ICON_SMALL` handle changed when switching). Closed and reopened the app after choosing Dark; Dark and its logo restored from localStorage. The app was left open in Light theme. Scan controls and scan logic were not changed.
 - `npm run build`: PASS; `dist/brand/` contains both PNGs. `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`: PASS. `cargo check --manifest-path src-tauri/Cargo.toml`: PASS. `cargo test --manifest-path src-tauri/Cargo.toml`: PASS, 19 passed. `git diff --check`: PASS.
 - Native runtime tested; Windows installer/shortcut and packaged binary: NOT RUN. Runtime theme changes apply to the Tauri window icon only; the bundled executable/installer/shortcut icon is the fixed Light asset and does not change with theme. Real ClamAV integration remains NOT RUN.
+
