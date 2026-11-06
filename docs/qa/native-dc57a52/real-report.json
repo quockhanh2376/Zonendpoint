@@ -1,0 +1,22 @@
+{
+  "real": true,
+  "targetInjection": "debug feature; real picker NOT RUN",
+  "results": [
+    {
+      "name": "native shell and English controls",
+      "status": "PASS"
+    },
+    {
+      "name": "theme and logo persistence after native relaunch",
+      "status": "PASS"
+    },
+    {
+      "name": "real ClamAV benign scan via native UI and Rust IPC",
+      "status": "PASS"
+    },
+    {
+      "name": "folder target through debug injection",
+      "status": "PASS"
+    }
+  ]
+}

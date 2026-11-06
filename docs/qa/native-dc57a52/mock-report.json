@@ -1,0 +1,42 @@
+{
+  "real": false,
+  "targetInjection": "debug feature; real picker NOT RUN",
+  "results": [
+    {
+      "name": "native shell and English controls",
+      "status": "PASS"
+    },
+    {
+      "name": "theme and logo persistence after native relaunch",
+      "status": "PASS"
+    },
+    {
+      "name": "mock successful native scan",
+      "status": "PASS"
+    },
+    {
+      "name": "folder target through debug injection",
+      "status": "PASS"
+    },
+    {
+      "name": "mock INFECTED result",
+      "status": "PASS"
+    },
+    {
+      "name": "error never becomes CLEAN",
+      "status": "PASS"
+    },
+    {
+      "name": "malformed never becomes CLEAN",
+      "status": "PASS"
+    },
+    {
+      "name": "Stop lifecycle and scan again",
+      "status": "PASS"
+    },
+    {
+      "name": "offline never becomes CLEAN",
+      "status": "PASS"
+    }
+  ]
+}
