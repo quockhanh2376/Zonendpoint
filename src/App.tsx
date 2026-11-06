@@ -55,6 +55,16 @@ const labels: Record<Status, string> = {
 };
 
 function App() {
+  const [targetMenuOpen, setTargetMenuOpen] = useState(false);
+  const targetPickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!targetMenuOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!targetPickerRef.current?.contains(event.target as Node)) setTargetMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [targetMenuOpen]);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [selectedTarget, setSelectedTarget] = useState<SelectedTarget | null>(null);
   const [scanId, setScanId] = useState<string | null>(null);
@@ -224,11 +234,14 @@ function App() {
   return (
     <main className="app-shell">
       <div className="topbar">
+        <div className="brand-heading">
         <img
           className="brand-logo"
           src={theme === "dark" ? "/brand/logo-dark-slogan-transparent.png" : "/brand/logo-light-slogan-transparent.png"}
           alt="ZonEndpoint"
         />
+          <p className="brand-slogan">Protect your digital life</p>
+        </div>
         <button
           className="theme-toggle"
           type="button"
@@ -242,37 +255,43 @@ function App() {
             <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
           )}
         </button>
-      </div>
-      <header>
-        <p className="eyebrow">ZONENDPOINT · ON-DEMAND SCANNING</p>
+      <section className="panel selection-panel" aria-label="Scan selection">
         <h1>Scan files and folders</h1>
-        <p className="intro">Results show what ClamAV detected during this scan. Zonendpoint does not replace Defender or other endpoint protection.</p>
-      </header>
-
-      <section className="panel" aria-label="Scan selection">
         <div className="actions">
-          <button onClick={() => void select("file")} disabled={!!scanId}>Select file</button>
-          <button onClick={() => void select("folder")} disabled={!!scanId}>Select folder</button>
+          <div className="target-picker" ref={targetPickerRef}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setTargetMenuOpen(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setTargetMenuOpen(false);
+                targetPickerRef.current?.querySelector("button")?.focus();
+              }
+            }}>
+            <button aria-expanded={targetMenuOpen} aria-controls="target-options"
+              onClick={() => setTargetMenuOpen(!targetMenuOpen)} disabled={!!scanId}>
+              Select target ▾
+            </button>
+            {targetMenuOpen && !scanId && (
+              <div id="target-options" className="target-options" role="group" aria-label="Target type">
+                <button onClick={() => { setTargetMenuOpen(false); void select("file"); }}>File</button>
+                <button onClick={() => { setTargetMenuOpen(false); void select("folder"); }}>Folder</button>
+              </div>
+            )}
+          </div>
           <button className="primary" onClick={() => void toggleScan()} disabled={scanButtonDisabled}>{scanButtonLabel}</button>
         </div>
-        <p className="selected-path">{selectedTarget?.path || "No file or folder selected"}</p>
-        <p className="guard-note">Real-time protection is not enabled in this MVP.</p>
-        <p className="guard-note">ClamAV must run on loopback or a trusted private/VPN network. Files are not sent to public services.</p>
-      </section>
-
-      {error && <p role="alert" className="notice error">{error}</p>}
-      {engineOffline && <p role="status" className="notice warning">Could not connect to ClamAV. Errors or unscanned results must not be treated as clean.</p>}
+        {!scanId && !summary && <p className="selected-path">{selectedTarget?.path || "No file or folder selected"}</p>}
 
       {scanId && (
-        <section className="panel" aria-live="polite">
+        <section className="scan-feedback" aria-live="polite">
           <h2>Scanning</h2>
-          <p>Processed {progress?.scanned ?? 0} items · clean {progress?.clean ?? 0} · threats {progress?.infected ?? 0} · unknown {progress?.unknown ?? 0} · errors {progress?.errors ?? 0} · skipped {progress?.skipped ?? 0} · cancelled {progress?.cancelled_files ?? 0}</p>
-          {latest && <p className={`status ${latest.status.toLowerCase()}`}>{labels[latest.status]} — {latest.path}</p>}
+          <p className="selected-path">{latest?.path || selectedTarget?.path}</p>
         </section>
       )}
 
       {summary && (
-        <section className="panel" aria-live="polite">
+        <section className="scan-feedback" aria-live="polite">
           <h2>{summary.cancelled ? "Scan cancelled" : summary.complete ? "Scan complete" : "Scan incomplete"}</h2>
           <p>Processed {summary.scanned} items · clean {summary.clean} · threats {summary.infected} · unknown {summary.unknown} · errors {summary.errors} · skipped {summary.skipped} · cancelled {summary.cancelled_files}</p>
           {!summary.complete && <p className="notice warning">Do not treat an incomplete scan as clean.</p>}
@@ -288,6 +307,10 @@ function App() {
           </ul>
         </section>
       )}
+      {error && <p role="alert" className="notice error">{error}</p>}
+      {engineOffline && <p role="status" className="notice warning">Could not connect to ClamAV. Errors or unscanned results must not be treated as clean.</p>}
+      </section>
+      </div>
     </main>
   );
 }

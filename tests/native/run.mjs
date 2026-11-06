@@ -31,12 +31,13 @@ async function check(name, test) {
   catch(e) { results.push({name,status:'FAIL',error:String(e)}); throw e; }
 }
 async function button(label) { return browser.$(`button=${label}`); }
-async function select(kind='file') { await (await button(`Select ${kind}`)).click(); await browser.waitUntil(async()=> (await browser.$('.selected-path').getText()).includes(kind==='file'?'benign.txt':fixtures),{timeout:5000}); }
+async function select(kind='file') { await (await button("Select target ▾")).click(); await (await button(kind === "file" ? "File" : "Folder")).click(); await browser.waitUntil(async()=> (await browser.$('.selected-path').getText()).includes(kind==='file'?'benign.txt':fixtures),{timeout:5000}); }
 async function scan(expected) {
   writeFileSync(fixture, `Benign fixture ${Date.now()} ${Math.random()}`);
   await select(); const start=await button('Start scan'); await start.waitForEnabled(); await start.click();
   await browser.waitUntil(async()=>await browser.$('h2').isExisting(),{timeout:20000});
   await browser.waitUntil(async()=> (await browser.$('h2').getText())===expected,{timeout:20000});
+  assert.equal(await browser.execute(()=>{const r=document.querySelector('h2').getBoundingClientRect();return r.top>=0 && r.bottom<=innerHeight;}),true,'Scan outcome heading must be visible without scrolling');
 }
 try {
   if (!process.argv.includes('--skip-build')) build();
@@ -84,7 +85,7 @@ try {
     assert.match(await browser.$('.brand-logo').getAttribute('src'),/logo-light/);
   });
   await check(real?'real ClamAV benign scan via native UI and Rust IPC':'mock successful native scan',async()=>{await scan('Scan complete');assert.match(await browser.$('.results').getText(),/Clean/);});
-  await check('folder target through debug injection',async()=>{await select('folder');await (await button('Start scan')).click();await browser.waitUntil(async()=>await browser.$('h2').getText()==='Scan complete',{timeout:20000});});
+  await check('folder target through debug injection',async()=>{writeFileSync(fixture,'folder uncached '+Date.now()+' '+Math.random());await select('folder');await (await button('Start scan')).click();await browser.waitUntil(async()=>await browser.$('h2').getText()==='Scan complete',{timeout:20000});assert.match(await browser.$('.results').getText(),/Clean in this scan/);assert.match(await browser.$('.result-path').getText(),/benign\.txt/);assert.match(await browser.$('main').getText(),/Processed 1 items · clean 1/);});
   if(!real){
     await check('mock INFECTED result',async()=>{mode='infected';await scan('Scan complete');assert.match(await browser.$('.results').getText(),/Threat detected/);});
     for(const state of ['error','malformed'])await check(`${state} never becomes CLEAN`,async()=>{mode=state;await scan('Scan incomplete');assert.doesNotMatch(await browser.$('.results').getText(),/Clean/);});
@@ -107,9 +108,3 @@ try {
   for(const s of sockets)s.destroy();if(server)server.close();
   report();console.log(`Native test artifacts: ${artifacts}`);
 }
-
-
-
-
-
-
