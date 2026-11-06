@@ -171,6 +171,19 @@ pub async fn scan_directory(
                 WalkItem::Error(path, reason) => ScanResult::error(path, reason),
             }
         };
+        // Cancellation may arrive while a scan finishes, before the monitor runs.
+        // Do not publish that racing CLEAN as a completed scan.
+        let result = if *cancel.borrow() && result.status == ScanStatus::Clean {
+            ScanResult::new(
+                result.path,
+                ScanStatus::Cancelled,
+                None,
+                Some("cancelled before completion".into()),
+                0,
+            )
+        } else {
+            result
+        };
         summary.record(result.clone());
         progress(&summary, &result);
         if *cancel.borrow() {

@@ -3,6 +3,9 @@ mod directory;
 pub mod scanner;
 mod watcher;
 
+#[cfg(all(feature = "native-ui-tests", not(debug_assertions)))]
+compile_error!("native-ui-tests must never be enabled in release builds");
+
 use directory::{ProgressFn, ScanFn, ScanSummary};
 use serde::Serialize;
 use std::{
@@ -156,15 +159,27 @@ fn select_scan_path(
     manager: tauri::State<'_, ScanManager>,
     kind: String,
 ) -> Result<Option<SelectedTarget>, String> {
-    let selected = match kind.as_str() {
-        "file" => app.dialog().file().blocking_pick_file(),
-        "folder" => app.dialog().file().blocking_pick_folder(),
-        _ => return Err("selection kind must be file or folder".into()),
+    #[cfg(all(feature = "native-ui-tests", debug_assertions))]
+    let fixture = std::env::var_os("ZONENDPOINT_TEST_FIXTURE").map(PathBuf::from);
+    #[cfg(not(all(feature = "native-ui-tests", debug_assertions)))]
+    let fixture: Option<PathBuf> = None;
+    let path = if let Some(root) = fixture {
+        match kind.as_str() {
+            "file" => root.join("benign.txt"),
+            "folder" => root,
+            _ => return Err("selection kind must be file or folder".into()),
+        }
+    } else {
+        let selected = match kind.as_str() {
+            "file" => app.dialog().file().blocking_pick_file(),
+            "folder" => app.dialog().file().blocking_pick_folder(),
+            _ => return Err("selection kind must be file or folder".into()),
+        };
+        let Some(path) = selected else {
+            return Ok(None);
+        };
+        path.into_path().map_err(|error| error.to_string())?
     };
-    let Some(path) = selected else {
-        return Ok(None);
-    };
-    let path = path.into_path().map_err(|error| error.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let mut selections = manager
         .selected
