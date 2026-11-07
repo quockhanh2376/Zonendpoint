@@ -1,12 +1,12 @@
 # Project status — 2026-11-07
 
-Phase: current scan candidate stabilization for an **internal company pilot**. Documentation reconciled with ZonEndpoint Notebook; new protection/enrichment features remain backlog. Recommended next task: Qeen independent verification of UI simplify & preflight handoff in [ui-simplify-vic-to-qeen.md](handoffs/ui-simplify-vic-to-qeen.md).
+Phase: current scan candidate stabilization for an **internal company pilot**. Documentation reconciled with ZonEndpoint Notebook; new protection/enrichment features remain backlog. Recommended next task: Qeen independent verification of P0-01 fix & Q-3 findings handoff in [p0-01-fix-vic-to-qeen.md](handoffs/p0-01-fix-vic-to-qeen.md).
 
 ## Active checkout/snapshot
 - Implementation: E:\Zonendpoint-vic-ui, branch vic/ui-simplify.
-- Latest product code: 8c687b9b4c9ded3cc762f55a62e117ef43bd88e6 (UI simplify & preflight: target auto-return, summary-first results with All Good / threat-only / incomplete view, server status dot & 30s idle poll, short preflight with ClamAV banner check & generic error copy).
-- Artifacts: NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`ABE6ACFF39C1F881375E289AD07F56184D91FD3433D1ED55832FF75848641CB0`) and standalone `zonendpoint.exe` (`55AD3B9CF860CCA37A64B89A5C94554BF43D578974D6D1D3BD9C864E10F23CB1`) at `E:\Zonendpoint-tools\artifacts\8c687b9\`.
-- Handoff doc: [ui-simplify-vic-to-qeen.md](handoffs/ui-simplify-vic-to-qeen.md).
+- Latest product code: 0a555169fb6e72db82456e568f385982a8021e39 (`0a55516`): P0-01 security fix (bounded EOF drain after INSTREAM & zVERSION), resilience-proxy chunk buffering fix, Win11 ComboBoxEx32 automation documentation, and 5 new Tier 1 integration tests.
+- Artifacts: NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`A0C9E63F3358C92E3EC56022C7DB16287D055CB190BAF4AD4DC45C3D40727252`) and standalone `zonendpoint.exe` (`AF414BC52E8D06015243CAFDDA5F0712ABB29F5AF7565F54B4A495E948367FD4`) at `E:\Zonendpoint-tools\artifacts\0a55516\`.
+- Handoff doc: [p0-01-fix-vic-to-qeen.md](handoffs/p0-01-fix-vic-to-qeen.md).
 - Draft PR: https://github.com/quockhanh2376/Zonendpoint/pull/1 . No main merge or public release performed.
 - Original source checkout E:\Zonendpoint/main and user changes remain preserved. Previously omitted architecture/licensing specs were restored under the same canonical relative filenames in this branch; architecture has a current addendum and Ed25519 content is unchanged. No alternate-name specs created.
 
