@@ -36,3 +36,6 @@ Clean completion button now reads All Good with green/check; clicking still star
 
 ## Draft PR and Qeen validation — 2026-11-07
 PR#1 opened as draft. Code8e8204aa10f478362263b60b8e46226367e0052f fixes Qeen's two P2 findings; see qa/report-8e8204a.md. Qeen Rust20/20, mock11/11, real-lab6/6 PASS; release hook guard verified. Real file picker Unicode selection PASS. Full acceptance BLOCKED by actual folder picker not verified and exact native EICAR AV interference; installer/real network matrix NOT RUN. No merge. Historical no-push notes above are superseded by this PR state.
+
+## Real Folder picker verified — 2026-11-07
+Actual native Folder selection -> real ClamAV scan2/clean2 PASS, Cancel preserves selection/results, rescan2/clean2 PASS. See qa/folder-picker-8e8204a.md; supersedes prior Folder BLOCKED entry. Exact native EICAR remains AV-interference/BLOCKED; no merge or release claim.
