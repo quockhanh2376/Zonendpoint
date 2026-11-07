@@ -242,7 +242,7 @@ function App() {
       ? "Stop"
       : startPending
         ? "Starting…"
-        : selectedTarget ? "Scan" : "Quick scan";
+        : selectedTarget ? "Scan" : "Quick Scan";
   const scanButtonDisabled = scanState === "cancelling"
     || cancelPending
     || startPending
@@ -305,7 +305,7 @@ function App() {
                 <button onClick={() => { setTargetMenuOpen(false); void select("folder"); }}>Folder</button>
                 <button onClick={() => {
                   setTargetMenuOpen(false); setSelectedTarget(null); setSummary(null); setProgress(null); setError("");
-                }}>Quick scan</button>
+                }}>Quick Scan</button>
               </div>
             )}
           </div>

@@ -47,7 +47,7 @@ pub fn system_root() -> Result<PathBuf, String> {
     }
     #[cfg(not(windows))]
     {
-        Err("Quick scan requires Windows x64".into())
+        Err("Quick Scan requires Windows x64".into())
     }
 }
 
