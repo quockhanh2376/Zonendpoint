@@ -303,17 +303,10 @@ fn mark_user_cancelled(summary: &mut ScanSummary, path: &std::path::Path) {
     }
 
     let result = &mut summary.results[0];
-    if result.status == scanner::ScanStatus::Cancelled {
+    if result.status != scanner::ScanStatus::Clean {
         return;
     }
-    match result.status {
-        scanner::ScanStatus::Clean => summary.clean = summary.clean.saturating_sub(1),
-        scanner::ScanStatus::Infected => summary.infected = summary.infected.saturating_sub(1),
-        scanner::ScanStatus::Unknown => summary.unknown = summary.unknown.saturating_sub(1),
-        scanner::ScanStatus::Error => summary.errors = summary.errors.saturating_sub(1),
-        scanner::ScanStatus::Skipped => summary.skipped = summary.skipped.saturating_sub(1),
-        scanner::ScanStatus::Cancelled => unreachable!(),
-    }
+    summary.clean = summary.clean.saturating_sub(1);
     result.path = path.to_string_lossy().into_owned();
     result.sha256 = None;
     result.status = scanner::ScanStatus::Cancelled;
@@ -458,6 +451,37 @@ mod tests {
         assert_eq!(summary.clean, 0);
         assert_eq!(summary.cancelled_files, 1);
         assert_eq!(summary.results[0].status, ScanStatus::Cancelled);
+    }
+
+    #[test]
+    fn accepted_cancel_preserves_nonclean_evidence() {
+        for status in [
+            ScanStatus::Infected,
+            ScanStatus::Error,
+            ScanStatus::Unknown,
+            ScanStatus::Skipped,
+        ] {
+            let mut summary = ScanSummary::default();
+            summary.record(scanner::ScanResult::new(
+                "sample.txt",
+                status,
+                None,
+                Some("original evidence".into()),
+                6,
+            ));
+            mark_user_cancelled(&mut summary, std::path::Path::new("sample.txt"));
+            assert!(summary.cancelled);
+            assert!(!summary.complete);
+            assert_eq!(summary.results[0].status, status);
+            assert_eq!(
+                summary.results[0].reason.as_deref(),
+                Some("original evidence")
+            );
+            assert_eq!(summary.cancelled_files, 0);
+            if status == ScanStatus::Infected {
+                assert_eq!(summary.infected, 1);
+            }
+        }
     }
 
     #[test]

@@ -327,7 +327,7 @@ function App() {
           {!summary.complete && <p className="notice warning">Do not treat an incomplete scan as clean.</p>}
           {summary.details_truncated && <p>Result details are limited to keep memory use bounded.</p>}
           <ul className="results">
-            {summary.results.slice(-50).map((item, index) => (
+            {summary.results.map((item, index) => (
               <li key={`${item.path}-${index}`}>
                 <span className={`status ${item.status.toLowerCase()}`}>{labels[item.status]}</span>
                 <span className="result-path">{item.path}</span>

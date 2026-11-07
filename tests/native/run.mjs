@@ -1,7 +1,7 @@
 import { remote } from 'webdriverio';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -15,6 +15,7 @@ writeFileSync(fixture, 'Zonendpoint benign fixture');
 const real = process.argv.includes('--real');
 const results = [];
 let browser, driver, server, mode = 'clean';
+let mixedResponses = 0;
 const sockets = new Set();
 const env = { ...process.env, LOCALAPPDATA: path.join(run, 'appdata'),
   WEBVIEW2_USER_DATA_FOLDER: path.join(run, 'webview'), ZONENDPOINT_TEST_FIXTURE: fixtures };
@@ -56,7 +57,7 @@ try {
         }
         while(data.length>=4){const n=data.readUInt32BE(); if(n>25*1024*1024){s.destroy();return;} if(data.length<4+n)return;data=data.subarray(4+n);if(n===0){
           if(mode==='delay')return;
-          s.end(mode==='infected'?'stream: Native-Mock-Signature FOUND\0':mode==='malformed'?'garbage OK\0':mode==='error'?'stream: failed ERROR\0':'stream: OK\0');return;
+          s.end((mode==='infected' || (mode==='mixed' && mixedResponses++===0))?'stream: Native-Mock-Signature FOUND\0':mode==='malformed'?'garbage OK\0':mode==='error'?'stream: failed ERROR\0':'stream: OK\0');return;
         }}
       });
     });
@@ -90,6 +91,18 @@ try {
   await check(real?'real ClamAV benign scan via native UI and Rust IPC':'mock successful native scan',async()=>{await scan('Scan complete');assert.match(await browser.$('.results').getText(),/Clean/);});
   await check('folder target through debug injection',async()=>{writeFileSync(fixture,'folder uncached '+Date.now()+' '+Math.random());await select('folder');await (await button('Start scan')).click();await browser.waitUntil(async()=>await browser.$('h2').getText()==='Scan complete',{timeout:20000});assert.match(await browser.$('.results').getText(),/Clean in this scan/);assert.match(await browser.$('.result-path').getText(),/benign\.txt/);assert.match(await browser.$('main').getText(),/Processed 1 items · clean 1/);});
   if(!real){
+    await check('threat details remain visible beyond50 results',async()=>{
+      mode='mixed';mixedResponses=0;
+      writeFileSync(fixture,'mixed benign '+Date.now());
+      const extras=Array.from({length:50},(_,i)=>path.join(fixtures,`extra-${i}.txt`));
+      for(const [i,file] of extras.entries())writeFileSync(file,`unique mixed fixture ${i} ${Date.now()}`);
+      await select('folder');await (await button('Start scan')).click();
+      await browser.waitUntil(async()=>await browser.$('h2').getText()==='Scan complete',{timeout:30000});
+      assert.equal((await browser.$$('.results li')).length,51);
+      assert.match(await browser.$('.results').getText(),/Threat detected/);
+      assert.equal(mixedResponses,51);
+      for(const file of extras)rmSync(file);
+    });
     await check('mock INFECTED result',async()=>{mode='infected';await scan('Scan complete');assert.match(await browser.$('.results').getText(),/Threat detected/);});
     for(const state of ['error','malformed'])await check(`${state} never becomes CLEAN`,async()=>{mode=state;await scan('Scan incomplete');assert.doesNotMatch(await browser.$('.results').getText(),/Clean/);});
     await check('Stop lifecycle and scan again',async()=>{
