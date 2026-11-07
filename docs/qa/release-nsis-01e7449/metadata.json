@@ -1,0 +1,18 @@
+[
+  {
+    "Kind": "app-build",
+    "FileDescription": "Zonendpoint",
+    "ProductName": "Zonendpoint",
+    "CompanyName": "zonendpoint",
+    "FileVersion": "0.1.0",
+    "Signature": "NotSigned"
+  },
+  {
+    "Kind": "NSIS-installer",
+    "FileDescription": "Zonendpoint",
+    "ProductName": "Zonendpoint",
+    "CompanyName": "",
+    "FileVersion": "0.1.0",
+    "Signature": "NotSigned"
+  }
+]

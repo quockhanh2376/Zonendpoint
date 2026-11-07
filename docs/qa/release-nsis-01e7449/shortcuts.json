@@ -1,0 +1,12 @@
+[
+  {
+    "Path": "C:\\Users\\admzon\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Zonendpoint.lnk",
+    "Target": "E:\\Zonendpoint-tools\\installer-sandbox\\app\\zonendpoint.exe",
+    "Icon": ",0"
+  },
+  {
+    "Path": "C:\\Users\\admzon\\Desktop\\Zonendpoint.lnk",
+    "Target": "E:\\Zonendpoint-tools\\installer-sandbox\\app\\zonendpoint.exe",
+    "Icon": ",0"
+  }
+]

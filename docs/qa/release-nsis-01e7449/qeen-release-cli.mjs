@@ -1,0 +1,10 @@
+import {spawnSync} from 'node:child_process';import{createServer}from'node:net';import{writeFileSync}from'node:fs';import assert from'node:assert/strict';
+const exe='E:/Zonendpoint-tools/installer-sandbox/app/zonendpoint.exe';
+const env={...process.env,LOCALAPPDATA:'E:/Zonendpoint-tools/installer-sandbox/userdata',ZONENDPOINT_CLAMD:'127.0.0.1:13310'};
+const clean=spawnSync(exe,['--scan','E:/Zonendpoint-tools/picker-fixture/one.txt'],{env,encoding:'utf8',timeout:20000,windowsHide:true});
+assert.equal(clean.status,0);assert.match(clean.stdout,/^Clean:/);
+const s=createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const port=s.address().port;await new Promise(r=>s.close(r));
+const offline=spawnSync(exe,['--scan','E:/Zonendpoint-tools/picker-fixture/one.txt'],{env:{...env,ZONENDPOINT_CLAMD:`127.0.0.1:${port}`},encoding:'utf8',timeout:20000,windowsHide:true});
+assert.equal(offline.status,1);assert.match(offline.stdout,/^(Error|Unknown):/);assert.doesNotMatch(offline.stdout,/Clean:/);
+const result={clean:{exit:clean.status,stdout:clean.stdout.trim()},offline:{exit:offline.status,stdout:offline.stdout.trim()},cacheBypass:'PASS: cached clean is not reused offline'};
+writeFileSync('E:/Zonendpoint-tools/installer-sandbox/release-cli-result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));

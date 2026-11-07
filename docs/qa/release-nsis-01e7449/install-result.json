@@ -1,0 +1,8 @@
+{
+  "Installer": "E:\\Zonendpoint-tools\\qeen-target\\release\\bundle\\nsis\\Zonendpoint_0.1.0_x64-setup.exe",
+  "SHA256": "94336243A891F372B0B05D18C6EB3A180AA1C05E10CC7A54735E1428DDDD14E6",
+  "InstalledExe": "E:\\Zonendpoint-tools\\installer-sandbox\\app\\zonendpoint.exe",
+  "ExitCode": 0,
+  "Version": "0.1.0",
+  "Signature": 2
+}

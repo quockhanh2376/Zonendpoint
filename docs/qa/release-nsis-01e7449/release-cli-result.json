@@ -1,0 +1,11 @@
+{
+  "clean": {
+    "exit": 0,
+    "stdout": "Clean: E:/Zonendpoint-tools/picker-fixture/one.txt"
+  },
+  "offline": {
+    "exit": 1,
+    "stdout": "Error: E:/Zonendpoint-tools/picker-fixture/one.txt"
+  },
+  "cacheBypass": "PASS: cached clean is not reused offline"
+}

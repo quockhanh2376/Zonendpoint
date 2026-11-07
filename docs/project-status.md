@@ -1,41 +1,23 @@
-# Current implementation state — 2026-11-07
+# Project status — 2026-11-07
 
-## Checkout and snapshot
-- Active implementation: E:\Zonendpoint-restored\Zonendpoint-vic, vic/mvp-first-scan.
-- Current code: 8e8204aa10f478362263b60b8e46226367e0052f (Qeen fixes; see latest QA section).
-- Coordinator/source docs: E:\Zonendpoint\docs. Historical restored handoff: 2487664; historical QA code: e3ed872.
-- Product scope: [v1.0.0-scope.md](v1.0.0-scope.md). Manual scan, English, persisted Light/Dark, Guard OFF; quarantine/licensing deferred.
+## Active checkout/snapshot
+- Implementation:E:\Zonendpoint-restored\Zonendpoint-vic, branch vic/mvp-first-scan.
+- Latest product/config code:01e744974b75332592aa5621bbcfc0e12da8b477. Core scan QA snapshot8e8204a;01e7449 only brands NSIS setup/uninstaller icons.
+- Draft PR:https://github.com/quockhanh2376/Zonendpoint/pull/1 . No main merge or public release performed.
+- Original source checkout E:\Zonendpoint/main and user changes remain preserved. Source architecture/licensing specifications remain there; no duplicate specs created.
 
-## Current UI
-800x240 default window; 168x162px logo and separate 13px/600 right-aligned slogan (orange Light, white Dark). Scan heading and feedback live inside right-hand panel. One Select target button offers File/Folder. Compact controls; static MVP/network copy removed as approved. During scan: Scanning + progress path. Final outcome and per-file results retained; longer content scrolls. Theme persists.
+## Current scope/UI
+See [v1.0.0-scope.md](v1.0.0-scope.md). Manual file/folder scan, English, persisted Light/Dark, Guard OFF. SecConnect/licensing/quarantine deferred. Compact800x240 UI,168x162 logo and13px slogan; Select target File/Folder; active path; all-CLEAN green/check All Good; bounded result window growth and backend-bounded result list.
 
-## Verification
-- Current native mock suite: 9/9 PASS, including error/malformed/offline, cancellation/rescan and viewport-visible outcome heading.
-- Current real ClamAV benign suite: 4/4 PASS; folder fixture changed before scanning and path/count/verdict asserted.
-- Frontend and debug native build PASS. Earlier Rust 19/19 and clippy PASS on unchanged backend; not rerun for this frontend-only snapshot.
-- Static independent code review found offscreen feedback and weak folder assertion; both fixed, re-reviewed without remaining important findings in that scope. This is not independent Qeen runtime acceptance.
-- [Native test instructions](native-ui-tests.md), [handoff](handoffs/vic-to-qeen.md), [current verification report](qa/report-d694f4f.md).
+## Verification/evidence
+- Core8e8204a:Rust20, extended native mock11 (incl60s timeout/51-file threat visibility), real lab6 PASS; fmt/clippy PASS, npm audit0. Release test-hook guard verified.
+- Real native File Unicode selection and Folder/Cancel/rescan PASS. [Core QA report](qa/report-8e8204a.md), [Folder follow-up](qa/folder-picker-8e8204a.md).
+- Current release01e7449:NSIS0.1.0 x64 build, branded setup/uninstaller, install/shortcut/theme persistence, actual installed native Folder+real ClamAV2-file scan, offline-not-CLEAN cache check, same-version repair, uninstall/data preservation PASS. [Release report](qa/release-installer-01e7449.md), [handoff](handoffs/release-vic-to-qeen.md), [plan/prompts](superpowers/plans/2026-11-07-release-installer-qa.md).
+- Final unsigned installer:E:\Zonendpoint-tools\artifacts\01e7449\Zonendpoint_0.1.0_x64-setup.exe. SHA25694336243A891F372B0B05D18C6EB3A180AA1C05E10CC7A54735E1428DDDD14E6. No test installation remains; owned fixture/artifact data retained for evidence.
 
-## Next acceptance / limitations
-Qeen runtime acceptance PENDING. Real Windows picker automation, real EICAR, real-engine network/timeout/cancel matrix and installer/shortcut remain NOT RUN. Do not claim production readiness. Native harness injects fixtures only with explicit debug feature; release guard still has no executed release-build test.
+## Limits / next acceptance
+PASS is scoped to observed core/native and unsigned NSIS current-user tests, not production readiness. Exact EICAR through Windows remains BLOCKED by Microsoft Defender (Operational1116/1117, quarantine); app reported error225, never CLEAN. ClamAV EICAR on Ubuntu and native positive detection via temporary harmless lab signature passed; signature removed/cleanup verified.
 
-Lab: admzon@100.96.250.245; clamd loopback 3310; Windows SSH tunnel 127.0.0.1:13310. Recheck tunnel before running real mode. Setup and two source architecture/licensing specifications remain in coordinator/source docs; do not duplicate or replace them.
+MSI, signed1.0 release, different-version upgrade, multi-user install, resource benchmark and full real-network reset/cancel matrix NOT RUN. PR stays draft pending owner's merge decision and acceptance of documented limits. No further product feature is implied by these tests.
 
-UI adjustment requested: logo and its grid column reduced 15% from220 to187px in both themes. Separate slogan remains13px/600, theme colors and right alignment preserved. Frontend build PASS; native regression not rerun for CSS-only size change.
-
-
-Per Zon, logo narrowed another10% to168px while keeping162px height for taller/slimmer proportions. Slogan remains13px and right-aligned. Frontend build PASS; intentional aspect adjustment supersedes prior preserve-ratio preference for this logo presentation.
-
-## Local synchronization
-Origin now points to GitHub; recovery-bundle preserves original import remote. Latest UI branch imported into E:\Zonendpoint as recovery/ui-approved; source main and dirty changes untouched. No GitHub push or merge performed. Frontend build PASS at latest logo snapshot; native tests not rerun for final CSS sizing.
-
-Clean completion UI: Start scan turns green with check SVG only for nonempty complete all-CLEAN result and no active scan/error; reset on selection/new scan. Summary triggers bounded native window height growth to fit rendered results, preserving width; long results retain scroll. Added core:window:allow-set-size. Native mock9/9 PASS and real benign4/4 PASS; short results fit viewport assertion passes. Final width-preservation adjustment verified in real native mode. Source changes currently uncommitted.
-
-
-Clean completion button now reads All Good with green/check; clicking still starts another scan. Other lifecycle labels unchanged. Native build + mock suite9/9 PASS, including explicit All Good assertion; log E:\Zonendpoint-tools\all-good-tests.log.
-
-## Draft PR and Qeen validation — 2026-11-07
-PR#1 opened as draft. Code8e8204aa10f478362263b60b8e46226367e0052f fixes Qeen's two P2 findings; see qa/report-8e8204a.md. Qeen Rust20/20, mock11/11, real-lab6/6 PASS; release hook guard verified. Real file picker Unicode selection PASS. Full acceptance BLOCKED by actual folder picker not verified and exact native EICAR AV interference; installer/real network matrix NOT RUN. No merge. Historical no-push notes above are superseded by this PR state.
-
-## Real Folder picker verified — 2026-11-07
-Actual native Folder selection -> real ClamAV scan2/clean2 PASS, Cancel preserves selection/results, rescan2/clean2 PASS. See qa/folder-picker-8e8204a.md; supersedes prior Folder BLOCKED entry. Exact native EICAR remains AV-interference/BLOCKED; no merge or release claim.
+Lab:admzon@100.96.250.245; clamd loopback3310; normal Windows test tunnel127.0.0.1:13310. All testing preserved Defender/Sophos policies; no exclusions, public uploads or Internet-exposed clamd.

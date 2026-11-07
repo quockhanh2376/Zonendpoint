@@ -36,3 +36,7 @@
 
 - Closed native Folder picker blocker: actual Windows dialog selection, real-engine2-file scan, Cancel preservation and rescan PASS on8e8204a. EICAR Windows AV blocker remains.
 
+- Vic/Qeen release plan completed: fixed generic NSIS setup/uninstaller icon at01e7449; final unsigned0.1.0 NSIS install/shortcut/native scan/theme/offline/repair/uninstall PASS, original cache preserved. Installer artifact manifest retained; no merge/public release.
+
+- Final NSIS01e7449 artifact94336243...DDDD14E6 retested: setup/uninstaller icon match, install/native real scan/shortcut/theme/offline cache/repair/uninstall PASS. Test install removed; original user cache unchanged. Unsigned0.1.0 only; documented EICAR Defender interference and unrun release gates retained.
+
