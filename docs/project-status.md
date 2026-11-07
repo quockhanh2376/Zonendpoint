@@ -2,7 +2,7 @@
 
 ## Checkout and snapshot
 - Active implementation: E:\Zonendpoint-restored\Zonendpoint-vic, vic/mvp-first-scan.
-- Current code: d5bc9133048ba83d5dbd1fe82423dfbf6a2451b3 (latest logo CSS; native runtime evidence remains at d694f4f).
+- Current code: e5ff7eedfdb4c2186c0568530f8fe04c18f2d6ab (All Good and bounded result window growth; native mock9/9 verified).
 - Coordinator/source docs: E:\Zonendpoint\docs. Historical restored handoff: 2487664; historical QA code: e3ed872.
 - Product scope: [v1.0.0-scope.md](v1.0.0-scope.md). Manual scan, English, persisted Light/Dark, Guard OFF; quarantine/licensing deferred.
 

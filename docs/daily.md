@@ -30,3 +30,5 @@
 
 - Changed all-CLEAN button label to All Good; native mock9/9 PASS.
 
+- All Good/resize code committed e5ff7ee; pre-sync native mock9/9 PASS. Source recovery/ui-approved synchronized; no push/merge.
+
