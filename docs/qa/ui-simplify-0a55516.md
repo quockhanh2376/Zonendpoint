@@ -84,4 +84,39 @@ Do hộp thoại file Windows 11 (`IFileOpenDialog`) sử dụng control `ComboB
 3. **Auto-return sau khi quét File:** Sau khi quét file hoàn tất, đường dẫn target tự động xóa, nút chính quay lại `Quick Scan`, kết quả quét vẫn giữ nguyên trên màn hình cho tới lượt quét tiếp theo.
 4. **Auto-return sau khi quét Folder:** Tương tự đối với lượt quét folder.
 5. **Dòng "All Good" duy nhất cho file sạch:** Quét thủ công 1 file sạch bất kỳ để chiêm ngưỡng giao diện kết quả chuẩn `All Good` dạng 1 dòng duy nhất có icon dấu kiểm xanh lục (vì Quick Scan hiện tại luôn dính lỗi Q-4-01 tại `DriverData`).
-6. **Bảng danh sách mối đe dọa (Threat List):** Quét một file mẫu độc hại hoặc sử dụng proxy giả lập threat để xác nhận bảng kết quả chỉ hiển thị các dòng `INFECTED` kèm đường dẫn và tên mã độc.
+6. **Bảng danh sách mối đe dọa (Threat List):** Đã được kiểm thử và xác minh tự động trong Task Q-5 (chi tiết tại Mục 6 bên dưới).
+
+---
+
+## 6. Q-5 Threat View Verification (Kiểm Thử Hiển Thị Danh Sách Mối Đe Dọa)
+
+- **Thời gian thực hiện:** 2026-11-07
+- **Worktree:** `E:\Zonendpoint-Qeen-0a55516` (commit `0a55516`)
+- **Evidence:** `E:\Zonendpoint-tools\artifacts\0a55516\qeen\threat\`
+- **Kịch bản thực hiện:** Proxy `qeen-proxy-threat.mjs` chạy tại `127.0.0.1:13399` nối tới lab clamd `127.0.0.1:13310`. Khi quét Quick Scan, proxy chặn và ghi đè kết quả phản hồi `INSTREAM` cho 3 file:
+  - File thứ 30: `stream: Win.Test.ZonQA FOUND\0` (Tên mã độc chuẩn)
+  - File thứ 60: `stream: Win.Test.<b>x</b> FOUND\0` (Kiểm tra chèn mã HTML / XSS probe)
+  - File thứ 90: `stream: Win.Test.LongName.Trojan.Dropper.Generic.VeryLongSignatureStringWithNoSpacesToTestTextWrappingAndLayoutIntegrityUnderExtremeLengthConditions.Variant1234567890.End FOUND\0` (Kiểm tra độ dài cực hạn & bố cục layout)
+
+### 6.1. Kết Quả Kiểm Tra Giao Diện & Bộ Đệm
+
+1. **Hiển thị chỉ các dòng mối đe dọa (Threat-only view):**
+   - Tiêu đề kết thúc quét: `"Scan incomplete"`, tuyệt đối không bao giờ hiển thị `"All Good"`.
+   - Dòng thống kê: `Processed 589 items · clean 585 · threats 3 · unknown 0 · errors 1 · skipped 0 · cancelled 0`.
+   - Cảnh báo: `Do not treat an incomplete scan as clean.`.
+   - Danh sách `.results li`: Hiển thị đúng 4 dòng (3 dòng `Threat detected` + 1 dòng `Scan error` do `DriverData` [Q-4-01]). Toàn bộ 585 file `Clean` bị ẩn hoàn toàn, không xuất hiện bất kỳ dòng Clean nào trong danh sách.
+   - Ảnh chụp giao diện thực tế: `E:\Zonendpoint-tools\artifacts\0a55516\qeen\threat\threat-list-view.png`.
+
+2. **Chống chèn HTML & Render nguyên văn (HTML Sanitization):**
+   - Tên mã độc `Win.Test.<b>x</b>` hiển thị nguyên văn dạng plain text `Win.Test.<b>x</b>`.
+   - DOM runtime: Thẻ `<b>` hoàn toàn **không** tồn tại trong DOM (`$('.results small b')` = `false`).
+   - Mã nguồn innerHTML của `<small>`: `Win.Test.&lt;b&gt;x&lt;/b&gt;` do React escape an toàn. Không có nguy cơ chèn mã HTML / XSS.
+
+3. **Tính toàn vẹn cơ sở dữ liệu `cache.db`:**
+   - Cơ sở dữ liệu SQLite tại `sandbox/appdata/Zonendpoint/cache.db` ghi nhận 588 bản ghi: `CLEAN = 585`, `INFECTED = 3`.
+   - Kiểm tra đối chiếu mã băm SHA256: 100% các file bị nhiễm mã độc (`INFECTED`) tuyệt đối không có bản ghi nào bị ghi nhầm thành `CLEAN`.
+
+4. **Kiểm tra vỡ bố cục khi tên mã độc cực dài (Finding Q-5-01):**
+   - Phát hiện: Phần tử `.results small` trong `src/App.css` thiếu thuộc tính `overflow-wrap: anywhere;` (hoặc `word-break: break-word`), hiện đang nhận `overflow-wrap: normal`.
+   - Hệ quả: Với tên chữ ký dài không có khoảng trắng, phần tử `<small>` bị phình rộng từ `clientWidth: 217px` lên `scrollWidth: 1006px`, khiến danh sách `.results` phình rộng từ `419px` lên `1208px` và làm xuất hiện thanh cuộn ngang (horizontal scrollbar) bên trong danh sách kết quả (dù khung `.app-shell` chính vẫn được neo cố định 800px nhờ `overflow: auto`).
+
