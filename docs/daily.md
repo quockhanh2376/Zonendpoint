@@ -26,3 +26,7 @@
 
 - Committed final logo as d5bc913; restored GitHub origin and imported UI branch into source repo recovery/ui-approved. Source main/dirty changes preserved; no push.
 
+- Added green/check all-CLEAN button and automatic result window growth. Native regression red reproduced missing state, mock9/9 and real benign4/4 PASS; real native screenshot inspected.
+
+- Changed all-CLEAN button label to All Good; native mock9/9 PASS.
+

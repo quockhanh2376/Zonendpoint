@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow, currentMonitor, LogicalSize } from "@tauri-apps/api/window";
 import "./App.css";
 
 type Status = "CLEAN" | "INFECTED" | "UNKNOWN" | "ERROR" | "SKIPPED" | "CANCELLED";
@@ -75,6 +76,28 @@ function App() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState("");
+  useEffect(() => {
+    if (!summary) return;
+    let disposed = false;
+    const frame = requestAnimationFrame(() => {
+      const desired = Math.ceil(document.querySelector<HTMLElement>(".app-shell")?.scrollHeight ?? 240);
+      void (async () => {
+        const appWindow = getCurrentWindow();
+        const monitor = await currentMonitor();
+        const position = await appWindow.outerPosition();
+        const size = await appWindow.innerSize();
+        const scale = await appWindow.scaleFactor();
+        const available = monitor
+          ? (monitor.workArea.position.y + monitor.workArea.size.height - position.y) / monitor.scaleFactor - 48
+          : window.screen.availHeight - 80;
+        const height = Math.max(window.innerHeight, Math.min(desired, available));
+        if (!disposed && height > window.innerHeight) {
+          await appWindow.setSize(new LogicalSize(size.width / scale, height));
+        }
+      })().catch((reason) => console.error("Could not resize scan results window", reason));
+    });
+    return () => { disposed = true; cancelAnimationFrame(frame); };
+  }, [summary]);
   const activeScanId = useRef<string | null>(null);
   const startPendingRef = useRef(false);
   const cancelPendingRef = useRef(false);
@@ -207,6 +230,8 @@ function App() {
   }
 
   const latest = progress?.latest;
+  const scanClean = !scanId && !startPending && !error && !!summary?.complete
+    && !summary.cancelled && summary.scanned > 0 && summary.clean === summary.scanned;
   const engineOffline = latest?.status === "ERROR" && /clamd|timed out|connect/i.test(latest.reason ?? "");
   const nextTheme: Theme = theme === "light" ? "dark" : "light";
   const scanButtonLabel = scanState === "cancelling" || cancelPending
@@ -279,7 +304,12 @@ function App() {
               </div>
             )}
           </div>
-          <button className="primary" onClick={() => void toggleScan()} disabled={scanButtonDisabled}>{scanButtonLabel}</button>
+          <button className={`primary${scanClean ? " scan-clean" : ""}`}
+            title={scanClean ? "Scan complete: no threats detected" : undefined}
+            onClick={() => void toggleScan()} disabled={scanButtonDisabled}>
+            {scanClean && <svg className="scan-check" aria-hidden="true" viewBox="0 0 20 20"><path d="m4 10 4 4 8-8" /></svg>}
+            {scanClean ? "All Good" : scanButtonLabel}
+          </button>
         </div>
         {!scanId && !summary && <p className="selected-path">{selectedTarget?.path || "No file or folder selected"}</p>}
 

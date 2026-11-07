@@ -30,7 +30,7 @@ async function check(name, test) {
   try { await test(); results.push({name,status:'PASS'}); }
   catch(e) { results.push({name,status:'FAIL',error:String(e)}); throw e; }
 }
-async function button(label) { return browser.$(`button=${label}`); }
+async function button(label) { return label === "Start scan" ? browser.$("button.primary") : browser.$(`button=${label}`); }
 async function select(kind='file') { await (await button("Select target ▾")).click(); await (await button(kind === "file" ? "File" : "Folder")).click(); await browser.waitUntil(async()=> (await browser.$('.selected-path').getText()).includes(kind==='file'?'benign.txt':fixtures),{timeout:5000}); }
 async function scan(expected) {
   writeFileSync(fixture, `Benign fixture ${Date.now()} ${Math.random()}`);
@@ -38,6 +38,9 @@ async function scan(expected) {
   await browser.waitUntil(async()=>await browser.$('h2').isExisting(),{timeout:20000});
   await browser.waitUntil(async()=> (await browser.$('h2').getText())===expected,{timeout:20000});
   assert.equal(await browser.execute(()=>{const r=document.querySelector('h2').getBoundingClientRect();return r.top>=0 && r.bottom<=innerHeight;}),true,'Scan outcome heading must be visible without scrolling');
+  const clean = expected==='Scan complete' && (real || mode==='clean');
+  await browser.waitUntil(async()=>await browser.$('.primary.scan-clean').isExisting()===clean,{timeout:5000});
+  if(clean){assert.equal(await browser.$('.primary').getText(),'All Good');assert.equal(await browser.$('.scan-check').isExisting(),true);await browser.waitUntil(async()=>await browser.execute(()=>{const r=document.querySelector('.results').getBoundingClientRect();return r.bottom<=innerHeight;}),{timeout:5000,timeoutMsg:'Window must grow to fit short scan results'});}
 }
 try {
   if (!process.argv.includes('--skip-build')) build();

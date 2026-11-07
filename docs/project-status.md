@@ -28,3 +28,8 @@ Per Zon, logo narrowed another10% to168px while keeping162px height for taller/s
 
 ## Local synchronization
 Origin now points to GitHub; recovery-bundle preserves original import remote. Latest UI branch imported into E:\Zonendpoint as recovery/ui-approved; source main and dirty changes untouched. No GitHub push or merge performed. Frontend build PASS at latest logo snapshot; native tests not rerun for final CSS sizing.
+
+Clean completion UI: Start scan turns green with check SVG only for nonempty complete all-CLEAN result and no active scan/error; reset on selection/new scan. Summary triggers bounded native window height growth to fit rendered results, preserving width; long results retain scroll. Added core:window:allow-set-size. Native mock9/9 PASS and real benign4/4 PASS; short results fit viewport assertion passes. Final width-preservation adjustment verified in real native mode. Source changes currently uncommitted.
+
+
+Clean completion button now reads All Good with green/check; clicking still starts another scan. Other lifecycle labels unchanged. Native build + mock suite9/9 PASS, including explicit All Good assertion; log E:\Zonendpoint-tools\all-good-tests.log.
