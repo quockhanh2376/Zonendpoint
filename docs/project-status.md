@@ -4,7 +4,7 @@ Phase:current scan candidate stabilization for an **internal company pilot**. Do
 
 ## Active checkout/snapshot
 - Implementation:E:\Zonendpoint-restored\Zonendpoint-vic, branch vic/mvp-first-scan.
-- Latest product code:c7f5fd98a9f1f81a47fae7571b9be3d0e135f884 (Quick scan/x64). Older NSIS packaging snapshot01e7449 does not contain this feature.
+- Latest product code:0de3208a6ce209b52f885c75053e97e09597c81c (Quick Scan label consistency, CLI non-zero exit for non-clean outcomes).
 - Draft PR:https://github.com/quockhanh2376/Zonendpoint/pull/1 . No main merge or public release performed.
 - Original source checkout E:\Zonendpoint/main and user changes remain preserved. Previously omitted architecture/licensing specs were restored under the same canonical relative filenames in this branch; architecture has a current addendum and Ed25519 content is unchanged. No alternate-name specs created.
 
@@ -14,6 +14,7 @@ See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Window
 ## Verification/evidence
 - Core8e8204a:Rust20, extended native mock11 (incl60s timeout/51-file threat visibility), real lab6 PASS; fmt/clippy PASS, npm audit0. Release test-hook guard verified.
 - Real native File Unicode selection and Folder/Cancel/rescan PASS. [Core QA report](qa/report-8e8204a.md), [Folder follow-up](qa/folder-picker-8e8204a.md).
+- Release package 0de3208: NSIS 0.1.0 x64 setup (`EE35537DBF8ABCBA2038F68B63A4396568F5D00AE757B2D1EBBC6F9CACD7AECD`) Qeen independent acceptance A–H PASS. Release File/Folder native dialog automation BLOCKED by Windows UIPI (manual check by anh pending). No merge performed; no product code changes. Details in [quick-package-0de3208.md](qa/quick-package-0de3208.md) and [quick-package-vic-to-qeen.md](handoffs/quick-package-vic-to-qeen.md).
 - Current release01e7449:NSIS0.1.0 x64 build, branded setup/uninstaller, install/shortcut/theme persistence, actual installed native Folder+real ClamAV2-file scan, offline-not-CLEAN cache check, same-version repair, uninstall/data preservation PASS. [Release report](qa/release-installer-01e7449.md), [handoff](handoffs/release-vic-to-qeen.md), [plan/prompts](superpowers/plans/2026-11-07-release-installer-qa.md).
 - Final unsigned installer:E:\Zonendpoint-tools\artifacts\01e7449\Zonendpoint_0.1.0_x64-setup.exe. SHA25694336243A891F372B0B05D18C6EB3A180AA1C05E10CC7A54735E1428DDDD14E6. No test installation remains; owned fixture/artifact data retained for evidence.
 
