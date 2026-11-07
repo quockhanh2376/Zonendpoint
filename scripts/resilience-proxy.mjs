@@ -78,11 +78,18 @@ const proxyServer = net.createServer(clientSocket => {
   let upstreamSocket = null;
   let clientBuffer = Buffer.alloc(0);
   let commandDetected = null;
+  let pendingChunks = [];
 
   function connectUpstream(onConnect) {
+    clientSocket.pause();
     upstreamSocket = net.connect({ host: TARGET_HOST, port: TARGET_PORT }, () => {
       log(`[Conn #${connId}] Connected to upstream clamd at ${TARGET_HOST}:${TARGET_PORT}`);
       if (onConnect) onConnect();
+      for (const p of pendingChunks) {
+        upstreamSocket.write(p);
+      }
+      pendingChunks = [];
+      clientSocket.resume();
     });
 
     upstreamSocket.on('error', err => {
@@ -159,6 +166,8 @@ const proxyServer = net.createServer(clientSocket => {
     } else {
       if (upstreamSocket && !upstreamSocket.destroyed) {
         upstreamSocket.write(chunk);
+      } else {
+        pendingChunks.push(chunk);
       }
     }
   });

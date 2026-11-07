@@ -166,6 +166,21 @@ async fn read_nul_frame<R: AsyncRead + Unpin>(
     }
 }
 
+const EOF_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
+
+async fn read_until_eof<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    timeout_duration: Duration,
+) -> Result<(), String> {
+    let mut extra = [0u8; 64];
+    match timeout(timeout_duration, reader.read(&mut extra)).await {
+        Ok(Ok(0)) => Ok(()),
+        Ok(Ok(_)) => Err("server sent unexpected extra data after response terminator".into()),
+        Ok(Err(error)) => Err(format!("read server response close: {error}")),
+        Err(_) => Err("server did not close connection after response terminator".into()),
+    }
+}
+
 async fn wait_cancelled(mut cancel: watch::Receiver<bool>) {
     loop {
         if *cancel.borrow() {
@@ -194,6 +209,7 @@ pub async fn clamd_version_with_timeout(
         let response = timeout(connect_timeout, read_nul_frame(&mut socket, 256))
             .await
             .map_err(|_| "VERSION command timed out".to_owned())??;
+        read_until_eof(&mut socket, EOF_DRAIN_TIMEOUT).await?;
         if response.is_empty() || response[response.len() - 1] != 0 {
             return Err("VERSION response is not NUL terminated".into());
         }
@@ -281,12 +297,7 @@ async fn stream_scan<R: AsyncRead + Unpin>(
             .await
             .map_err(|error| format!("finish stream: {error}"))?;
         let response = read_nul_frame(&mut socket, MAX_RESPONSE_BYTES).await?;
-        let mut extra = [0u8; 1];
-        if let Ok(n) = socket.try_read(&mut extra)
-            && n > 0
-        {
-            return Err("server sent unexpected extra data after response terminator".into());
-        }
+        read_until_eof(&mut socket, EOF_DRAIN_TIMEOUT).await?;
         let (status, reason) = parse_response(&response)?;
         Ok(StreamOutcome {
             status,
@@ -724,7 +735,7 @@ mod tests {
                 b"stream: Eicar-Test-".to_vec(),
                 b"Signature FOUND\0".to_vec(),
             ],
-            true,
+            false,
         )
         .await;
         let mut reader = bytes_reader(payload).await;

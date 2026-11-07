@@ -19,6 +19,18 @@ enum FaultMode {
     CorruptReply(Vec<u8>),
     Infected(String),
     RawReply(Vec<u8>),
+    DelayedExtraReply {
+        first: Vec<u8>,
+        delay: Duration,
+        second: Vec<u8>,
+    },
+    NeverClose(Vec<u8>),
+    DelayedExtraVersion {
+        first: Vec<u8>,
+        delay: Duration,
+        second: Vec<u8>,
+    },
+    NeverCloseVersion(Vec<u8>),
 }
 
 async fn drain_instream(socket: &mut tokio::net::TcpStream) {
@@ -59,7 +71,24 @@ async fn spawn_mock_clamd(
                     }
                 }
                 if cmd.starts_with(b"zVERSION\0") {
-                    let _ = socket.write_all(version.as_bytes()).await;
+                    match &mode {
+                        FaultMode::DelayedExtraVersion {
+                            first,
+                            delay,
+                            second,
+                        } => {
+                            let _ = socket.write_all(first).await;
+                            tokio::time::sleep(*delay).await;
+                            let _ = socket.write_all(second).await;
+                        }
+                        FaultMode::NeverCloseVersion(reply) => {
+                            let _ = socket.write_all(reply).await;
+                            tokio::time::sleep(Duration::from_secs(10)).await;
+                        }
+                        _ => {
+                            let _ = socket.write_all(version.as_bytes()).await;
+                        }
+                    }
                     return;
                 }
                 if cmd.starts_with(b"zINSTREAM\0") {
@@ -88,6 +117,24 @@ async fn spawn_mock_clamd(
                         FaultMode::RawReply(reply) => {
                             drain_instream(&mut socket).await;
                             let _ = socket.write_all(&reply).await;
+                        }
+                        FaultMode::DelayedExtraReply {
+                            first,
+                            delay,
+                            second,
+                        } => {
+                            drain_instream(&mut socket).await;
+                            let _ = socket.write_all(&first).await;
+                            tokio::time::sleep(delay).await;
+                            let _ = socket.write_all(&second).await;
+                        }
+                        FaultMode::NeverClose(reply) => {
+                            drain_instream(&mut socket).await;
+                            let _ = socket.write_all(&reply).await;
+                            tokio::time::sleep(Duration::from_secs(10)).await;
+                        }
+                        FaultMode::DelayedExtraVersion { .. } | FaultMode::NeverCloseVersion(_) => {
+                            unreachable!("Version fault modes are handled during zVERSION");
                         }
                     }
                 }
@@ -549,4 +596,169 @@ async fn test_infected_preserves_threat_name() {
 
     handle.abort();
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn test_delayed_second_frame_50ms_rejected() {
+    let (root, target, cache_db) = create_temp_test_dir("delayed-50ms");
+    std::fs::write(&target, b"delayed 50ms payload").unwrap();
+
+    let (addr, handle) = spawn_mock_clamd(
+        STANDARD_VERSION,
+        FaultMode::DelayedExtraReply {
+            first: b"stream: OK\0".to_vec(),
+            delay: Duration::from_millis(50),
+            second: b"stream: Threat.Delayed50ms FOUND\0".to_vec(),
+        },
+    )
+    .await;
+    let (_tx, cancel) = watch::channel(false);
+
+    let result = scan_file_with_timeout(
+        target,
+        cache_db.clone(),
+        addr,
+        cancel,
+        Arc::new(Semaphore::new(1)),
+        Duration::from_secs(5),
+    )
+    .await;
+
+    assert_eq!(
+        result.status,
+        ScanStatus::Error,
+        "50ms delayed second frame must be rejected as Error"
+    );
+    assert_ne!(result.status, ScanStatus::Clean);
+
+    let stats = cache::stats(&cache_db).unwrap();
+    assert_eq!(
+        stats.entries, 0,
+        "50ms delayed response must never be cached"
+    );
+
+    handle.abort();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn test_delayed_second_frame_500ms_rejected() {
+    let (root, target, cache_db) = create_temp_test_dir("delayed-500ms");
+    std::fs::write(&target, b"delayed 500ms payload").unwrap();
+
+    let (addr, handle) = spawn_mock_clamd(
+        STANDARD_VERSION,
+        FaultMode::DelayedExtraReply {
+            first: b"stream: OK\0".to_vec(),
+            delay: Duration::from_millis(500),
+            second: b"stream: Threat.Delayed500ms FOUND\0".to_vec(),
+        },
+    )
+    .await;
+    let (_tx, cancel) = watch::channel(false);
+
+    let result = scan_file_with_timeout(
+        target,
+        cache_db.clone(),
+        addr,
+        cancel,
+        Arc::new(Semaphore::new(1)),
+        Duration::from_secs(5),
+    )
+    .await;
+
+    assert_eq!(
+        result.status,
+        ScanStatus::Error,
+        "500ms delayed second frame must be rejected as Error"
+    );
+    assert_ne!(result.status, ScanStatus::Clean);
+
+    let stats = cache::stats(&cache_db).unwrap();
+    assert_eq!(
+        stats.entries, 0,
+        "500ms delayed response must never be cached"
+    );
+
+    handle.abort();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn test_response_without_eof_never_closed_rejected() {
+    let (root, target, cache_db) = create_temp_test_dir("never-closed");
+    std::fs::write(&target, b"never closed payload").unwrap();
+
+    let (addr, handle) = spawn_mock_clamd(
+        STANDARD_VERSION,
+        FaultMode::NeverClose(b"stream: OK\0".to_vec()),
+    )
+    .await;
+    let (_tx, cancel) = watch::channel(false);
+
+    let result = scan_file_with_timeout(
+        target,
+        cache_db.clone(),
+        addr,
+        cancel,
+        Arc::new(Semaphore::new(1)),
+        Duration::from_secs(5),
+    )
+    .await;
+
+    assert_eq!(
+        result.status,
+        ScanStatus::Error,
+        "Response without EOF must time out and be rejected as Error"
+    );
+    assert_ne!(result.status, ScanStatus::Clean);
+
+    let stats = cache::stats(&cache_db).unwrap();
+    assert_eq!(
+        stats.entries, 0,
+        "Never-closed response must never be cached"
+    );
+
+    handle.abort();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn test_preflight_delayed_extra_frame_rejected() {
+    let (addr, handle) = spawn_mock_clamd(
+        STANDARD_VERSION,
+        FaultMode::DelayedExtraVersion {
+            first: b"ClamAV 1.5.4/28175/Sat Nov  7 08:34:12 2026\0".to_vec(),
+            delay: Duration::from_millis(50),
+            second: b"EXTRA_FRAME\0".to_vec(),
+        },
+    )
+    .await;
+    let (_tx, cancel) = watch::channel(false);
+
+    let result = clamd_version(addr, cancel).await;
+    assert!(
+        result.is_err(),
+        "Preflight with delayed extra frame must be rejected"
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn test_preflight_without_eof_rejected() {
+    let (addr, handle) = spawn_mock_clamd(
+        STANDARD_VERSION,
+        FaultMode::NeverCloseVersion(b"ClamAV 1.5.4/28175/Sat Nov  7 08:34:12 2026\0".to_vec()),
+    )
+    .await;
+    let (_tx, cancel) = watch::channel(false);
+
+    let result = clamd_version(addr, cancel).await;
+    assert!(
+        result.is_err(),
+        "Preflight without EOF close must be rejected"
+    );
+
+    handle.abort();
 }

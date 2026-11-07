@@ -25,3 +25,8 @@ Isolation: each run gets unique fixture, cache/LOCALAPPDATA and WebView profile 
 Target injection is limited to feature native-ui-tests AND debug_assertions. Release builds with that feature deliberately fail compilation. Normal builds use the actual native picker; no production IPC command or frontend bypass was added. Test builds with ZONENDPOINT_TEST_FIXTURE select benign.txt or its parent in the normal select_scan_path command. This verifies real IPC/scanning, NOT the Windows picker itself.
 
 Coverage limits: real picker automation, native taskbar icon inspection, full product-string inventory, contrast in every pseudo-state, daemon timeout duration, EICAR, signature-update invalidation and installer remain NOT RUN in this suite. Rust protocol/unit coverage complements these tests. Do not interpret passing mock tests as real detection acceptance.
+
+## Windows 11 Native File Dialog Automation Notes
+
+The standard Windows 11 file picker dialog (`IFileOpenDialog`) uses a `ComboBoxEx32` control (AutomationId `1148`) for the file path input box. This control does not support UIAutomation's `ValuePattern`. Test automation targeting Windows 11 must send `WM_SETTEXT` directly to the child `Edit` window within `ComboBoxEx32`, then invoke the `Open` button (AutomationId `1`).
+
