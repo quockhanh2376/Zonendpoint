@@ -29,3 +29,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-07 | vic/ui-compact | 7dcf4e2 | YES | docs(tasks): record main fast-forward and draft PR closure note in project-status |
 | 2026-11-07 | vic/ui-compact | 321d32b | YES | feat(ui): compact layout with status dot next to logo and theme toggle inside scan card |
 | 2026-11-07 | vic/ui-compact | c0fe890 | YES | docs: handoff ui-compact layout to qeen and update project status |
+| 2026-11-07 | vic/ui-compact | 63493b1 | YES | docs(tasks): track handoff commit in commit-notes |
