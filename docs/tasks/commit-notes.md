@@ -24,3 +24,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-07 | vic/ui-simplify | b42ff26 | YES | docs(tasks): track status update commit in commit-notes |
 | 2026-11-07 | vic/ui-simplify | eaba90a | YES | docs(qa): import qeen q-5 threat view verification report and handoff for 0a55516 |
 | 2026-11-07 | vic/ui-simplify | 79f0f59 | YES | fix(ui): wrap long threat names and verify in native mock in Light and Dark (Q-5-01) |
+| 2026-11-07 | vic/ui-simplify | 3464ab8 | YES | docs: handoff release candidate 79f0f59 to qeen and update project status |
