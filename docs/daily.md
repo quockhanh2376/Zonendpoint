@@ -43,3 +43,4 @@
 - Created Vic/Qeen Quick scan/x64 task brief from Zon request; waiting only for essential-system target scope choice before implementation.
 
 - Quick scan/x64 implemented c7f5fd9 after core+drivers approval. Qeen isolated Rust25/mock15/real-fixtures6 PASS; actual Windows588 clean+1 protected-directory error correctly incomplete/no All Good. New installer/manual picker rerun not performed; draft PR only.
+- Reconciled Notebook recommendations/SourceDatabase-v2 with code/QA; Zon confirmed internal company use first. Restored canonical source specs/agent instructions, appended architecture addendum and normalized scope/roadmap/technical tasks. Next:exact-SHA Quick-scan package QA, then real-network/engine-ops/performance; feeds/Guard/firewall/SQLCipher/AI remain gated backlog. No product code or environment policy changed.
