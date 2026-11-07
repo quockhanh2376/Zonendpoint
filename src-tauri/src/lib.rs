@@ -1,8 +1,8 @@
-mod cache;
-mod directory;
-mod quick;
+pub mod cache;
+pub mod directory;
+pub mod quick;
 pub mod scanner;
-mod watcher;
+pub mod watcher;
 
 #[cfg(all(target_os = "windows", not(target_arch = "x86_64")))]
 compile_error!("Zonendpoint supports Windows x64 builds only");
@@ -23,21 +23,21 @@ use tauri_plugin_dialog::DialogExt;
 use tokio::sync::{Semaphore, watch};
 use watcher::Guard;
 
-struct ScanManager {
+pub struct ScanManager {
     active: Mutex<Option<ActiveScan>>,
     selected: Mutex<HashMap<String, (Instant, PathBuf)>>,
     semaphore: Arc<Semaphore>,
 }
 
-struct ActiveScan {
+pub struct ActiveScan {
     scan_id: String,
     cancel: watch::Sender<bool>,
     state: ScanLifecycle,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Debug)]
 #[serde(rename_all = "lowercase")]
-enum ScanLifecycle {
+pub enum ScanLifecycle {
     Scanning,
     Cancelling,
     Idle,
@@ -50,7 +50,7 @@ struct ScanStateEvent {
 }
 
 impl ScanManager {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             active: Mutex::new(None),
             selected: Mutex::new(HashMap::new()),
@@ -58,7 +58,7 @@ impl ScanManager {
         }
     }
 
-    fn begin_scan(&self, scan_id: String) -> Result<watch::Receiver<bool>, String> {
+    pub fn begin_scan(&self, scan_id: String) -> Result<watch::Receiver<bool>, String> {
         let mut active = self
             .active
             .lock()
@@ -90,7 +90,7 @@ impl ScanManager {
         Ok(path.clone())
     }
 
-    fn request_cancel(&self, scan_id: &str) -> bool {
+    pub fn request_cancel(&self, scan_id: &str) -> bool {
         let Ok(mut active) = self.active.lock() else {
             return false;
         };
@@ -107,7 +107,7 @@ impl ScanManager {
         true
     }
 
-    fn finish_scan(&self, scan_id: &str) -> Result<bool, String> {
+    pub fn finish_scan(&self, scan_id: &str) -> Result<bool, String> {
         let mut active = self
             .active
             .lock()
@@ -119,6 +119,19 @@ impl ScanManager {
         } else {
             Ok(false)
         }
+    }
+
+    pub fn active_scan_id(&self) -> Option<String> {
+        self.active
+            .lock()
+            .ok()
+            .and_then(|active| active.as_ref().map(|scan| scan.scan_id.clone()))
+    }
+}
+
+impl Default for ScanManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

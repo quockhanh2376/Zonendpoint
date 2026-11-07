@@ -1,3 +1,6 @@
+#[cfg(all(feature = "native-ui-tests", not(debug_assertions)))]
+compile_error!("native-ui-tests must never be enabled in release builds");
+
 use anyhow::Result;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -22,6 +25,16 @@ pub const CACHE_TTL_SECONDS: i64 = 12 * 60 * 60;
 pub const POLICY_VERSION: &str = "zonendpoint-mvp-1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const TOTAL_SCAN_TIMEOUT: Duration = Duration::from_secs(60);
+
+pub fn default_scan_timeout() -> Duration {
+    #[cfg(all(feature = "native-ui-tests", debug_assertions))]
+    if let Ok(ms) = std::env::var("ZONENDPOINT_TEST_SCAN_TIMEOUT_MS") {
+        if let Ok(ms) = ms.parse::<u64>() {
+            return Duration::from_millis(ms);
+        }
+    }
+    TOTAL_SCAN_TIMEOUT
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -99,26 +112,27 @@ struct StreamOutcome {
     bytes_scanned: u64,
 }
 
-fn parse_response(response: &[u8]) -> Result<ScanStatus, String> {
+fn parse_response(response: &[u8]) -> Result<(ScanStatus, Option<String>), String> {
     let Some(response) = response.strip_suffix(b"\0") else {
         return Err("clamd response is not NUL terminated".into());
     };
     let response = std::str::from_utf8(response).map_err(|_| "clamd response is not UTF-8")?;
     if response == "stream: OK" {
-        return Ok(ScanStatus::Clean);
+        return Ok((ScanStatus::Clean, None));
     }
-    for (terminal, status) in [
-        (" FOUND", ScanStatus::Infected),
-        (" ERROR", ScanStatus::Error),
-    ] {
-        if let Some(name) = response
-            .strip_prefix("stream: ")
-            .and_then(|text| text.strip_suffix(terminal))
-            && !name.trim().is_empty()
-            && !name.bytes().any(|byte| byte.is_ascii_control())
-        {
-            return Ok(status);
+    if let Some(err_msg) = response.strip_suffix(" ERROR") {
+        let msg = err_msg.strip_prefix("stream: ").unwrap_or(err_msg);
+        if !msg.trim().is_empty() && !msg.bytes().any(|byte| byte.is_ascii_control()) {
+            return Ok((ScanStatus::Error, Some(msg.trim().to_owned())));
         }
+    }
+    if let Some(threat) = response
+        .strip_prefix("stream: ")
+        .and_then(|text| text.strip_suffix(" FOUND"))
+        && !threat.trim().is_empty()
+        && !threat.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Ok((ScanStatus::Infected, Some(threat.trim().to_owned())));
     }
     Err("unrecognized clamd response".into())
 }
@@ -133,14 +147,19 @@ async fn read_nul_frame<R: AsyncRead + Unpin>(
             return Err("clamd response exceeded limit".into());
         }
         let mut byte = [0];
-        match reader.read(&mut byte).await {
-            Ok(0) => return Err("clamd closed before response terminator".into()),
-            Ok(_) if byte[0] == 0 => {
+        let read_result = timeout(Duration::from_secs(5), reader.read(&mut byte)).await;
+        let count = match read_result {
+            Ok(Ok(n)) => n,
+            Ok(Err(error)) => return Err(format!("read clamd response: {error}")),
+            Err(_) => return Err("read clamd response timed out".into()),
+        };
+        match count {
+            0 => return Err("clamd closed before response terminator".into()),
+            _ if byte[0] == 0 => {
                 response.push(0);
                 return Ok(response);
             }
-            Ok(_) => response.push(byte[0]),
-            Err(error) => return Err(format!("read clamd response: {error}")),
+            _ => response.push(byte[0]),
         }
     }
 }
@@ -176,6 +195,10 @@ pub async fn clamd_version(
             .map_err(|_| "clamd VERSION is not UTF-8")?;
         if !text.starts_with("ClamAV ") || text.len() <= 7 {
             return Err("invalid clamd VERSION response".into());
+        }
+        let parts: Vec<&str> = text.split('/').collect();
+        if parts.len() < 2 || parts[0].trim().len() <= 7 || parts[1].trim().is_empty() {
+            return Err("invalid clamd VERSION response: missing signature version".into());
         }
         Ok(text.to_owned())
     };
@@ -236,9 +259,13 @@ async fn stream_scan<R: AsyncRead + Unpin>(
             .await
             .map_err(|error| format!("finish clamd stream: {error}"))?;
         let response = read_nul_frame(&mut socket, MAX_RESPONSE_BYTES).await?;
-        let status = parse_response(&response)?;
-        let reason = (status == ScanStatus::Error)
-            .then(|| String::from_utf8_lossy(&response[..response.len() - 1]).into_owned());
+        let mut extra = [0u8; 1];
+        if let Ok(n) = socket.try_read(&mut extra)
+            && n > 0
+        {
+            return Err("clamd sent unexpected extra data after response terminator".into());
+        }
+        let (status, reason) = parse_response(&response)?;
         Ok(StreamOutcome {
             status,
             sha256: Some(hex::encode(hasher.finalize())),
@@ -325,6 +352,25 @@ pub async fn scan_file(
     cancel: watch::Receiver<bool>,
     semaphore: Arc<Semaphore>,
 ) -> ScanResult {
+    scan_file_with_timeout(
+        path,
+        cache_path,
+        addr,
+        cancel,
+        semaphore,
+        default_scan_timeout(),
+    )
+    .await
+}
+
+pub async fn scan_file_with_timeout(
+    path: PathBuf,
+    cache_path: PathBuf,
+    addr: SocketAddr,
+    cancel: watch::Receiver<bool>,
+    semaphore: Arc<Semaphore>,
+    total_timeout: Duration,
+) -> ScanResult {
     if *cancel.borrow() {
         return ScanResult::new(
             path,
@@ -365,16 +411,26 @@ pub async fn scan_file(
         Ok(_) => {}
         Err(error) => return ScanResult::error(path, format!("read file metadata: {error}")),
     }
-    scan_file_with_engine(path, cache_path, addr, None, cancel, semaphore).await
+    scan_file_with_engine_timeout(
+        path,
+        cache_path,
+        addr,
+        None,
+        cancel,
+        semaphore,
+        total_timeout,
+    )
+    .await
 }
 
-async fn scan_file_with_engine(
+pub async fn scan_file_with_engine_timeout(
     path: PathBuf,
     cache_path: PathBuf,
     addr: SocketAddr,
     engine_override: Option<String>,
     cancel: watch::Receiver<bool>,
     semaphore: Arc<Semaphore>,
+    total_timeout: Duration,
 ) -> ScanResult {
     let permit = tokio::select! {
         _ = wait_cancelled(cancel.clone()) => return ScanResult::new(path, ScanStatus::Cancelled, None, Some("cancelled".into()), 0),
@@ -437,7 +493,7 @@ async fn scan_file_with_engine(
             addr,
             MAX_FILE_BYTES,
             cancel.clone(),
-            TOTAL_SCAN_TIMEOUT,
+            total_timeout,
         )
         .await;
         if outcome.status == ScanStatus::Clean || outcome.status == ScanStatus::Infected {
@@ -510,7 +566,7 @@ async fn scan_file_with_engine(
     let result_cancel = cancel.clone();
     let result = tokio::select! {
         _ = wait_cancelled(result_cancel) => ScanResult::new(&path, ScanStatus::Cancelled, None, Some("cancelled".into()), 0),
-        result = timeout(TOTAL_SCAN_TIMEOUT, operation) => match result {
+        result = timeout(total_timeout, operation) => match result {
             Ok(Ok(result)) => result,
             Ok(Err(reason)) => ScanResult::error(&path, reason),
             Err(_) => ScanResult::new(&path, ScanStatus::Error, None, Some("scan timed out".into()), 0),
@@ -534,14 +590,27 @@ mod tests {
 
     #[test]
     fn only_terminal_clamd_replies_map_to_clean_or_infected() {
-        assert_eq!(parse_response(b"stream: OK\0").unwrap(), ScanStatus::Clean);
+        assert_eq!(
+            parse_response(b"stream: OK\0").unwrap(),
+            (ScanStatus::Clean, None)
+        );
         assert_eq!(
             parse_response(b"stream: Eicar-Test-Signature FOUND\0").unwrap(),
-            ScanStatus::Infected
+            (
+                ScanStatus::Infected,
+                Some("Eicar-Test-Signature".to_string())
+            )
         );
         assert_eq!(
             parse_response(b"stream: failed ERROR\0").unwrap(),
-            ScanStatus::Error
+            (ScanStatus::Error, Some("failed".to_string()))
+        );
+        assert_eq!(
+            parse_response(b"INSTREAM size limit exceeded. ERROR\0").unwrap(),
+            (
+                ScanStatus::Error,
+                Some("INSTREAM size limit exceeded.".to_string())
+            )
         );
         assert!(parse_response(b"\0").is_err());
         assert!(parse_response(b"stream: OK").is_err());
@@ -716,13 +785,14 @@ mod tests {
 
         let (addr, daemon) = mock_clamd(vec![b"stream: Mock-Threat FOUND\0".to_vec()], false).await;
         let (_tx, cancel) = watch::channel(false);
-        let result = scan_file_with_engine(
+        let result = scan_file_with_engine_timeout(
             file_path.clone(),
             cache_path.clone(),
             addr,
-            Some("ClamAV test/signature-1".into()),
+            Some("ClamAV 1.5.4/28175/Sat Nov 7 2026".into()),
             cancel,
             Arc::new(Semaphore::new(1)),
+            Duration::from_secs(60),
         )
         .await;
         assert_eq!(result.status, ScanStatus::Infected);
@@ -741,7 +811,7 @@ mod tests {
         crate::cache::put(
             &cache_path,
             &hash,
-            "ClamAV old/signature",
+            "ClamAV 1.5.4/28175/Sat Nov 7 2026",
             POLICY_VERSION,
             ScanStatus::Clean,
             9999999999,
