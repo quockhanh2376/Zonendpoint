@@ -24,6 +24,8 @@ pub const MAX_FILE_BYTES: u64 = 100_000_000;
 pub const CACHE_TTL_SECONDS: i64 = 12 * 60 * 60;
 pub const POLICY_VERSION: &str = "zonendpoint-mvp-1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+pub const PREFLIGHT_ERROR_MSG: &str = "Cannot connect to ZonEndpoint server";
+const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(3);
 const TOTAL_SCAN_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn default_scan_timeout() -> Duration {
@@ -114,9 +116,9 @@ struct StreamOutcome {
 
 fn parse_response(response: &[u8]) -> Result<(ScanStatus, Option<String>), String> {
     let Some(response) = response.strip_suffix(b"\0") else {
-        return Err("clamd response is not NUL terminated".into());
+        return Err("server response is not NUL terminated".into());
     };
-    let response = std::str::from_utf8(response).map_err(|_| "clamd response is not UTF-8")?;
+    let response = std::str::from_utf8(response).map_err(|_| "server response is not UTF-8")?;
     if response == "stream: OK" {
         return Ok((ScanStatus::Clean, None));
     }
@@ -134,7 +136,7 @@ fn parse_response(response: &[u8]) -> Result<(ScanStatus, Option<String>), Strin
     {
         return Ok((ScanStatus::Infected, Some(threat.trim().to_owned())));
     }
-    Err("unrecognized clamd response".into())
+    Err("unrecognized server response".into())
 }
 
 async fn read_nul_frame<R: AsyncRead + Unpin>(
@@ -144,17 +146,17 @@ async fn read_nul_frame<R: AsyncRead + Unpin>(
     let mut response = Vec::with_capacity(64);
     loop {
         if response.len() == limit {
-            return Err("clamd response exceeded limit".into());
+            return Err("server response exceeded limit".into());
         }
         let mut byte = [0];
         let read_result = timeout(Duration::from_secs(5), reader.read(&mut byte)).await;
         let count = match read_result {
             Ok(Ok(n)) => n,
-            Ok(Err(error)) => return Err(format!("read clamd response: {error}")),
-            Err(_) => return Err("read clamd response timed out".into()),
+            Ok(Err(error)) => return Err(format!("read server response: {error}")),
+            Err(_) => return Err("read server response timed out".into()),
         };
         match count {
-            0 => return Err("clamd closed before response terminator".into()),
+            0 => return Err("server closed before response terminator".into()),
             _ if byte[0] == 0 => {
                 response.push(0);
                 return Ok(response);
@@ -175,30 +177,34 @@ async fn wait_cancelled(mut cancel: watch::Receiver<bool>) {
     }
 }
 
-pub async fn clamd_version(
+pub async fn clamd_version_with_timeout(
     addr: SocketAddr,
+    connect_timeout: Duration,
     cancel: watch::Receiver<bool>,
 ) -> Result<String, String> {
     let query = async {
-        let mut socket = timeout(CONNECT_TIMEOUT, TcpStream::connect(addr))
+        let mut socket = timeout(connect_timeout, TcpStream::connect(addr))
             .await
-            .map_err(|_| "clamd connection timed out".to_owned())?
-            .map_err(|error| format!("connect to clamd: {error}"))?;
+            .map_err(|_| "server connection timed out".to_owned())?
+            .map_err(|error| format!("connect to server: {error}"))?;
         socket
             .write_all(b"zVERSION\0")
             .await
-            .map_err(|error| format!("write clamd VERSION: {error}"))?;
-        let response = timeout(CONNECT_TIMEOUT, read_nul_frame(&mut socket, 256))
+            .map_err(|error| format!("write VERSION command: {error}"))?;
+        let response = timeout(connect_timeout, read_nul_frame(&mut socket, 256))
             .await
-            .map_err(|_| "clamd VERSION timed out".to_owned())??;
+            .map_err(|_| "VERSION command timed out".to_owned())??;
+        if response.is_empty() || response[response.len() - 1] != 0 {
+            return Err("VERSION response is not NUL terminated".into());
+        }
         let text = std::str::from_utf8(&response[..response.len() - 1])
-            .map_err(|_| "clamd VERSION is not UTF-8")?;
+            .map_err(|_| "VERSION response is not UTF-8")?;
         if !text.starts_with("ClamAV ") || text.len() <= 7 {
-            return Err("invalid clamd VERSION response".into());
+            return Err("invalid VERSION response".into());
         }
         let parts: Vec<&str> = text.split('/').collect();
         if parts.len() < 2 || parts[0].trim().len() <= 7 || parts[1].trim().is_empty() {
-            return Err("invalid clamd VERSION response: missing signature version".into());
+            return Err("invalid VERSION response: missing signature version".into());
         }
         Ok(text.to_owned())
     };
@@ -206,6 +212,22 @@ pub async fn clamd_version(
         _ = wait_cancelled(cancel.clone()) => Err("cancelled".into()),
         result = query => result,
     }
+}
+
+pub async fn clamd_version(
+    addr: SocketAddr,
+    cancel: watch::Receiver<bool>,
+) -> Result<String, String> {
+    clamd_version_with_timeout(addr, CONNECT_TIMEOUT, cancel).await
+}
+
+pub async fn clamd_preflight(
+    addr: SocketAddr,
+    cancel: watch::Receiver<bool>,
+) -> Result<String, String> {
+    clamd_version_with_timeout(addr, PREFLIGHT_TIMEOUT, cancel)
+        .await
+        .map_err(|_| PREFLIGHT_ERROR_MSG.to_string())
 }
 
 async fn stream_scan<R: AsyncRead + Unpin>(
@@ -218,12 +240,12 @@ async fn stream_scan<R: AsyncRead + Unpin>(
     let work = async {
         let mut socket = timeout(CONNECT_TIMEOUT, TcpStream::connect(addr))
             .await
-            .map_err(|_| "clamd connection timed out".to_owned())?
-            .map_err(|error| format!("connect to clamd: {error}"))?;
+            .map_err(|_| "server connection timed out".to_owned())?
+            .map_err(|error| format!("connect to server: {error}"))?;
         socket
             .write_all(b"zINSTREAM\0")
             .await
-            .map_err(|error| format!("write clamd command: {error}"))?;
+            .map_err(|error| format!("write server command: {error}"))?;
         let mut buffer = vec![0; STREAM_CHUNK_BYTES];
         let mut total = 0u64;
         let mut hasher = Sha256::new();
@@ -248,22 +270,22 @@ async fn stream_scan<R: AsyncRead + Unpin>(
             socket
                 .write_all(&(count as u32).to_be_bytes())
                 .await
-                .map_err(|error| format!("write clamd frame: {error}"))?;
+                .map_err(|error| format!("write stream frame: {error}"))?;
             socket
                 .write_all(&buffer[..count])
                 .await
-                .map_err(|error| format!("write clamd payload: {error}"))?;
+                .map_err(|error| format!("write stream payload: {error}"))?;
         }
         socket
             .write_all(&0u32.to_be_bytes())
             .await
-            .map_err(|error| format!("finish clamd stream: {error}"))?;
+            .map_err(|error| format!("finish stream: {error}"))?;
         let response = read_nul_frame(&mut socket, MAX_RESPONSE_BYTES).await?;
         let mut extra = [0u8; 1];
         if let Ok(n) = socket.try_read(&mut extra)
             && n > 0
         {
-            return Err("clamd sent unexpected extra data after response terminator".into());
+            return Err("server sent unexpected extra data after response terminator".into());
         }
         let (status, reason) = parse_response(&response)?;
         Ok(StreamOutcome {
@@ -352,10 +374,22 @@ pub async fn scan_file(
     cancel: watch::Receiver<bool>,
     semaphore: Arc<Semaphore>,
 ) -> ScanResult {
-    scan_file_with_timeout(
+    scan_file_with_engine_override(path, cache_path, addr, None, cancel, semaphore).await
+}
+
+pub async fn scan_file_with_engine_override(
+    path: PathBuf,
+    cache_path: PathBuf,
+    addr: SocketAddr,
+    engine_override: Option<String>,
+    cancel: watch::Receiver<bool>,
+    semaphore: Arc<Semaphore>,
+) -> ScanResult {
+    scan_file_with_engine_timeout_checked(
         path,
         cache_path,
         addr,
+        engine_override,
         cancel,
         semaphore,
         default_scan_timeout(),
@@ -367,6 +401,27 @@ pub async fn scan_file_with_timeout(
     path: PathBuf,
     cache_path: PathBuf,
     addr: SocketAddr,
+    cancel: watch::Receiver<bool>,
+    semaphore: Arc<Semaphore>,
+    total_timeout: Duration,
+) -> ScanResult {
+    scan_file_with_engine_timeout_checked(
+        path,
+        cache_path,
+        addr,
+        None,
+        cancel,
+        semaphore,
+        total_timeout,
+    )
+    .await
+}
+
+async fn scan_file_with_engine_timeout_checked(
+    path: PathBuf,
+    cache_path: PathBuf,
+    addr: SocketAddr,
+    engine_override: Option<String>,
     cancel: watch::Receiver<bool>,
     semaphore: Arc<Semaphore>,
     total_timeout: Duration,
@@ -415,7 +470,7 @@ pub async fn scan_file_with_timeout(
         path,
         cache_path,
         addr,
-        None,
+        engine_override,
         cancel,
         semaphore,
         total_timeout,
@@ -830,6 +885,91 @@ mod tests {
         )
         .await;
         assert_eq!(result.status, ScanStatus::Error);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    async fn mock_version_daemon(
+        reply: Vec<u8>,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut cmd = [0u8; 9];
+            let n = socket.read(&mut cmd).await.unwrap();
+            assert_eq!(&cmd[..n], b"zVERSION\0");
+            socket.write_all(&reply).await.unwrap();
+        });
+        (addr, task)
+    }
+
+    #[tokio::test]
+    async fn preflight_ok_returns_validated_engine_version() {
+        let banner = b"ClamAV 1.5.4/28175/Sat Nov 7 2026\0".to_vec();
+        let (addr, daemon) = mock_version_daemon(banner).await;
+        let (_tx, cancel) = watch::channel(false);
+        let result = clamd_preflight(addr, cancel).await;
+        assert_eq!(result.unwrap(), "ClamAV 1.5.4/28175/Sat Nov 7 2026");
+        daemon.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn preflight_refused_returns_generic_server_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let (_tx, cancel) = watch::channel(false);
+        let result = clamd_preflight(addr, cancel).await;
+        assert_eq!(result.unwrap_err(), PREFLIGHT_ERROR_MSG);
+    }
+
+    #[tokio::test]
+    async fn preflight_invalid_banner_rejected() {
+        for invalid in [
+            b"SSH-2.0-OpenSSH_8.9p1\r\n\0".to_vec(),
+            b"HTTP/1.1 200 OK\r\n\r\n\0".to_vec(),
+            b"ClamAV 1.5.4\0".to_vec(),
+            b"ClamAV \0".to_vec(),
+            b"random banner\0".to_vec(),
+            b"\0".to_vec(),
+        ] {
+            let (addr, daemon) = mock_version_daemon(invalid).await;
+            let (_tx, cancel) = watch::channel(false);
+            let result = clamd_preflight(addr, cancel).await;
+            assert_eq!(result.unwrap_err(), PREFLIGHT_ERROR_MSG);
+            daemon.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn preflight_offline_cache_not_reused() {
+        let root = std::env::temp_dir().join(format!(
+            "zonendpoint-preflight-cache-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let file_path = root.join("fixture.bin");
+        let cache_path = root.join("cache.db");
+        std::fs::write(&file_path, b"known clean data").unwrap();
+        let hash: [u8; 32] = Sha256::digest(b"known clean data").into();
+        crate::cache::put(
+            &cache_path,
+            &hash,
+            "ClamAV 1.5.4/28175/Sat Nov 7 2026",
+            POLICY_VERSION,
+            ScanStatus::Clean,
+            9999999999,
+        )
+        .unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let (_tx, cancel) = watch::channel(false);
+        let preflight = clamd_preflight(addr, cancel).await;
+        assert_eq!(preflight.unwrap_err(), PREFLIGHT_ERROR_MSG);
+
         let _ = std::fs::remove_dir_all(root);
     }
 }

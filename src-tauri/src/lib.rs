@@ -234,6 +234,14 @@ async fn quick_scan(
     run_scan(app, manager, scan_id, quick::targets_for_root(&root)).await
 }
 
+#[tauri::command]
+async fn check_server_status() -> Result<String, String> {
+    let addr =
+        scanner::configured_clamd_addr().map_err(|_| scanner::PREFLIGHT_ERROR_MSG.to_string())?;
+    let (_tx, cancel) = watch::channel(false);
+    scanner::clamd_preflight(addr, cancel).await
+}
+
 async fn run_scan(
     app: tauri::AppHandle,
     manager: tauri::State<'_, ScanManager>,
@@ -248,7 +256,19 @@ async fn run_scan(
         .cloned()
         .ok_or("scan target list is empty")?;
     let multiple = targets.len() > 1;
+
+    let addr =
+        scanner::configured_clamd_addr().map_err(|_| scanner::PREFLIGHT_ERROR_MSG.to_string())?;
+
     let cancel_rx = manager.begin_scan(scan_id.clone())?;
+    let engine_version = match scanner::clamd_preflight(addr, cancel_rx.clone()).await {
+        Ok(version) => version,
+        Err(err) => {
+            let _ = manager.finish_scan(&scan_id);
+            return Err(err);
+        }
+    };
+
     let _ = app.emit(
         "scan-state",
         ScanStateEvent {
@@ -259,20 +279,26 @@ async fn run_scan(
     let cancellation_path = target.clone();
     let result = async {
         let cache_path = cache::default_path().map_err(|error| error.to_string())?;
-        let addr = scanner::configured_clamd_addr();
         let semaphore = manager.semaphore.clone();
-        let scan_addr = addr.clone();
+        let scan_addr = addr;
         let scan_cache = cache_path.clone();
         let scan_semaphore = semaphore.clone();
+        let scan_version = engine_version.clone();
         let scan: ScanFn = Box::new(move |file, cancel| {
             let cache_path = scan_cache.clone();
             let semaphore = scan_semaphore.clone();
-            let addr = scan_addr.clone();
+            let addr = scan_addr;
+            let version = scan_version.clone();
             Box::pin(async move {
-                match addr {
-                    Ok(addr) => scanner::scan_file(file, cache_path, addr, cancel, semaphore).await,
-                    Err(reason) => scanner::ScanResult::error(file, reason),
-                }
+                scanner::scan_file_with_engine_override(
+                    file,
+                    cache_path,
+                    addr,
+                    Some(version),
+                    cancel,
+                    semaphore,
+                )
+                .await
             })
         });
         let progress_app = app.clone();
@@ -292,13 +318,15 @@ async fn run_scan(
                 Ok(directory::scan_directory(target, cancel_rx.clone(), scan, progress).await)
             }
             _ => {
-                let result = match addr {
-                    Ok(addr) => {
-                        scanner::scan_file(target, cache_path, addr, cancel_rx.clone(), semaphore)
-                            .await
-                    }
-                    Err(reason) => scanner::ScanResult::error(&target, reason),
-                };
+                let result = scanner::scan_file_with_engine_override(
+                    target,
+                    cache_path,
+                    addr,
+                    Some(engine_version),
+                    cancel_rx.clone(),
+                    semaphore,
+                )
+                .await;
                 let mut summary = ScanSummary::default();
                 summary.record(result.clone());
                 let _ = app.emit(
@@ -453,7 +481,8 @@ pub fn run() {
             cancel_scan,
             cache_stats,
             set_guard,
-            set_window_theme_icon
+            set_window_theme_icon,
+            check_server_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
