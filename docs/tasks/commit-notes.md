@@ -20,3 +20,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-07 | vic/ui-simplify | bbdf68a | YES | docs(qa): import qeen q-4 ui-simplify verification report and handoff for 0a55516 |
 | 2026-11-07 | vic/ui-simplify | 6294506 | YES | fix(quick): exclude %SystemRoot%\System32\drivers\DriverData from Quick Scan (Q-4-01) |
 | 2026-11-07 | vic/ui-simplify | 9495ab8 | YES | docs: handoff quick scan DriverData scope update to qeen and update project status |
+| 2026-11-07 | vic/ui-simplify | c4b1858 | YES | docs(tasks): track handoff commit in commit-notes |
