@@ -221,7 +221,7 @@ async fn scan_path(
     target_id: String,
 ) -> Result<ScanSummary, String> {
     let target = manager.selected_path(&target_id)?;
-    run_scan(app, manager, scan_id, vec![target]).await
+    run_scan(app, manager, scan_id, vec![target], Vec::new()).await
 }
 
 #[tauri::command]
@@ -231,7 +231,15 @@ async fn quick_scan(
     scan_id: String,
 ) -> Result<ScanSummary, String> {
     let root = quick::system_root()?;
-    run_scan(app, manager, scan_id, quick::targets_for_root(&root)).await
+    let exclusions = quick::exclusions_for_root(&root);
+    run_scan(
+        app,
+        manager,
+        scan_id,
+        quick::targets_for_root(&root),
+        exclusions,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -247,6 +255,7 @@ async fn run_scan(
     manager: tauri::State<'_, ScanManager>,
     scan_id: String,
     targets: Vec<PathBuf>,
+    exclusions: Vec<PathBuf>,
 ) -> Result<ScanSummary, String> {
     if scan_id.is_empty() || scan_id.len() > 80 {
         return Err("invalid scan identifier".into());
@@ -311,12 +320,24 @@ async fn run_scan(
         });
 
         if multiple {
-            return Ok(directory::scan_roots(targets, cancel_rx.clone(), scan, progress).await);
+            return Ok(directory::scan_roots_with_exclusions(
+                targets,
+                exclusions,
+                cancel_rx.clone(),
+                scan,
+                progress,
+            )
+            .await);
         }
         match tokio::fs::symlink_metadata(&target).await {
-            Ok(metadata) if metadata.is_dir() => {
-                Ok(directory::scan_directory(target, cancel_rx.clone(), scan, progress).await)
-            }
+            Ok(metadata) if metadata.is_dir() => Ok(directory::scan_roots_with_exclusions(
+                vec![target],
+                exclusions,
+                cancel_rx.clone(),
+                scan,
+                progress,
+            )
+            .await),
             _ => {
                 let result = scanner::scan_file_with_engine_override(
                     target,

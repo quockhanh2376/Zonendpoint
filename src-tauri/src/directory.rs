@@ -106,11 +106,21 @@ pub async fn scan_directory(
     scan: ScanFn,
     progress: ProgressFn,
 ) -> ScanSummary {
-    scan_roots(vec![root], cancel, scan, progress).await
+    scan_roots_with_exclusions(vec![root], Vec::new(), cancel, scan, progress).await
 }
 
 pub async fn scan_roots(
     roots: Vec<PathBuf>,
+    cancel: watch::Receiver<bool>,
+    scan: ScanFn,
+    progress: ProgressFn,
+) -> ScanSummary {
+    scan_roots_with_exclusions(roots, Vec::new(), cancel, scan, progress).await
+}
+
+pub async fn scan_roots_with_exclusions(
+    roots: Vec<PathBuf>,
+    exclusions: Vec<PathBuf>,
     cancel: watch::Receiver<bool>,
     scan: ScanFn,
     progress: ProgressFn,
@@ -122,25 +132,57 @@ pub async fn scan_roots(
     let producer_cancelled = cancelled.clone();
     let producer = tokio::task::spawn_blocking(move || {
         for producer_root in roots {
-            for entry in walkdir::WalkDir::new(&producer_root)
+            if !exclusions.is_empty() && crate::quick::is_path_excluded(&producer_root, &exclusions)
+            {
+                continue;
+            }
+            let walker = walkdir::WalkDir::new(&producer_root)
                 .follow_links(false)
                 .follow_root_links(false)
-                .max_open(16)
-            {
+                .max_open(16);
+            let mut it = walker.into_iter();
+            loop {
                 if producer_cancelled.load(Ordering::Relaxed) {
                     break;
                 }
+                let entry = match it.next() {
+                    None => break,
+                    Some(res) => res,
+                };
                 let item = match entry {
-                    Ok(entry) if entry.file_type().is_dir() => continue,
-                    Ok(entry) if entry.file_type().is_symlink() => {
-                        WalkItem::Skip(entry.into_path())
+                    Ok(entry) => {
+                        let path = entry.path();
+                        if !exclusions.is_empty()
+                            && crate::quick::is_path_excluded(path, &exclusions)
+                        {
+                            if entry.file_type().is_dir() {
+                                it.skip_current_dir();
+                            }
+                            continue;
+                        }
+                        if entry.file_type().is_dir() {
+                            continue;
+                        }
+                        if entry.file_type().is_symlink() {
+                            WalkItem::Skip(entry.into_path())
+                        } else if entry.file_type().is_file() {
+                            WalkItem::File(entry.into_path())
+                        } else {
+                            WalkItem::Skip(entry.into_path())
+                        }
                     }
-                    Ok(entry) if entry.file_type().is_file() => WalkItem::File(entry.into_path()),
-                    Ok(entry) => WalkItem::Skip(entry.into_path()),
-                    Err(error) => WalkItem::Error(
-                        error.path().unwrap_or(&producer_root).to_path_buf(),
-                        error.to_string(),
-                    ),
+                    Err(error) => {
+                        if error.path().is_some_and(|err_path| {
+                            !exclusions.is_empty()
+                                && crate::quick::is_path_excluded(err_path, &exclusions)
+                        }) {
+                            continue;
+                        }
+                        WalkItem::Error(
+                            error.path().unwrap_or(&producer_root).to_path_buf(),
+                            error.to_string(),
+                        )
+                    }
                 };
                 if tx.blocking_send(item).is_err() {
                     break;
@@ -221,9 +263,10 @@ pub async fn scan_roots(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::quick;
     use crate::scanner::{ScanResult, ScanStatus};
     use std::{
-        path::PathBuf,
+        path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
     use tokio::sync::watch;
@@ -237,6 +280,55 @@ mod tests {
             std::env::temp_dir().join(format!("zonendpoint-folder-{}-{nonce}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    struct DenyAccessGuard {
+        path: PathBuf,
+    }
+
+    impl DenyAccessGuard {
+        fn new(path: &Path) -> Self {
+            #[cfg(windows)]
+            {
+                let output = std::process::Command::new("icacls.exe")
+                    .arg(path)
+                    .args(["/deny", "*S-1-1-0:(RD)"])
+                    .output();
+                if let Ok(out) = output {
+                    assert!(
+                        out.status.success(),
+                        "icacls deny warning: {}",
+                        String::from_utf8_lossy(&out.stderr)
+                    );
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000));
+            }
+            Self {
+                path: path.to_path_buf(),
+            }
+        }
+    }
+
+    impl Drop for DenyAccessGuard {
+        fn drop(&mut self) {
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("icacls.exe")
+                    .arg(&self.path)
+                    .args(["/remove:d", "*S-1-1-0"])
+                    .output();
+            }
+            #[cfg(not(windows))]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ =
+                    std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o755));
+            }
+        }
     }
 
     #[tokio::test]
@@ -406,5 +498,184 @@ mod tests {
         assert!(!summary.complete);
         assert!(summary.cancelled_files > 0);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    // --- Task V-6 Finding Q-4-01 TDD Tests ---
+
+    /// (a) DriverData under the quick root is excluded, not counted, no row, allows complete scan
+    #[tokio::test]
+    async fn tdd_driverdata_under_quick_root_excluded() {
+        let root = test_dir();
+        let drivers = root.join("drivers");
+        let driver_data = drivers.join("DriverData");
+        std::fs::create_dir_all(&driver_data).unwrap();
+        for core in quick::CORE_FILES {
+            std::fs::write(root.join(core), b"mock core").unwrap();
+        }
+        std::fs::write(drivers.join("test.sys"), b"mock driver").unwrap();
+        std::fs::write(driver_data.join("hidden.log"), b"should be skipped").unwrap();
+
+        let targets = quick::targets_for_root(&root);
+        let exclusions = quick::exclusions_for_root(&root);
+
+        let (_tx, cancel) = watch::channel(false);
+        let scan: ScanFn = Box::new(|path, _| {
+            Box::pin(async move { ScanResult::new(path, ScanStatus::Clean, None, None, 1) })
+        });
+
+        let summary =
+            scan_roots_with_exclusions(targets, exclusions, cancel, scan, Box::new(|_, _| {}))
+                .await;
+
+        assert!(summary.complete, "Quick scan should be complete");
+        assert_eq!(summary.errors, 0);
+        assert_eq!(summary.clean, 14); // 13 core files + 1 driver (test.sys)
+        assert!(
+            !summary
+                .results
+                .iter()
+                .any(|r| { r.path.to_ascii_lowercase().contains("driverdata") })
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// (b) A different unreadable directory under drivers still yields incomplete
+    #[tokio::test]
+    async fn tdd_different_unreadable_dir_under_drivers_yields_incomplete() {
+        let root = test_dir();
+        let drivers = root.join("drivers");
+        let driver_data = drivers.join("DriverData");
+        let unreadable = drivers.join("unreadable_dir");
+        std::fs::create_dir_all(&driver_data).unwrap();
+        std::fs::create_dir_all(&unreadable).unwrap();
+        std::fs::write(drivers.join("test.sys"), b"mock driver").unwrap();
+
+        let _guard = DenyAccessGuard::new(&unreadable);
+
+        let targets = quick::targets_for_root(&root);
+        let exclusions = quick::exclusions_for_root(&root);
+
+        let (_tx, cancel) = watch::channel(false);
+        let scan: ScanFn = Box::new(|path, _| {
+            Box::pin(async move { ScanResult::new(path, ScanStatus::Clean, None, None, 1) })
+        });
+
+        let summary =
+            scan_roots_with_exclusions(targets, exclusions, cancel, scan, Box::new(|_, _| {}))
+                .await;
+
+        assert!(
+            !summary.complete,
+            "Scan must be incomplete when another dir is unreadable"
+        );
+        assert!(summary.errors >= 1);
+        assert!(summary.results.iter().any(|r| {
+            r.status == ScanStatus::Error && r.path.to_ascii_lowercase().contains("unreadable_dir")
+        }));
+        // But DriverData must NOT have an error or row
+        assert!(
+            !summary
+                .results
+                .iter()
+                .any(|r| { r.path.to_ascii_lowercase().contains("driverdata") })
+        );
+        drop(_guard);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// (c) A folder named DriverData elsewhere is NOT excluded
+    #[tokio::test]
+    async fn tdd_folder_named_driverdata_elsewhere_not_excluded() {
+        let quick_root = test_dir();
+        let other_root = test_dir();
+        let other_driver_data = other_root.join("DriverData");
+        std::fs::create_dir_all(&other_driver_data).unwrap();
+        std::fs::write(other_driver_data.join("sample.bin"), b"scanned").unwrap();
+
+        // Quick scan exclusion is based on quick_root (%SystemRoot%\System32\drivers\DriverData)
+        let exclusions = quick::exclusions_for_root(&quick_root);
+
+        let (_tx, cancel) = watch::channel(false);
+        let scan: ScanFn = Box::new(|path, _| {
+            Box::pin(async move { ScanResult::new(path, ScanStatus::Clean, None, None, 1) })
+        });
+
+        // Scanning the other directory must NOT exclude its DriverData folder
+        let summary = scan_roots_with_exclusions(
+            vec![other_root.clone()],
+            exclusions,
+            cancel,
+            scan,
+            Box::new(|_, _| {}),
+        )
+        .await;
+
+        assert!(summary.complete);
+        assert_eq!(summary.clean, 1);
+        assert!(
+            summary
+                .results
+                .iter()
+                .any(|r| { r.path.to_ascii_lowercase().contains("sample.bin") })
+        );
+        let _ = std::fs::remove_dir_all(quick_root);
+        let _ = std::fs::remove_dir_all(other_root);
+    }
+
+    /// (d) Folder scan of drivers still reports the denied subdir
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn tdd_folder_scan_of_drivers_reports_denied_subdir() {
+        // Test against the real Windows %SystemRoot%\System32\drivers if available,
+        // or a simulated drivers folder with an access-denied DriverData subdir.
+        let sys_root = quick::system_root().unwrap();
+        let real_drivers = sys_root.join("drivers");
+        let real_driver_data = real_drivers.join("DriverData");
+
+        if real_driver_data.exists() {
+            let (_tx, cancel) = watch::channel(false);
+            let scan: ScanFn = Box::new(|path, _| {
+                Box::pin(async move { ScanResult::new(path, ScanStatus::Clean, None, None, 1) })
+            });
+
+            // Normal folder scan has NO exclusions
+            let summary =
+                scan_directory(real_drivers.clone(), cancel, scan, Box::new(|_, _| {})).await;
+
+            // Must be incomplete because DriverData has SYSTEM-only ACL (os error 5)
+            assert!(
+                !summary.complete,
+                "Folder scan of drivers must be incomplete on access-denied DriverData"
+            );
+            assert!(
+                summary.errors >= 1,
+                "Should have at least 1 error for DriverData"
+            );
+            assert!(
+                summary.results.iter().any(|r| {
+                    r.status == ScanStatus::Error
+                        && r.path.to_ascii_lowercase().contains("driverdata")
+                }),
+                "Folder scan must report DriverData error"
+            );
+        } else {
+            // Fallback for non-standard environments: simulated drivers directory with denied DriverData
+            let root = test_dir();
+            let drivers = root.join("drivers");
+            let driver_data = drivers.join("DriverData");
+            std::fs::create_dir_all(&driver_data).unwrap();
+            let _guard = DenyAccessGuard::new(&driver_data);
+
+            let (_tx, cancel) = watch::channel(false);
+            let scan: ScanFn = Box::new(|path, _| {
+                Box::pin(async move { ScanResult::new(path, ScanStatus::Clean, None, None, 1) })
+            });
+
+            let summary = scan_directory(drivers.clone(), cancel, scan, Box::new(|_, _| {})).await;
+            assert!(!summary.complete);
+            assert!(summary.errors >= 1);
+            drop(_guard);
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 }

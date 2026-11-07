@@ -13,6 +13,8 @@ const fixtures = path.join(run, 'fixtures'); mkdirSync(fixtures);
 const fixture = path.join(fixtures, 'benign.txt');
 writeFileSync(fixture, 'Zonendpoint benign fixture');
 const systemRoot = path.join(run, 'system'); mkdirSync(systemRoot); mkdirSync(path.join(systemRoot, 'drivers'));
+mkdirSync(path.join(systemRoot, 'drivers', 'DriverData'));
+writeFileSync(path.join(systemRoot, 'drivers', 'DriverData', 'ignored.bin'), 'excluded from quick scan');
 const coreNames = ['ntoskrnl.exe', 'ntdll.dll', 'kernel32.dll', 'kernelbase.dll', 'ci.dll', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe', 'lsass.exe', 'svchost.exe', 'winlogon.exe', 'winload.efi'];
 for (const name of coreNames) writeFileSync(path.join(systemRoot, name), `Benign system fixture ${name}`);
 writeFileSync(path.join(systemRoot, 'drivers', 'fixture.sys'), 'Benign driver fixture');
