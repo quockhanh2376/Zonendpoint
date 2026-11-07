@@ -2,7 +2,7 @@
 
 ## Checkout and snapshot
 - Active implementation: E:\Zonendpoint-restored\Zonendpoint-vic, vic/mvp-first-scan.
-- Current code: d694f4f547c46755dbf4fcf41a7195b0b83fd99c.
+- Current code: d5bc9133048ba83d5dbd1fe82423dfbf6a2451b3 (latest logo CSS; native runtime evidence remains at d694f4f).
 - Coordinator/source docs: E:\Zonendpoint\docs. Historical restored handoff: 2487664; historical QA code: e3ed872.
 - Product scope: [v1.0.0-scope.md](v1.0.0-scope.md). Manual scan, English, persisted Light/Dark, Guard OFF; quarantine/licensing deferred.
 
@@ -25,3 +25,6 @@ UI adjustment requested: logo and its grid column reduced 15% from220 to187px in
 
 
 Per Zon, logo narrowed another10% to168px while keeping162px height for taller/slimmer proportions. Slogan remains13px and right-aligned. Frontend build PASS; intentional aspect adjustment supersedes prior preserve-ratio preference for this logo presentation.
+
+## Local synchronization
+Origin now points to GitHub; recovery-bundle preserves original import remote. Latest UI branch imported into E:\Zonendpoint as recovery/ui-approved; source main and dirty changes untouched. No GitHub push or merge performed. Frontend build PASS at latest logo snapshot; native tests not rerun for final CSS sizing.

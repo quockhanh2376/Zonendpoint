@@ -24,3 +24,5 @@
 
 - Narrowed logo another10%, retaining height and slogan font; frontend build PASS.
 
+- Committed final logo as d5bc913; restored GitHub origin and imported UI branch into source repo recovery/ui-approved. Source main/dirty changes preserved; no push.
+
