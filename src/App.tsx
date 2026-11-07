@@ -158,7 +158,7 @@ function App() {
   }
 
   async function startScan() {
-    if (!selectedTarget || activeScanId.current || startPendingRef.current) return;
+    if (activeScanId.current || startPendingRef.current) return;
     const id = crypto.randomUUID();
     activeScanId.current = id;
     terminalScanId.current = null;
@@ -172,7 +172,9 @@ function App() {
     setSummary(null);
     setProgress(null);
     try {
-      const result = await invoke<Summary>("scan_path", { scanId: id, targetId: selectedTarget.id });
+      const result = selectedTarget
+        ? await invoke<Summary>("scan_path", { scanId: id, targetId: selectedTarget.id })
+        : await invoke<Summary>("quick_scan", { scanId: id });
       if (activeScanId.current === id) setSummary(result);
     } catch (reason) {
       if (activeScanId.current === id) setError(String(reason));
@@ -240,11 +242,11 @@ function App() {
       ? "Stop"
       : startPending
         ? "Starting…"
-        : "Start scan";
+        : selectedTarget ? "Scan" : "Quick scan";
   const scanButtonDisabled = scanState === "cancelling"
     || cancelPending
     || startPending
-    || (scanState === "idle" && (!!scanId || !selectedTarget || !scanEventsReady));
+    || (scanState === "idle" && (!!scanId || !scanEventsReady));
 
   function toggleTheme() {
     document.documentElement.dataset.theme = nextTheme;
@@ -301,6 +303,9 @@ function App() {
               <div id="target-options" className="target-options" role="group" aria-label="Target type">
                 <button onClick={() => { setTargetMenuOpen(false); void select("file"); }}>File</button>
                 <button onClick={() => { setTargetMenuOpen(false); void select("folder"); }}>Folder</button>
+                <button onClick={() => {
+                  setTargetMenuOpen(false); setSelectedTarget(null); setSummary(null); setProgress(null); setError("");
+                }}>Quick scan</button>
               </div>
             )}
           </div>
@@ -311,12 +316,12 @@ function App() {
             {scanClean ? "All Good" : scanButtonLabel}
           </button>
         </div>
-        {!scanId && !summary && <p className="selected-path">{selectedTarget?.path || "No file or folder selected"}</p>}
+        {!scanId && !summary && <p className="selected-path">{selectedTarget?.path || "Windows core files + drivers"}</p>}
 
       {scanId && (
         <section className="scan-feedback" aria-live="polite">
           <h2>Scanning</h2>
-          <p className="selected-path">{latest?.path || selectedTarget?.path}</p>
+          <p className="selected-path">{latest?.path || selectedTarget?.path || "Windows core files + drivers"}</p>
         </section>
       )}
 

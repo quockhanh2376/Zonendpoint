@@ -12,13 +12,18 @@ const artifacts = path.join(run, 'artifacts'); mkdirSync(artifacts);
 const fixtures = path.join(run, 'fixtures'); mkdirSync(fixtures);
 const fixture = path.join(fixtures, 'benign.txt');
 writeFileSync(fixture, 'Zonendpoint benign fixture');
+const systemRoot=path.join(run,'system');mkdirSync(systemRoot);mkdirSync(path.join(systemRoot,'drivers'));
+const coreNames=['ntoskrnl.exe','ntdll.dll','kernel32.dll','kernelbase.dll','ci.dll','smss.exe','csrss.exe','wininit.exe','services.exe','lsass.exe','svchost.exe','winlogon.exe','winload.efi'];
+for(const name of coreNames)writeFileSync(path.join(systemRoot,name),`Benign system fixture ${name}`);
+writeFileSync(path.join(systemRoot,'drivers','fixture.sys'),'Benign driver fixture');
 const real = process.argv.includes('--real');
 const results = [];
 let browser, driver, server, mode = 'clean';
 let mixedResponses = 0;
 const sockets = new Set();
 const env = { ...process.env, LOCALAPPDATA: path.join(run, 'appdata'),
-  WEBVIEW2_USER_DATA_FOLDER: path.join(run, 'webview'), ZONENDPOINT_TEST_FIXTURE: fixtures };
+  WEBVIEW2_USER_DATA_FOLDER: path.join(run, 'webview'), ZONENDPOINT_TEST_FIXTURE: fixtures,
+  ZONENDPOINT_TEST_SYSTEM_ROOT:systemRoot };
 const target = process.env.CARGO_TARGET_DIR || path.join(root, 'src-tauri', 'target');
 const binary = path.join(target, 'debug', 'zonendpoint.exe');
 const nativeDriver = process.env.EDGE_DRIVER || 'msedgedriver.exe';
@@ -75,8 +80,40 @@ try {
   await check('native shell and English controls',async()=>{
     assert.equal(await browser.$('h1').getText(),'Scan files and folders');
     assert.equal(await browser.execute(()=>document.documentElement.dataset.theme),'light');
-    assert.equal(await (await button('Start scan')).isEnabled(),false);
+    await (await button('Start scan')).waitForEnabled();
+    assert.equal(await (await button('Start scan')).getText(),'Quick scan');
     assert.equal((await browser.$$('button=Cancel scan')).length,0);
+  });
+  await check('Quick scan runs approved core and driver fixtures',async()=>{
+    await browser.$('button.primary').click();
+    await browser.waitUntil(async()=>await browser.$('button.primary').getText()==='All Good',{timeout:20000});
+    assert.equal((await browser.$$('.results li')).length,14);
+    assert.match(await browser.$('main').getText(),/Processed 14 items · clean 14/);
+    assert.match(await browser.$('.results').getText(),/fixture\.sys/);
+  });
+  if(!real) await check('Quick scan missing core file never becomes All Good',async()=>{
+    rmSync(path.join(systemRoot,'ci.dll'));
+    await browser.$('button.primary').click();
+    await browser.waitUntil(async()=>await browser.$('h2').getText()==='Scan incomplete',{timeout:20000});
+    assert.equal(await browser.$('.primary.scan-clean').isExisting(),false);
+    assert.match(await browser.$('.results').getText(),/ci\.dll/);
+    writeFileSync(path.join(systemRoot,'ci.dll'),'Restored harmless ci fixture');
+  });
+  if(!real) await check('Quick scan preserves threat outcome',async()=>{
+    mode='infected';writeFileSync(path.join(systemRoot,'ci.dll'),'changed threat simulation '+Date.now());
+    await browser.$('button.primary').click();
+    await browser.waitUntil(async()=>await browser.$('h2').getText()==='Scan complete',{timeout:20000});
+    assert.match(await browser.$('.results').getText(),/Threat detected/);
+    assert.equal(await browser.$('.primary.scan-clean').isExisting(),false);
+    mode='clean';
+  });
+  if(!real) await check('Quick scan Stop completes before another mode can start',async()=>{
+    mode='delay';writeFileSync(path.join(systemRoot,'ntoskrnl.exe'),'changed cancellation fixture '+Date.now());
+    await browser.$('button.primary').click();await (await button('Stop')).waitForExist();
+    await (await button('Stop')).click();
+    await browser.waitUntil(async()=>await browser.$('h2').getText()==='Scan cancelled',{timeout:10000});
+    assert.equal(await browser.$('.primary.scan-clean').isExisting(),false);
+    mode='clean';
   });
   await check('theme and logo persistence after native relaunch',async()=>{
     await browser.$('.theme-toggle').click();
@@ -89,6 +126,12 @@ try {
     assert.match(await browser.$('.brand-logo').getAttribute('src'),/logo-light/);
   });
   await check(real?'real ClamAV benign scan via native UI and Rust IPC':'mock successful native scan',async()=>{await scan('Scan complete');assert.match(await browser.$('.results').getText(),/Clean/);});
+  await check('Manual selection uses Scan; menu returns to Quick scan',async()=>{
+    await select();assert.equal(await browser.$('button.primary').getText(),'Scan');
+    await browser.$('button=Select target ▾').click();await (await browser.$('#target-options').$('button=Quick scan')).click();
+    assert.equal(await browser.$('button.primary').getText(),'Quick scan');
+    assert.equal(await browser.$('h2').isExisting(),false);
+  });
   await check('folder target through debug injection',async()=>{writeFileSync(fixture,'folder uncached '+Date.now()+' '+Math.random());await select('folder');await (await button('Start scan')).click();await browser.waitUntil(async()=>await browser.$('h2').getText()==='Scan complete',{timeout:20000});assert.match(await browser.$('.results').getText(),/Clean in this scan/);assert.match(await browser.$('.result-path').getText(),/benign\.txt/);assert.match(await browser.$('main').getText(),/Processed 1 items · clean 1/);});
   if(!real){
     await check('threat details remain visible beyond50 results',async()=>{

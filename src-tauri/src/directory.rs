@@ -106,31 +106,45 @@ pub async fn scan_directory(
     scan: ScanFn,
     progress: ProgressFn,
 ) -> ScanSummary {
+    scan_roots(vec![root], cancel, scan, progress).await
+}
+
+pub async fn scan_roots(
+    roots: Vec<PathBuf>,
+    cancel: watch::Receiver<bool>,
+    scan: ScanFn,
+    progress: ProgressFn,
+) -> ScanSummary {
+    let root = roots.first().cloned().unwrap_or_default();
     let (tx, mut rx) = mpsc::channel(QUEUE_CAPACITY);
     let cancelled = Arc::new(AtomicBool::new(false));
     let scan_cancel = cancel.clone();
     let producer_cancelled = cancelled.clone();
-    let producer_root = root.clone();
     let producer = tokio::task::spawn_blocking(move || {
-        for entry in walkdir::WalkDir::new(&producer_root)
-            .follow_links(false)
-            .max_open(16)
-        {
-            if producer_cancelled.load(Ordering::Relaxed) {
-                break;
-            }
-            let item = match entry {
-                Ok(entry) if entry.file_type().is_dir() => continue,
-                Ok(entry) if entry.file_type().is_symlink() => WalkItem::Skip(entry.into_path()),
-                Ok(entry) if entry.file_type().is_file() => WalkItem::File(entry.into_path()),
-                Ok(entry) => WalkItem::Skip(entry.into_path()),
-                Err(error) => WalkItem::Error(
-                    error.path().unwrap_or(&producer_root).to_path_buf(),
-                    error.to_string(),
-                ),
-            };
-            if tx.blocking_send(item).is_err() {
-                break;
+        for producer_root in roots {
+            for entry in walkdir::WalkDir::new(&producer_root)
+                .follow_links(false)
+                .follow_root_links(false)
+                .max_open(16)
+            {
+                if producer_cancelled.load(Ordering::Relaxed) {
+                    break;
+                }
+                let item = match entry {
+                    Ok(entry) if entry.file_type().is_dir() => continue,
+                    Ok(entry) if entry.file_type().is_symlink() => {
+                        WalkItem::Skip(entry.into_path())
+                    }
+                    Ok(entry) if entry.file_type().is_file() => WalkItem::File(entry.into_path()),
+                    Ok(entry) => WalkItem::Skip(entry.into_path()),
+                    Err(error) => WalkItem::Error(
+                        error.path().unwrap_or(&producer_root).to_path_buf(),
+                        error.to_string(),
+                    ),
+                };
+                if tx.blocking_send(item).is_err() {
+                    break;
+                }
             }
         }
     });
@@ -223,6 +237,100 @@ mod tests {
             std::env::temp_dir().join(format!("zonendpoint-folder-{}-{nonce}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn root_junction_is_skipped_not_followed() {
+        use std::os::windows::process::CommandExt;
+        let root = test_dir();
+        let target = root.join("target");
+        let link = root.join("junction");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("private.txt"), b"do not scan").unwrap();
+        let output = std::process::Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target)
+            .creation_flags(0x08000000)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let (_tx, cancel) = watch::channel(false);
+        let scan: ScanFn = Box::new(|_, _| panic!("junction target must not be scanned"));
+        let summary = scan_directory(link.clone(), cancel, scan, Box::new(|_, _| {})).await;
+        assert_eq!(summary.skipped, 1);
+        assert_eq!(summary.clean, 0);
+        assert!(!summary.complete);
+        std::fs::remove_dir(link).unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn multi_root_cancel_preserves_already_detected_threat() {
+        let root = test_dir();
+        let threat = root.join("threat.bin");
+        let later = root.join("later.bin");
+        std::fs::write(&threat, b"harmless mock").unwrap();
+        std::fs::write(&later, b"later").unwrap();
+        let (tx, cancel) = watch::channel(false);
+        let scan: ScanFn = Box::new(move |path, _| {
+            let tx = tx.clone();
+            Box::pin(async move {
+                let _ = tx.send(true);
+                ScanResult::new(
+                    path,
+                    ScanStatus::Infected,
+                    None,
+                    Some("mock positive evidence".into()),
+                    1,
+                )
+            })
+        });
+        let summary = scan_roots(vec![threat, later], cancel, scan, Box::new(|_, _| {})).await;
+        assert!(summary.cancelled);
+        assert!(!summary.complete);
+        assert_eq!(summary.infected, 1);
+        assert_eq!(summary.results[0].status, ScanStatus::Infected);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn multiple_roots_keep_missing_file_errors_and_driver_results() {
+        let root = test_dir();
+        std::fs::create_dir(root.join("drivers")).unwrap();
+        std::fs::write(root.join("core.exe"), b"core").unwrap();
+        std::fs::write(root.join("drivers").join("fixture.sys"), b"driver").unwrap();
+        let (_tx, cancel) = watch::channel(false);
+        let scan: ScanFn = Box::new(|path, _| {
+            Box::pin(async move { ScanResult::new(path, ScanStatus::Clean, None, None, 1) })
+        });
+        let summary = scan_roots(
+            vec![
+                root.join("core.exe"),
+                root.join("missing.dll"),
+                root.join("drivers"),
+            ],
+            cancel,
+            scan,
+            Box::new(|_, _| {}),
+        )
+        .await;
+        assert_eq!(summary.scanned, 3);
+        assert_eq!(summary.clean, 2);
+        assert_eq!(summary.errors, 1);
+        assert!(!summary.complete);
+        assert!(
+            summary
+                .results
+                .iter()
+                .any(|r| r.path.ends_with("missing.dll") && r.status == ScanStatus::Error)
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test]

@@ -1,7 +1,11 @@
 mod cache;
 mod directory;
+mod quick;
 pub mod scanner;
 mod watcher;
+
+#[cfg(all(target_os = "windows", not(target_arch = "x86_64")))]
+compile_error!("Zonendpoint supports Windows x64 builds only");
 
 #[cfg(all(feature = "native-ui-tests", not(debug_assertions)))]
 compile_error!("native-ui-tests must never be enabled in release builds");
@@ -203,10 +207,34 @@ async fn scan_path(
     scan_id: String,
     target_id: String,
 ) -> Result<ScanSummary, String> {
+    let target = manager.selected_path(&target_id)?;
+    run_scan(app, manager, scan_id, vec![target]).await
+}
+
+#[tauri::command]
+async fn quick_scan(
+    app: tauri::AppHandle,
+    manager: tauri::State<'_, ScanManager>,
+    scan_id: String,
+) -> Result<ScanSummary, String> {
+    let root = quick::system_root()?;
+    run_scan(app, manager, scan_id, quick::targets_for_root(&root)).await
+}
+
+async fn run_scan(
+    app: tauri::AppHandle,
+    manager: tauri::State<'_, ScanManager>,
+    scan_id: String,
+    targets: Vec<PathBuf>,
+) -> Result<ScanSummary, String> {
     if scan_id.is_empty() || scan_id.len() > 80 {
         return Err("invalid scan identifier".into());
     }
-    let target = manager.selected_path(&target_id)?;
+    let target = targets
+        .first()
+        .cloned()
+        .ok_or("scan target list is empty")?;
+    let multiple = targets.len() > 1;
     let cancel_rx = manager.begin_scan(scan_id.clone())?;
     let _ = app.emit(
         "scan-state",
@@ -243,6 +271,9 @@ async fn scan_path(
             );
         });
 
+        if multiple {
+            return Ok(directory::scan_roots(targets, cancel_rx.clone(), scan, progress).await);
+        }
         match tokio::fs::symlink_metadata(&target).await {
             Ok(metadata) if metadata.is_dir() => {
                 Ok(directory::scan_directory(target, cancel_rx.clone(), scan, progress).await)
@@ -405,6 +436,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             select_scan_path,
             scan_path,
+            quick_scan,
             cancel_scan,
             cache_stats,
             set_guard,
