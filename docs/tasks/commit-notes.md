@@ -27,3 +27,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-07 | vic/ui-simplify | 3464ab8 | YES | docs: handoff release candidate 79f0f59 to qeen and update project status |
 | 2026-11-07 | main | ed1088c | YES | main fast-forwarded 2db42a8 → ed1088c (Zon approved, Loki pushed) |
 | 2026-11-07 | vic/ui-compact | 7dcf4e2 | YES | docs(tasks): record main fast-forward and draft PR closure note in project-status |
+| 2026-11-07 | vic/ui-compact | 321d32b | YES | feat(ui): compact layout with status dot next to logo and theme toggle inside scan card |
