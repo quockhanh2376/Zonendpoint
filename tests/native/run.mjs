@@ -22,6 +22,7 @@ const real = process.argv.includes('--real');
 const results = [];
 let browser, driver, server, serverPort, mode = 'clean';
 let mixedResponses = 0;
+let customThreatName = null;
 const sockets = new Set();
 const log = [];
 const env = {
@@ -113,8 +114,9 @@ function startMockServer(port = 0) {
         data = data.subarray(4 + n);
         if (n === 0) {
           if (mode === 'delay') return;
+          const sig = customThreatName || 'Native-Mock-Signature';
           s.end((mode === 'infected' || (mode === 'mixed' && mixedResponses++ === 0))
-            ? 'stream: Native-Mock-Signature FOUND\0'
+            ? `stream: ${sig} FOUND\0`
             : mode === 'malformed'
               ? 'garbage OK\0'
               : mode === 'error'
@@ -252,6 +254,38 @@ try {
     }
     assert.match(await browser.$('.results').getText(), /Native-Mock-Signature/);
     mode = 'clean';
+    writeFileSync(path.join(systemRoot, 'ci.dll'), 'Restored harmless ci fixture');
+  });
+
+  if (!real) await check('150+ char threat name produces no horizontal scroll in Light and Dark', async () => {
+    mode = 'infected';
+    customThreatName = 'Win.Test.LongName.Trojan.Dropper.Generic.VeryLongSignatureStringWithNoSpacesToTestTextWrappingAndLayoutIntegrityUnderExtremeLengthConditions.Variant1234567890.End';
+    assert.ok(customThreatName.length >= 150, 'Threat name must be at least 150 characters');
+    writeFileSync(path.join(systemRoot, 'ci.dll'), 'changed threat simulation ' + Date.now());
+    await browser.$('button.primary').click();
+    await browser.waitUntil(async () => await browser.$('h2').getText() === 'Scan complete', { timeout: 20000 });
+    await browser.$('.results').waitForExist({ timeout: 5000 });
+    assert.match(await browser.$('.results').getText(), /Win\.Test\.LongName/);
+
+    const checkNoHorizontalScroll = async () => {
+      return await browser.execute(() => {
+        const results = document.querySelector('.results');
+        return results ? results.scrollWidth <= results.clientWidth : false;
+      });
+    };
+
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'light');
+    assert.equal(await checkNoHorizontalScroll(), true, 'Results list must have scrollWidth <= clientWidth in Light theme');
+
+    await browser.$('.theme-toggle').click();
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'dark');
+    assert.equal(await checkNoHorizontalScroll(), true, 'Results list must have scrollWidth <= clientWidth in Dark theme');
+
+    await browser.$('.theme-toggle').click();
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'light');
+
+    mode = 'clean';
+    customThreatName = null;
     writeFileSync(path.join(systemRoot, 'ci.dll'), 'Restored harmless ci fixture');
   });
 
