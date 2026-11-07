@@ -40,3 +40,6 @@
 
 - Final NSIS01e7449 artifact94336243...DDDD14E6 retested: setup/uninstaller icon match, install/native real scan/shortcut/theme/offline cache/repair/uninstall PASS. Test install removed; original user cache unchanged. Unsigned0.1.0 only; documented EICAR Defender interference and unrun release gates retained.
 
+- Created Vic/Qeen Quick scan/x64 task brief from Zon request; waiting only for essential-system target scope choice before implementation.
+
+- Quick scan/x64 implemented c7f5fd9 after core+drivers approval. Qeen isolated Rust25/mock15/real-fixtures6 PASS; actual Windows588 clean+1 protected-directory error correctly incomplete/no All Good. New installer/manual picker rerun not performed; draft PR only.

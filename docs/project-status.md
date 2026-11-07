@@ -2,12 +2,12 @@
 
 ## Active checkout/snapshot
 - Implementation:E:\Zonendpoint-restored\Zonendpoint-vic, branch vic/mvp-first-scan.
-- Latest product/config code:01e744974b75332592aa5621bbcfc0e12da8b477. Core scan QA snapshot8e8204a;01e7449 only brands NSIS setup/uninstaller icons.
+- Latest product code:c7f5fd98a9f1f81a47fae7571b9be3d0e135f884 (Quick scan/x64). Older NSIS packaging snapshot01e7449 does not contain this feature.
 - Draft PR:https://github.com/quockhanh2376/Zonendpoint/pull/1 . No main merge or public release performed.
 - Original source checkout E:\Zonendpoint/main and user changes remain preserved. Source architecture/licensing specifications remain there; no duplicate specs created.
 
 ## Current scope/UI
-See [v1.0.0-scope.md](v1.0.0-scope.md). Manual file/folder scan, English, persisted Light/Dark, Guard OFF. SecConnect/licensing/quarantine deferred. Compact800x240 UI,168x162 logo and13px slogan; Select target File/Folder; active path; all-CLEAN green/check All Good; bounded result window growth and backend-bounded result list.
+See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Windows core files+drivers) or picked file/folder Scan; Windows x64 app builds only. English, persisted Light/Dark, Guard OFF. SecConnect/licensing/quarantine deferred. Compact800x240 UI,168x162 logo and13px slogan; Select target File/Folder/Quick scan; active path; all-CLEAN green/check All Good; bounded result window growth and backend-bounded result list.
 
 ## Verification/evidence
 - Core8e8204a:Rust20, extended native mock11 (incl60s timeout/51-file threat visibility), real lab6 PASS; fmt/clippy PASS, npm audit0. Release test-hook guard verified.
@@ -21,3 +21,6 @@ PASS is scoped to observed core/native and unsigned NSIS current-user tests, not
 MSI, signed1.0 release, different-version upgrade, multi-user install, resource benchmark and full real-network reset/cancel matrix NOT RUN. PR stays draft pending owner's merge decision and acceptance of documented limits. No further product feature is implied by these tests.
 
 Lab:admzon@100.96.250.245; clamd loopback3310; normal Windows test tunnel127.0.0.1:13310. All testing preserved Defender/Sophos policies; no exclusions, public uploads or Internet-exposed clamd.
+
+## Next requested feature — Quick scan/x64
+Zon approved13 core files+drivers. Vic implementation committed c7f5fd9; independent Qeen Rust25/native mock15 PASS. Real-engine fixtures6 PASS; actual Windows589 outcomes (588 CLEAN+1 access-denied ERROR), correctly Scan incomplete/no All Good; see [task](tasks/quick-scan-x64.md) and [QA report](qa/quick-scan-c7f5fd9.md). Default Quick scan; selected target Scan; Windows x64 packages only. Previous01e7449 installer is unchanged and must not be used as new-feature evidence.
