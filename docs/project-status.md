@@ -20,3 +20,8 @@
 Qeen runtime acceptance PENDING. Real Windows picker automation, real EICAR, real-engine network/timeout/cancel matrix and installer/shortcut remain NOT RUN. Do not claim production readiness. Native harness injects fixtures only with explicit debug feature; release guard still has no executed release-build test.
 
 Lab: admzon@100.96.250.245; clamd loopback 3310; Windows SSH tunnel 127.0.0.1:13310. Recheck tunnel before running real mode. Setup and two source architecture/licensing specifications remain in coordinator/source docs; do not duplicate or replace them.
+
+UI adjustment requested: logo and its grid column reduced 15% from220 to187px in both themes. Separate slogan remains13px/600, theme colors and right alignment preserved. Frontend build PASS; native regression not rerun for CSS-only size change.
+
+
+Per Zon, logo narrowed another10% to168px while keeping162px height for taller/slimmer proportions. Slogan remains13px and right-aligned. Frontend build PASS; intentional aspect adjustment supersedes prior preserve-ratio preference for this logo presentation.

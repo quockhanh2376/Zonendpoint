@@ -20,3 +20,7 @@
 
 - Chốt approved UI at d694f4f. Independent static review findings fixed: offscreen outcomes and folder cache false-pass. Regression red reproduced; updated native mock9/9 and real benign4/4 PASS. Runtime Qeen acceptance pending.
 
+- Reduced logo15% both themes; slogan font unchanged. Frontend build PASS.
+
+- Narrowed logo another10%, retaining height and slogan font; frontend build PASS.
+
