@@ -17,3 +17,5 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-07 | vic/ui-simplify | 0a55516 | YES | fix(scanner): require bounded EOF drain after clamd response frame (P0-01) |
 | 2026-11-07 | vic/ui-simplify | 34d8dcb | YES | docs: handoff p0-01 fix to qeen and track 0a55516 in commit-notes |
 | 2026-11-07 | vic/ui-simplify | bdd4356 | YES | docs: update project status and daily log for p0-01 fix |
+| 2026-11-07 | vic/ui-simplify | bbdf68a | YES | docs(qa): import qeen q-4 ui-simplify verification report and handoff for 0a55516 |
+| 2026-11-07 | vic/ui-simplify | 6294506 | YES | fix(quick): exclude %SystemRoot%\System32\drivers\DriverData from Quick Scan (Q-4-01) |
