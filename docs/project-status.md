@@ -2,12 +2,12 @@
 
 ## Checkout and snapshot
 - Active implementation: E:\Zonendpoint-restored\Zonendpoint-vic, vic/mvp-first-scan.
-- Current code: e5ff7eedfdb4c2186c0568530f8fe04c18f2d6ab (All Good and bounded result window growth; native mock9/9 verified).
+- Current code: 8e8204aa10f478362263b60b8e46226367e0052f (Qeen fixes; see latest QA section).
 - Coordinator/source docs: E:\Zonendpoint\docs. Historical restored handoff: 2487664; historical QA code: e3ed872.
 - Product scope: [v1.0.0-scope.md](v1.0.0-scope.md). Manual scan, English, persisted Light/Dark, Guard OFF; quarantine/licensing deferred.
 
 ## Current UI
-800x240 default window; 220px logo and separate 13px/600 right-aligned slogan (orange Light, white Dark). Scan heading and feedback live inside right-hand panel. One Select target button offers File/Folder. Compact controls; static MVP/network copy removed as approved. During scan: Scanning + progress path. Final outcome and per-file results retained; longer content scrolls. Theme persists.
+800x240 default window; 168x162px logo and separate 13px/600 right-aligned slogan (orange Light, white Dark). Scan heading and feedback live inside right-hand panel. One Select target button offers File/Folder. Compact controls; static MVP/network copy removed as approved. During scan: Scanning + progress path. Final outcome and per-file results retained; longer content scrolls. Theme persists.
 
 ## Verification
 - Current native mock suite: 9/9 PASS, including error/malformed/offline, cancellation/rescan and viewport-visible outcome heading.
@@ -33,3 +33,6 @@ Clean completion UI: Start scan turns green with check SVG only for nonempty com
 
 
 Clean completion button now reads All Good with green/check; clicking still starts another scan. Other lifecycle labels unchanged. Native build + mock suite9/9 PASS, including explicit All Good assertion; log E:\Zonendpoint-tools\all-good-tests.log.
+
+## Draft PR and Qeen validation — 2026-11-07
+PR#1 opened as draft. Code8e8204aa10f478362263b60b8e46226367e0052f fixes Qeen's two P2 findings; see qa/report-8e8204a.md. Qeen Rust20/20, mock11/11, real-lab6/6 PASS; release hook guard verified. Real file picker Unicode selection PASS. Full acceptance BLOCKED by actual folder picker not verified and exact native EICAR AV interference; installer/real network matrix NOT RUN. No merge. Historical no-push notes above are superseded by this PR state.

@@ -1,0 +1,31 @@
+{
+  "real": true,
+  "targetInjection": "debug feature; real picker NOT RUN",
+  "results": [
+    {
+      "name": "native shell and English controls",
+      "status": "PASS"
+    },
+    {
+      "name": "theme and logo persistence after native relaunch",
+      "status": "PASS"
+    },
+    {
+      "name": "real ClamAV benign scan via native UI and Rust IPC",
+      "status": "PASS"
+    },
+    {
+      "name": "folder target through debug injection",
+      "status": "PASS"
+    },
+    {
+      "name": "real daemon stream limit never becomes CLEAN",
+      "status": "PASS"
+    },
+    {
+      "name": "real EICAR detection (endpoint AV may interfere)",
+      "status": "FAIL",
+      "error": "AssertionError [ERR_ASSERTION]: EICAR detection not observed; inspect Defender interference before assigning FAIL"
+    }
+  ]
+}

@@ -32,3 +32,5 @@
 
 - All Good/resize code committed e5ff7ee; pre-sync native mock9/9 PASS. Source recovery/ui-approved synchronized; no push/merge.
 
+- Pushed branch and opened draft PR#1; Qeen found/fixed twoP2 issues at8e8204a. QA Rust20/mock11/real-lab6 PASS; file picker Unicode PASS. Exact EICAR blocked by active AV; folder picker unverified; keep draft. Lab-only custom signature removed and cleanup verified.
+
