@@ -32,3 +32,5 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-07 | vic/ui-compact | 63493b1 | YES | docs(tasks): track handoff commit in commit-notes |
 | 2026-11-07 | vic/ui-compact | 7a2b89a | YES | docs(tasks): track final commit in commit-notes |
 | 2026-11-08 | vic/ui-compact | 597424b | YES | docs(handoff): fix full SHA in ui-compact handoff doc (Q-7) |
+| 2026-11-08 | vic/cache-reason | d91cc29 | YES | fix(cache): store threat name for infected entries and preserve on cache hit (P1-01) |
+| 2026-11-08 | vic/cache-reason | f6ed114 | YES | docs: handoff cache-reason P1-01 fix to qeen and update project status |

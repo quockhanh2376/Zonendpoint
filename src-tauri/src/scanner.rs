@@ -535,13 +535,12 @@ pub async fn scan_file_with_engine_timeout(
                     size,
                 ));
             }
-            let mut result = ScanResult::new(
-                &path,
-                cached.status,
-                Some(hex::encode(hash)),
-                Some("verified content cache hit".into()),
-                size,
-            );
+            let reason = match cached.status {
+                ScanStatus::Infected => cached.threat_name,
+                _ => Some("verified content cache hit".into()),
+            };
+            let mut result =
+                ScanResult::new(&path, cached.status, Some(hex::encode(hash)), reason, size);
             result.engine_version = Some(engine_version.clone());
             return Ok(result);
         }
@@ -607,6 +606,7 @@ pub async fn scan_file_with_engine_timeout(
                 &engine_version,
                 POLICY_VERSION,
                 outcome.status,
+                result.reason.as_deref(),
                 now,
             ) {
                 result.reason = Some(format!(
@@ -835,6 +835,7 @@ mod tests {
             "ClamAV test/signature-1",
             POLICY_VERSION,
             ScanStatus::Clean,
+            None,
             100,
         )
         .unwrap();
@@ -880,6 +881,7 @@ mod tests {
             "ClamAV 1.5.4/28175/Sat Nov 7 2026",
             POLICY_VERSION,
             ScanStatus::Clean,
+            None,
             9999999999,
         )
         .unwrap();
@@ -969,6 +971,7 @@ mod tests {
             "ClamAV 1.5.4/28175/Sat Nov 7 2026",
             POLICY_VERSION,
             ScanStatus::Clean,
+            None,
             9999999999,
         )
         .unwrap();
