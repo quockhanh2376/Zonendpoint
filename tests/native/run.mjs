@@ -20,7 +20,7 @@ for (const name of coreNames) writeFileSync(path.join(systemRoot, name), `Benign
 writeFileSync(path.join(systemRoot, 'drivers', 'fixture.sys'), 'Benign driver fixture');
 const real = process.argv.includes('--real');
 const results = [];
-let browser, driver, server, serverPort, mode = 'clean';
+let browser, driver, server, serverPort, mode = 'clean', versionDelayMs = 0;
 let mixedResponses = 0;
 let customThreatName = null;
 const sockets = new Set();
@@ -99,6 +99,12 @@ function startMockServer(port = 0) {
         data = data.subarray(end + 1);
         command = true;
         if (cmd === 'zVERSION') {
+          if (versionDelayMs > 0) {
+            setTimeout(() => {
+              try { s.end('ClamAV native-mock/signature-1\0'); } catch {}
+            }, versionDelayMs);
+            return;
+          }
           s.end('ClamAV native-mock/signature-1\0');
           return;
         }
@@ -207,6 +213,8 @@ try {
           statusInLeftColumn: s.right <= c.left + 5,
           statusNextToLogo: s.left >= l.left,
           statusAlignedWithLogo: s.top >= l.top - 10 && s.bottom <= l.bottom + 10,
+          statusAlignedWithCardTop: Math.abs(s.top - c.top) <= 2,
+          statusTopDiff: Math.abs(s.top - c.top),
           toggleInsideCard: t.left >= c.left && t.right <= c.right && t.top >= c.top && t.bottom <= c.bottom,
           toggleSameRowAsTitle: Math.abs((t.top + t.bottom) / 2 - (h.top + h.bottom) / 2) < 20,
           toggleInTopRightOfCard: t.right > h.right,
@@ -221,6 +229,7 @@ try {
       assert.ok(info.statusInLeftColumn, `Status dot must be in left column (left of card) in ${themeName}`);
       assert.ok(info.statusNextToLogo, `Status dot must sit next to logo in ${themeName}`);
       assert.ok(info.statusAlignedWithLogo, `Status dot must be vertically aligned with logo in ${themeName}`);
+      assert.ok(info.statusAlignedWithCardTop, `Status dot top must align with card top in ${themeName} (diff: ${info.statusTopDiff}px)`);
       assert.ok(info.toggleInsideCard, `Theme toggle must be inside scan card in ${themeName}`);
       assert.ok(info.toggleSameRowAsTitle, `Theme toggle must be in same row as card title in ${themeName}`);
       assert.ok(info.toggleInTopRightOfCard, `Theme toggle must be in top-right of card in ${themeName}`);
@@ -367,16 +376,60 @@ try {
     mode = 'clean';
   });
 
-  if (!real) await check('status icon green→red→green', async () => {
+  if (!real) await check('status icon connected→checking→disconnected in Light and Dark', async () => {
+    const statusIconArtifactsDir = 'E:\\Zonendpoint-tools\\artifacts\\status-icon';
+    mkdirSync(statusIconArtifactsDir, { recursive: true });
     const statusBtn = await browser.$('.server-status');
     await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'connected', { timeout: 10000 });
     assert.equal(await statusBtn.getAttribute('title'), 'Connected to ZonEndpoint server');
+    assert.equal(await browser.$('.server-status svg.status-icon-connected').isExisting(), true, 'Connected checkmark SVG must exist');
 
+    // 1. Connected screenshots (light & dark)
+    await browser.saveScreenshot(path.join(statusIconArtifactsDir, 'connected-light.png'));
+    await browser.$('.theme-toggle').click();
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'dark');
+    assert.equal(await browser.$('.server-status svg.status-icon-connected').isExisting(), true, 'Connected checkmark SVG must exist in dark');
+    await browser.saveScreenshot(path.join(statusIconArtifactsDir, 'connected-dark.png'));
+    await browser.$('.theme-toggle').click();
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'light');
+
+    // 2. Checking state: delay version response for light screenshot
+    versionDelayMs = 2000;
+    await statusBtn.click();
+    await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'checking', { timeout: 3000 });
+    assert.equal(await statusBtn.getAttribute('title'), 'Checking connection…');
+    assert.equal(await browser.$('.server-status svg.server-status-spinner').isExisting(), true, 'Checking spinner SVG must exist in light');
+    await browser.saveScreenshot(path.join(statusIconArtifactsDir, 'checking-light.png'));
+    await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'connected', { timeout: 10000 });
+
+    // Checking state: dark theme screenshot
+    await browser.$('.theme-toggle').click();
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'dark');
+    await statusBtn.click();
+    await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'checking', { timeout: 3000 });
+    assert.equal(await browser.$('.server-status svg.server-status-spinner').isExisting(), true, 'Checking spinner SVG must exist in dark');
+    await browser.saveScreenshot(path.join(statusIconArtifactsDir, 'checking-dark.png'));
+    await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'connected', { timeout: 10000 });
+    await browser.$('.theme-toggle').click();
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'light');
+    versionDelayMs = 0;
+
+    // 3. Disconnected state: stop mock server, trigger check
     await stopMockServer();
     await statusBtn.click();
     await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'disconnected', { timeout: 10000 });
     assert.equal(await statusBtn.getAttribute('title'), 'Cannot connect to ZonEndpoint server. Check your connection.');
+    assert.equal(await browser.$('.server-status svg.status-icon-disconnected').isExisting(), true, 'Disconnected X SVG must exist in light');
+    await browser.saveScreenshot(path.join(statusIconArtifactsDir, 'disconnected-light.png'));
 
+    await browser.$('.theme-toggle').click();
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'dark');
+    assert.equal(await browser.$('.server-status svg.status-icon-disconnected').isExisting(), true, 'Disconnected X SVG must exist in dark');
+    await browser.saveScreenshot(path.join(statusIconArtifactsDir, 'disconnected-dark.png'));
+    await browser.$('.theme-toggle').click();
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'light');
+
+    // Restore mock server
     await startMockServer(serverPort);
     await statusBtn.click();
     await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'connected', { timeout: 10000 });

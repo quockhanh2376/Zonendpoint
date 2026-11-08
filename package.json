@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test:native": "node tests/native/run.mjs",
-    "build:windows": "tauri build --target x86_64-pc-windows-msvc --bundles nsis"
+    "build:windows": "tauri build --target x86_64-pc-windows-msvc --bundles nsis",
+    "test": "node tests/native/run.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
