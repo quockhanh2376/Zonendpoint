@@ -38,3 +38,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-08 | vic/integrate-ui-cache | c61128b | YES | docs: handoff integration of ui-compact and cache-reason to qeen and update project status |
 | 2026-11-08 | vic/integrate-ui-cache | 8d6e2cc | YES | docs(tasks): track integration commits in commit-notes |
 | 2026-11-08 | vic/status-icon | 87992b0 | YES | feat(ui): status icon and top-alignment for server status button (V-16) |
+| 2026-11-08 | vic/status-icon | 6838d8b | YES | docs: handoff status-icon V-16 to qeen and update project status |
