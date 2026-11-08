@@ -80,17 +80,23 @@ function App() {
   const [serverStatus, setServerStatus] = useState<ServerStatus>("checking");
   const serverStatusRef = useRef<ServerStatus>("checking");
 
-  const checkServer = async () => {
-    serverStatusRef.current = "checking";
-    setServerStatus("checking");
+  const checkServer = async (manual = false) => {
+    if (manual) {
+      serverStatusRef.current = "checking";
+      setServerStatus("checking");
+    }
     try {
       await invoke<string>("check_server_status");
-      serverStatusRef.current = "connected";
-      setServerStatus("connected");
+      if (serverStatusRef.current !== "connected") {
+        serverStatusRef.current = "connected";
+        setServerStatus("connected");
+      }
       return true;
     } catch {
-      serverStatusRef.current = "disconnected";
-      setServerStatus("disconnected");
+      if (serverStatusRef.current !== "disconnected") {
+        serverStatusRef.current = "disconnected";
+        setServerStatus("disconnected");
+      }
       return false;
     }
   };
@@ -335,7 +341,7 @@ function App() {
               data-status={serverStatus}
               title={serverTooltip}
               aria-label={serverTooltip}
-              onClick={() => void checkServer()}
+              onClick={() => void checkServer(true)}
               disabled={serverStatus === "checking"}
             >
               {serverStatus === "connected" && (

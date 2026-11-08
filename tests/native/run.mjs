@@ -436,6 +436,45 @@ try {
     assert.equal(await statusBtn.getAttribute('title'), 'Connected to ZonEndpoint server');
   });
 
+  if (!real) await check('automatic preflight and background check preserves icon without flashing checking (Q-14)', async () => {
+    const statusBtn = await browser.$('.server-status');
+    await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'connected', { timeout: 10000 });
+
+    // Branch 2: automatic checkServer(manual=false) during startScan preflight
+    versionDelayMs = 1500;
+    const scanBtn = await browser.$('button.primary');
+    await scanBtn.click();
+
+    // While checkServer is awaiting clamd preflight (delayed by 1.5s), status must STAY "connected" (no spinner, no "checking")
+    await browser.pause(400);
+    assert.equal(await statusBtn.getAttribute('data-status'), 'connected', 'Status must remain connected during preflight');
+    assert.equal(await browser.$('.server-status svg.status-icon-connected').isExisting(), true, 'Connected checkmark must remain visible');
+    assert.equal(await browser.$('.server-status svg.server-status-spinner').isExisting(), false, 'Spinner must NOT appear during automated preflight');
+
+    // Wait for scan to complete
+    await browser.waitUntil(async () => await browser.$('.all-good-line').isExisting(), { timeout: 20000 });
+    versionDelayMs = 0;
+    assert.equal(await statusBtn.getAttribute('data-status'), 'connected');
+
+    // Test offline transition via automated check without flashing "checking":
+    await stopMockServer();
+    await scanBtn.click();
+    await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'disconnected', { timeout: 10000 });
+    assert.equal(await browser.$('.server-status svg.status-icon-disconnected').isExisting(), true);
+    assert.equal(await browser.$('.server-status svg.server-status-spinner').isExisting(), false, 'Spinner must never have flashed during offline transition');
+
+    // Restore mock server
+    await startMockServer(serverPort);
+    // Branch 1: manual click MUST show checking spinner
+    versionDelayMs = 1500;
+    await statusBtn.click();
+    await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'checking', { timeout: 3000 });
+    assert.equal(await browser.$('.server-status svg.server-status-spinner').isExisting(), true, 'Manual click MUST show checking spinner');
+    await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'connected', { timeout: 10000 });
+    assert.equal(await browser.$('.server-status svg.status-icon-connected').isExisting(), true);
+    versionDelayMs = 0;
+  });
+
   await check('theme and logo persistence after native relaunch', async () => {
     await browser.$('.theme-toggle').click();
     assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'dark');
