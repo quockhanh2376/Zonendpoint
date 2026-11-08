@@ -762,3 +762,98 @@ async fn test_preflight_without_eof_rejected() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn test_infected_cache_hit_preserves_exact_threat_name() {
+    let (root, target, cache_db) = create_temp_test_dir("infected-cache-hit-name");
+    std::fs::write(&target, b"payload with threat").unwrap();
+
+    let threat_name = "YARA.ZonQA_Benign_Marker.UNOFFICIAL";
+    let (addr, handle) =
+        spawn_mock_clamd(STANDARD_VERSION, FaultMode::Infected(threat_name.into())).await;
+    let (_tx, cancel) = watch::channel(false);
+
+    // Scan 1: Live scan from clamd daemon
+    let result1 = scan_file_with_timeout(
+        target.clone(),
+        cache_db.clone(),
+        addr,
+        cancel,
+        Arc::new(Semaphore::new(1)),
+        Duration::from_secs(2),
+    )
+    .await;
+
+    assert_eq!(result1.status, ScanStatus::Infected);
+    assert_eq!(result1.reason, Some(threat_name.into()));
+
+    // Verify cache recorded 1 infected entry
+    let stats = cache::stats(&cache_db).unwrap();
+    assert_eq!(stats.entries, 1, "Infected scan must be recorded in cache");
+
+    // Scan 2: Cache hit on the same file -> must preserve the exact threat name!
+    let (_tx2, cancel2) = watch::channel(false);
+    let result2 = scan_file_with_timeout(
+        target.clone(),
+        cache_db.clone(),
+        addr,
+        cancel2,
+        Arc::new(Semaphore::new(1)),
+        Duration::from_secs(2),
+    )
+    .await;
+
+    assert_eq!(result2.status, ScanStatus::Infected);
+    assert_eq!(
+        result2.reason,
+        Some(threat_name.into()),
+        "Cache hit on INFECTED file must return the exact threat name, not generic cache hit message"
+    );
+
+    handle.abort();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn test_clean_cache_hit_preserves_verified_content_cache_hit_message() {
+    let (root, target, cache_db) = create_temp_test_dir("clean-cache-hit-msg");
+    std::fs::write(&target, b"clean payload bytes").unwrap();
+
+    let (addr, handle) = spawn_mock_clamd(STANDARD_VERSION, FaultMode::Clean).await;
+    let (_tx, cancel) = watch::channel(false);
+
+    // Scan 1: Live scan
+    let result1 = scan_file_with_timeout(
+        target.clone(),
+        cache_db.clone(),
+        addr,
+        cancel,
+        Arc::new(Semaphore::new(1)),
+        Duration::from_secs(2),
+    )
+    .await;
+
+    assert_eq!(result1.status, ScanStatus::Clean);
+
+    // Scan 2: Cache hit -> must preserve "verified content cache hit"
+    let (_tx2, cancel2) = watch::channel(false);
+    let result2 = scan_file_with_timeout(
+        target.clone(),
+        cache_db.clone(),
+        addr,
+        cancel2,
+        Arc::new(Semaphore::new(1)),
+        Duration::from_secs(2),
+    )
+    .await;
+
+    assert_eq!(result2.status, ScanStatus::Clean);
+    assert_eq!(
+        result2.reason,
+        Some("verified content cache hit".into()),
+        "Cache hit on CLEAN file must preserve verified content cache hit message"
+    );
+
+    handle.abort();
+    let _ = std::fs::remove_dir_all(root);
+}
