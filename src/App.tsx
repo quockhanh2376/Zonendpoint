@@ -321,41 +321,44 @@ function App() {
     <main className="app-shell">
       <div className="topbar">
         <div className="brand-heading">
-          <img
-            className="brand-logo"
-            src={theme === "dark" ? "/brand/logo-dark-slogan-transparent.png" : "/brand/logo-light-slogan-transparent.png"}
-            alt="ZonEndpoint"
-          />
+          <div className="brand-identity">
+            <img
+              className="brand-logo"
+              src={theme === "dark" ? "/brand/logo-dark-slogan-transparent.png" : "/brand/logo-light-slogan-transparent.png"}
+              alt="ZonEndpoint"
+            />
+            <button
+              type="button"
+              className={`server-status status-${serverStatus}`}
+              data-status={serverStatus}
+              title={serverTooltip}
+              aria-label={serverTooltip}
+              onClick={() => void checkServer()}
+              disabled={serverStatus === "checking"}
+            >
+              <span className="server-status-dot" aria-hidden="true" />
+            </button>
+          </div>
           <p className="brand-slogan">Protect your digital life</p>
         </div>
-        <div className="header-controls">
-          <button
-            type="button"
-            className={`server-status status-${serverStatus}`}
-            data-status={serverStatus}
-            title={serverTooltip}
-            aria-label={serverTooltip}
-            onClick={() => void checkServer()}
-            disabled={serverStatus === "checking"}
-          >
-            <span className="server-status-dot" aria-hidden="true" />
-          </button>
-          <button
-            className="theme-toggle"
-            type="button"
-            title={`Switch to ${nextTheme} theme`}
-            aria-label={`Switch to ${nextTheme} theme`}
-            onClick={toggleTheme}
-          >
-            {theme === "light" ? (
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20.1 15.1A8.3 8.3 0 0 1 8.9 3.9 8.5 8.5 0 1 0 20.1 15.1Z" /></svg>
-            ) : (
-              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
-            )}
-          </button>
-        </div>
+
         <section className="panel selection-panel" aria-label="Scan selection">
-          <h1>Scan files and folders</h1>
+          <div className="panel-header">
+            <h1>Scan files and folders</h1>
+            <button
+              className="theme-toggle"
+              type="button"
+              title={`Switch to ${nextTheme} theme`}
+              aria-label={`Switch to ${nextTheme} theme`}
+              onClick={toggleTheme}
+            >
+              {theme === "light" ? (
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20.1 15.1A8.3 8.3 0 0 1 8.9 3.9 8.5 8.5 0 1 0 20.1 15.1Z" /></svg>
+              ) : (
+                <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
+              )}
+            </button>
+          </div>
           <div className="actions">
             <div className="target-picker" ref={targetPickerRef}
               onBlur={(event) => {

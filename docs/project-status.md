@@ -1,23 +1,25 @@
 # Project status — 2026-11-07
 
-Phase: current scan candidate stabilization for an **internal company pilot**. Release Candidate package staged for Qeen verification and Zon manual test. Recommended next task: Qeen independent test of RC package `79f0f59`, followed by Zon manual test of native picker/auto-return/All Good card.
+Phase: current scan candidate stabilization for an **internal company pilot**. Zon tested Release Candidate `79f0f59` manually: OK. GitHub main fast-forwarded `2db42a8` → `ed1088c` (Zon approved, Loki pushed). Task V-8 (Zon UI request: compact layout) implemented on `vic/ui-compact` (`321d32b`). Quality gates pass (51/51 Rust tests, fmt/clippy pass, npm build pass, native mock 17/17 pass). Package and screenshots staged at `E:\Zonendpoint-tools\artifacts\321d32b\`. Ready for Qeen independent verification.
 
 ## Active checkout/snapshot
-- Implementation: E:\Zonendpoint-vic-ui, branch vic/ui-simplify.
-- Latest product code: 79f0f596a8fc3a6a17d093283fedd09693c72847 (`79f0f59`): Release Candidate (RC) for Zon. Resolved finding Q-5-01 by adding `overflow-wrap: anywhere;` to `.results small` in `src/App.css` (threat name text wrapping); added native mock test verifying `scrollWidth <= clientWidth` in `.results` in both Light and Dark themes. All quality gates pass (51/51 Rust tests, fmt/clippy pass, npm build pass, native mock 15/15 pass).
+- Implementation: E:\Zonendpoint-vic-compact, branch vic/ui-compact (base ed1088c).
+- Latest product code snapshot: 321d32b8fa58890aa974bfa58882ca6c934f07a7 (`321d32b`): Task V-8 UI compact layout. Moved server status dot next to ZonEndpoint logo (left column, aligned with shield/wordmark); moved Light/Dark theme toggle into scan card header row; no floating controls in window top-right; maintained 44×44px hit targets, aria-labels, and tab focus order. All quality gates pass (51/51 Rust tests, fmt/clippy pass, npm build pass, native mock 17/17 pass).
 - Completed on branch `vic/ui-simplify`:
   1. **UI-SIMPLIFY**: Target dropdown simplified to File/Folder only (removed Quick Scan menu item); primary button dynamically toggles "Quick Scan" / "Scan"; summary-first results view ("All Good" card on clean, threats-only on infected, non-clean rows + warning banner on incomplete).
   2. **Preflight & Status Icon**: Connection preflight on `zVERSION` with friendly error copy; topbar status dot (green / red / grey) with 30s background poll.
   3. **P0-01 Security Fix**: Required bounded EOF drain after clamd response frame to prevent frame desynchronization and pipelined response attacks.
   4. **DriverData Exclusion (Q-4-01)**: Excluded `%SystemRoot%\System32\drivers\DriverData` from Quick Scan target set (canonical path resolution, case-insensitive comparison, not counted, not shown, no row) while preserving security invariants for all other access-denied paths and user Folder scans.
   5. **Q-5-01 Layout Fix**: Text wrapping for unbroken long threat names (150+ chars).
-- Artifacts: NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`3F69A4D54BFB6B71DE671FB76320DBB6BF4A3968D53DE8621304B1319483F807`) and standalone `zonendpoint.exe` (`94C42548B59D34A2C5900F5945FB103A248EEA77671D01F8972B098801CA7257`) at `E:\Zonendpoint-tools\artifacts\79f0f59\`.
-- Handoff doc: [rc-vic-to-qeen.md](handoffs/rc-vic-to-qeen.md).
-- Draft PR: https://github.com/quockhanh2376/Zonendpoint/pull/1 . No main merge or public release performed.
+- Completed on branch `vic/ui-compact`:
+  1. **UI-COMPACT (Task V-8)**: Status dot positioned directly beside logo; theme toggle integrated into scan card header row; no floating controls in window top-right; keyboard focus order: logo/status → card title/toggle → target picker → primary action button; added 2 native mock checks (17/17 PASS).
+- Artifacts: NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`A29C1ABB19F97E666CA674492029D854A987A3A1C829EDB84FDF42ED6D4092CF`) and standalone `zonendpoint.exe` (`DEA2944DBF1C6203927D5C3328D1BA5D125E259D19D545F3C60D349C4AA22AE2`) at `E:\Zonendpoint-tools\artifacts\321d32b\`. Screenshots (`idle-light.png`, `idle-dark.png`, `all-good-light.png`, `all-good-dark.png`) captured in the same directory.
+- Handoff doc: [ui-compact-vic-to-qeen.md](handoffs/ui-compact-vic-to-qeen.md).
+- Draft PR: https://github.com/quockhanh2376/Zonendpoint/pull/1 is fully contained in main (fast-forwarded 2db42a8 → ed1088c, Zon approved, Loki pushed) and can be closed on GitHub by Zon. No separate release or git tag has been created.
 - Original source checkout E:\Zonendpoint/main and user changes remain preserved. Previously omitted architecture/licensing specs were restored under the same canonical relative filenames in this branch; architecture has a current addendum and Ed25519 content is unchanged. No alternate-name specs created.
 
 ## Current scope/UI
-See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Windows core files + drivers, excluding `%SystemRoot%\System32\drivers\DriverData`) or picked file/folder Scan; Windows x64 app builds only. English, persisted Light/Dark, Guard OFF. SecConnect/licensing/quarantine deferred. Compact 800x240 UI, 168x162 logo and 13px slogan; Target dropdown has File / Folder only; default and post-scan auto-return to "Quick Scan"; summary-first result view (All Good card on clean, threats-only on infected, non-clean rows + warning on incomplete); server status dot (green / red / grey) with 30s idle poll; preflight checking `zVERSION` with generic "Cannot connect to ZonEndpoint server" copy.
+See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Windows core files + drivers, excluding `%SystemRoot%\System32\drivers\DriverData`) or picked file/folder Scan; Windows x64 app builds only. English, persisted Light/Dark, Guard OFF. SecConnect/licensing/quarantine deferred. Compact 800x240 UI, 168x162 logo and 13px slogan; Target dropdown has File / Folder only; default and post-scan auto-return to "Quick Scan"; summary-first result view (All Good card on clean, threats-only on infected, non-clean rows + warning on incomplete); server status dot (green / red / grey) with 30s idle poll next to logo; preflight checking `zVERSION` with generic "Cannot connect to ZonEndpoint server" copy; theme toggle inside scan card header row.
 
 ## Verification/evidence
 - Core 8e8204a: Rust 20, extended native mock 11 (incl 60s timeout/51-file threat visibility), real lab 6 PASS; fmt/clippy PASS, npm audit 0. Release test-hook guard verified.
@@ -27,7 +29,8 @@ See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Window
 - UI-SIMPLIFY-PREFLIGHT 8c687b9: Rust 41 tests (29 lib, 1 main, 11 resilience), fmt, clippy -D warnings, Vite build, native mock 14/14 PASS. Details in [ui-simplify-vic-to-qeen.md](handoffs/ui-simplify-vic-to-qeen.md).
 - P0-01 SECURITY FIX 0a55516: Rust 46 tests, bounded EOF drain, verified by Qeen in [ui-simplify-0a55516.md](qa/ui-simplify-0a55516.md) (All items PASS, identified Finding Q-4-01).
 - QUICK-SCOPE-EXCLUSION 6294506: Rust 51 tests (34 lib, 1 main, 16 resilience), fmt, clippy -D warnings, Vite build, native mock 14/14 PASS. Excluded DriverData from Quick Scan target set while preserving all security invariants for other errors and user folder scans. Verified by Loki in Round 5.
-- RELEASE CANDIDATE 79f0f59: Rust 51 tests, fmt, clippy -D warnings, Vite build, native mock 15/15 PASS (including Q-5-01 text wrap check). NSIS installer packaged at `E:\Zonendpoint-tools\artifacts\79f0f59\`. Details in [rc-vic-to-qeen.md](handoffs/rc-vic-to-qeen.md).
+- RELEASE CANDIDATE 79f0f59: Rust 51 tests, fmt, clippy -D warnings, Vite build, native mock 15/15 PASS (including Q-5-01 text wrap check). NSIS installer packaged at `E:\Zonendpoint-tools\artifacts\79f0f59\`. Details in [rc-vic-to-qeen.md](handoffs/rc-vic-to-qeen.md). Zon manual test: OK.
+- UI-COMPACT 321d32b: Rust 51 tests, fmt, clippy -D warnings, Vite build, native mock 17/17 PASS (including status dot position next to logo, theme toggle inside card in both themes, keyboard focus order). NSIS installer packaged at `E:\Zonendpoint-tools\artifacts\321d32b\`. Details in [ui-compact-vic-to-qeen.md](handoffs/ui-compact-vic-to-qeen.md).
 - Current release 01e7449: NSIS 0.1.0 x64 build, branded setup/uninstaller, install/shortcut/theme persistence, actual installed native Folder+real ClamAV 2-file scan, offline-not-CLEAN cache check, same-version repair, uninstall/data preservation PASS. [Release report](qa/release-installer-01e7449.md), [handoff](handoffs/release-vic-to-qeen.md).
 
 ## Limits / next acceptance
@@ -35,10 +38,10 @@ PASS is scoped to observed core/native and unsigned NSIS current-user tests, not
 
 ### Items requiring Zon's manual test:
 1. **File / Folder dialog pick**: Interacting with native Windows File/Folder picker dialogs (automated test is blocked due to Windows UIPI security boundaries).
-2. **Auto-return after File / Folder**: Verify target path automatically clears and primary button returns to "Quick Scan" upon scan completion.
-3. **Single "All Good" on a file**: Manually scan a single benign file and verify the single-line "All Good" card with green checkmark renders cleanly without error or extra list rows.
+2. **Auto-return after File / Folder**: Verify target path automatically clears and primary button returns to "Quick Scan" upon scan completion. (Zon tested RC: OK).
+3. **Single "All Good" on a file**: Manually scan a single benign file and verify the single-line "All Good" card with green checkmark renders cleanly without error or extra list rows. (Zon tested RC: OK).
 
-Next acceptance: Qeen independent verification of RC package `79f0f59` (installer `3F69A4D54BFB6B71DE671FB76320DBB6BF4A3968D53DE8621304B1319483F807`), followed by Zon manual test of UIPI-blocked native dialogs.
+Next acceptance: Qeen independent verification of UI Compact package `321d32b` (installer `A29C1ABB19F97E666CA674492029D854A987A3A1C829EDB84FDF42ED6D4092CF`).
 
 Lab: admzon@100.96.250.245; clamd loopback 3310; normal Windows test tunnel 127.0.0.1:13310. All testing preserved Defender/Sophos policies; no exclusions, public uploads or Internet-exposed clamd.
 

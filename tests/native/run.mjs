@@ -189,6 +189,73 @@ try {
     assert.equal(await browser.$('.server-status').isExisting(), true);
   });
 
+  await check('status dot position next to logo and theme toggle inside scan card in both themes', async () => {
+    const verifyPositions = async (themeName) => {
+      const info = await browser.execute(() => {
+        const status = document.querySelector('.server-status');
+        const logo = document.querySelector('.brand-logo');
+        const card = document.querySelector('.selection-panel');
+        const toggle = document.querySelector('.selection-panel .theme-toggle');
+        const cardTitle = document.querySelector('.selection-panel h1');
+        if (!status || !logo || !card || !toggle || !cardTitle) return null;
+        const s = status.getBoundingClientRect();
+        const l = logo.getBoundingClientRect();
+        const c = card.getBoundingClientRect();
+        const t = toggle.getBoundingClientRect();
+        const h = cardTitle.getBoundingClientRect();
+        return {
+          statusInLeftColumn: s.right <= c.left + 5,
+          statusNextToLogo: s.left >= l.left,
+          statusAlignedWithLogo: s.top >= l.top - 10 && s.bottom <= l.bottom + 10,
+          toggleInsideCard: t.left >= c.left && t.right <= c.right && t.top >= c.top && t.bottom <= c.bottom,
+          toggleSameRowAsTitle: Math.abs((t.top + t.bottom) / 2 - (h.top + h.bottom) / 2) < 20,
+          toggleInTopRightOfCard: t.right > h.right,
+          statusWidth: s.width,
+          statusHeight: s.height,
+          toggleWidth: t.width,
+          toggleHeight: t.height,
+          noFloatingHeaderControls: document.querySelector('.header-controls') === null
+        };
+      });
+      assert.ok(info, `Elements must exist in ${themeName} theme`);
+      assert.ok(info.statusInLeftColumn, `Status dot must be in left column (left of card) in ${themeName}`);
+      assert.ok(info.statusNextToLogo, `Status dot must sit next to logo in ${themeName}`);
+      assert.ok(info.statusAlignedWithLogo, `Status dot must be vertically aligned with logo in ${themeName}`);
+      assert.ok(info.toggleInsideCard, `Theme toggle must be inside scan card in ${themeName}`);
+      assert.ok(info.toggleSameRowAsTitle, `Theme toggle must be in same row as card title in ${themeName}`);
+      assert.ok(info.toggleInTopRightOfCard, `Theme toggle must be in top-right of card in ${themeName}`);
+      assert.ok(info.statusWidth >= 44 && info.statusHeight >= 44, `Status dot target must be >=44x44px in ${themeName}`);
+      assert.ok(info.toggleWidth >= 44 && info.toggleHeight >= 44, `Theme toggle target must be >=44x44px in ${themeName}`);
+      assert.ok(info.noFloatingHeaderControls, `No floating buttons left in topbar in ${themeName}`);
+    };
+
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'light');
+    await verifyPositions('light');
+
+    await browser.$('.theme-toggle').click();
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'dark');
+    await verifyPositions('dark');
+
+    await browser.$('.theme-toggle').click();
+    assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'light');
+  });
+
+  await check('keyboard focus order', async () => {
+    await browser.execute(() => {
+      document.querySelector('.server-status')?.focus();
+    });
+    assert.equal(await browser.execute(() => document.activeElement?.classList.contains('server-status')), true, 'First focus is status dot');
+
+    await browser.keys(['Tab']);
+    assert.equal(await browser.execute(() => document.activeElement?.classList.contains('theme-toggle')), true, 'Second focus is theme toggle');
+
+    await browser.keys(['Tab']);
+    assert.equal(await browser.execute(() => document.activeElement?.textContent?.includes('Select target')), true, 'Third focus is Select target');
+
+    await browser.keys(['Tab']);
+    assert.equal(await browser.execute(() => document.activeElement?.classList.contains('primary')), true, 'Fourth focus is main action button');
+  });
+
   await check('menu items', async () => {
     await browser.$('button=Select target ▾').click();
     await browser.$('#target-options').waitForExist({ timeout: 5000 });
