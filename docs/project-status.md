@@ -10,6 +10,7 @@ Phase: current scan candidate stabilization for an **internal company pilot**. I
 - Artifacts & handoffs from source branches:
   - UI-COMPACT: NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`A29C1ABB19F97E666CA674492029D854A987A3A1C829EDB84FDF42ED6D4092CF`) and standalone `zonendpoint.exe` (`DEA2944DBF1C6203927D5C3328D1BA5D125E259D19D545F3C60D349C4AA22AE2`) at `E:\Zonendpoint-tools\artifacts\321d32b\`. Screenshots (`idle-light.png`, `idle-dark.png`, `all-good-light.png`, `all-good-dark.png`) captured in the same directory. Handoff doc: [ui-compact-vic-to-qeen.md](handoffs/ui-compact-vic-to-qeen.md).
   - CACHE-REASON: NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`34E5DE6027FB89029CE951D2D33F68C2007D2354E2965854CBBD6E944F1E0E7E`) and standalone `zonendpoint.exe` (`AE298A429F0B3B8D3EFF6AEB2A694BF3C32092BBF115B65DAD59541AAC0618F7`) at `E:\Zonendpoint-tools\artifacts\d91cc29\`. Handoff doc: [cache-reason-vic-to-qeen.md](handoffs/cache-reason-vic-to-qeen.md).
+- Artifacts (Integrated Snapshot 69d8577): NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`9B4E8D693E9D47B59C928B2124E0F01A9C17B9A5A74E28515D0A8CC6C052C728`) and standalone `zonendpoint.exe` (`8FC2193767F747E66B71214667DCCEA0E773A2629410E0D7D059EB82B83D913C`) at `E:\Zonendpoint-tools\artifacts\69d8577\`. Handoff doc: [integrate-vic-to-qeen.md](handoffs/integrate-vic-to-qeen.md).
 - Completed on branch `vic/cache-reason`:
   1. **P1-01 Cache Threat Name**: Added `threat_name TEXT` to SQLite `scan_cache` schema (migrated `user_version` 1 -> 2).
   2. **INFECTED Preservation**: Cache hits for infected entries return exact threat name (e.g. `YARA.<rule>.UNOFFICIAL`) instead of "verified content cache hit".
@@ -40,6 +41,7 @@ See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Window
 - RELEASE CANDIDATE 79f0f59: Rust 51 tests, fmt, clippy -D warnings, Vite build, native mock 15/15 PASS (including Q-5-01 text wrap check). NSIS installer packaged at `E:\Zonendpoint-tools\artifacts\79f0f59\`. Details in [rc-vic-to-qeen.md](handoffs/rc-vic-to-qeen.md). Zon manual test: OK.
 - UI-COMPACT 321d32b: Rust 51 tests, fmt, clippy -D warnings, Vite build, native mock 17/17 PASS (including status dot position next to logo, theme toggle inside card in both themes, keyboard focus order). NSIS installer packaged at `E:\Zonendpoint-tools\artifacts\321d32b\`. Details in [ui-compact-vic-to-qeen.md](handoffs/ui-compact-vic-to-qeen.md).
 - CACHE-REASON d91cc29: Rust 58 tests, fmt, clippy -D warnings, Vite build PASS. Preserves threat name on cache hit for INFECTED entries, safe migration from v1 to v2. NSIS installer packaged at `E:\Zonendpoint-tools\artifacts\d91cc29\`. Details in [cache-reason-vic-to-qeen.md](handoffs/cache-reason-vic-to-qeen.md).
+- INTEGRATE-UI-CACHE 69d8577: Rust 58 tests (39 lib, 1 main, 18 resilience), fmt, clippy -D warnings, Vite build, native mock suite 17/17 PASS. Integrates UI compact layout and P1-01 threat name cache hit fix. NSIS installer packaged at `E:\Zonendpoint-tools\artifacts\69d8577\`. Details in [integrate-vic-to-qeen.md](handoffs/integrate-vic-to-qeen.md).
 - Current release 01e7449: NSIS 0.1.0 x64 build, branded setup/uninstaller, install/shortcut/theme persistence, actual installed native Folder+real ClamAV 2-file scan, offline-not-CLEAN cache check, same-version repair, uninstall/data preservation PASS. [Release report](qa/release-installer-01e7449.md), [handoff](handoffs/release-vic-to-qeen.md).
 
 ## Limits / next acceptance
@@ -50,7 +52,7 @@ PASS is scoped to observed core/native and unsigned NSIS current-user tests, not
 2. **Auto-return after File / Folder**: Verify target path automatically clears and primary button returns to "Quick Scan" upon scan completion. (Zon tested RC: OK).
 3. **Single "All Good" on a file**: Manually scan a single benign file and verify the single-line "All Good" card with green checkmark renders cleanly without error or extra list rows. (Zon tested RC: OK).
 
-Next acceptance: Qeen independent verification of integrated package on branch `vic/integrate-ui-cache`.
+Next acceptance: Qeen independent verification of integrated package on branch `vic/integrate-ui-cache` (`69d8577`).
 
 Lab: admzon@100.96.250.245; clamd loopback 3310; normal Windows test tunnel 127.0.0.1:13310. All testing preserved Defender/Sophos policies; no exclusions, public uploads or Internet-exposed clamd.
 
