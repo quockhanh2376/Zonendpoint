@@ -1,0 +1,10 @@
+Qeen — Q-9: verify fix P1-01 (cache giữ tên threat). Handoff: E:\Zonendpoint-vic-cache\docs\handoffs\cache-reason-vic-to-qeen.md (chỉ đọc). Snapshot d91cc29, artifacts E:\Zonendpoint-tools\artifacts\d91cc29\.
+Worktree detached mới: git -C E:\Zonendpoint-restored\Zonendpoint-vic worktree add --detach E:\Zonendpoint-Qeen-d91cc29 d91cc29. Evidence: E:\Zonendpoint-tools\artifacts\d91cc29\qeen\. Chạy visible, giữ tunnel 13310. Không EICAR/malware trên đĩa (dùng mock/fixture như Q-5).
+Kiểm:
+1. SHA256 khớp handoff; cargo test/fmt/clippy, npm run build.
+2. INFECTED quét lần 2 (cache hit) hiện đúng tên threat, không còn "verified content cache hit".
+3. Migration: DB cache v1 cũ (có INFECTED không tên) → không crash, quét lại, ghi tên. DB version lạ → không crash, không báo CLEAN.
+4. ERROR/UNKNOWN/timeout không vào cache, không bao giờ CLEAN. Regression: Quick Scan All Good, status dot, offline notice.
+5. Gỡ sandbox, giữ tunnel.
+Ghi docs/qa/cache-reason-d91cc29.md; lỗi → docs/handoffs/qeen-to-vic-d91cc29.md. No push.
+Báo cáo ngắn: chỉ bug, cần fix, cần anh Zon confirm.

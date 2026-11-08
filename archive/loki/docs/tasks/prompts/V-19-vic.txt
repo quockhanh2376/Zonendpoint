@@ -1,0 +1,11 @@
+Vic — V-19: kết nối bền cho máy anh Zon. Zon đã duyệt. Nhánh mới vic/connect-setup từ origin/main f41f852, worktree E:\Zonendpoint-vic-connect.
+A. Tunnel tự chạy khi đăng nhập (máy Windows này):
+   - scripts/windows/zon-tunnel.ps1: vòng lặp chạy lại ssh khi rớt (backoff 5→60s), lệnh y hệt tunnel hiện tại:
+     ssh -i %USERPROFILE%\.ssh\zonendpoint_lab -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -N -L 127.0.0.1:13310:127.0.0.1:3310 admzon@100.96.250.245
+     Log ngắn vào %LOCALAPPDATA%\ZonEndpoint\tunnel.log (xoay vòng, không ghi secret).
+   - install/uninstall script tạo Scheduled Task user hiện tại, At logon, chạy ẩn, không cần Admin, không quyền cao.
+   - Cài task trên máy này. Kiểm thử: dừng tunnel cũ (ssh pid 12576) → chạy task → zPING 127.0.0.1:13310 = PONG; kill ssh con → tự nối lại. Nếu hỏng, khôi phục tunnel cũ bằng đúng lệnh trên.
+B. App: ô cài đặt địa chỉ server (lưu trong app config dir), cùng rule private IP hiện có. Ưu tiên: biến ZONENDPOINT_CLAMD > cài đặt đã lưu > mặc định 127.0.0.1:13310. Lưu xong kiểm tra lại kết nối ngay. UI gọn, đúng light/dark.
+C. Docs ngắn docs/ops/client-connect.md (cài/gỡ task, đổi server).
+Không mở clamd ra Internet, không đổi server lab, không lưu mật khẩu/token. npm test/build + cargo test xanh. Commit, push nhánh, ghi commit-notes.md. Không merge main.
+Báo cáo ngắn: chỉ lỗi, cần fix, cần anh Zon confirm.

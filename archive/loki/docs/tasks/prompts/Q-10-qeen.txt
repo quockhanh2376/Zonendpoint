@@ -1,0 +1,10 @@
+Qeen — Q-10: smoke bản tích hợp 69d8577 (ui-compact + cache-reason) trước khi lên main. Handoff: E:\Zonendpoint-vic-integrate\docs\handoffs\integrate-vic-to-qeen.md (chỉ đọc). Artifacts E:\Zonendpoint-tools\artifacts\69d8577\.
+Worktree detached: git -C E:\Zonendpoint-restored\Zonendpoint-vic worktree add --detach E:\Zonendpoint-Qeen-69d8577 69d8577. Evidence ...\69d8577\qeen\. Visible, giữ tunnel 13310, không EICAR/malware (mock như Q-9).
+Kiểm nhanh (tái dùng script Q-7/Q-9):
+1. SHA256 khớp; cargo test/fmt/clippy, npm run build.
+2. Layout gọn: chấm cạnh logo, toggle trong thẻ, Light+Dark.
+3. Cache hit giữ tên threat (như Q-9) trên layout mới.
+4. Quick Scan All Good; tunnel off → chấm đỏ + notice, không CLEAN.
+5. Gỡ sandbox, giữ tunnel.
+Ghi docs/qa/integrate-69d8577.md; lỗi → docs/handoffs/qeen-to-vic-69d8577.md. No push.
+Báo cáo ngắn: chỉ bug, cần fix, cần anh Zon confirm.

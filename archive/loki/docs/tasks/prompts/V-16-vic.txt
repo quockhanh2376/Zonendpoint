@@ -1,0 +1,10 @@
+Vic — V-16: đổi chấm trạng thái server. Nhánh mới vic/status-icon từ origin/main (4b8f0f4), worktree E:\Zonendpoint-vic-status.
+1. Icon theo ServerStatus (src/App.tsx, App.css):
+   - connected → dấu tick ✓ trên nền xanh (--clean)
+   - disconnected → dấu X trên nền đỏ (--infected)
+   - checking → vòng xoay xám (spinner nhỏ; tắt animation khi prefers-reduced-motion)
+   Dùng SVG inline, cùng kích thước nút hiện tại; giữ aria-label/title đổi theo trạng thái; đúng cả light/dark.
+2. Bố cục: mép trên ô trạng thái thẳng hàng với mép trên card "Scan files and folders".
+3. npm test/build + cargo test xanh; chụp ảnh 3 trạng thái (light+dark) vào E:\Zonendpoint-tools\artifacts\status-icon\.
+Commit, push nhánh feature, ghi commit-notes.md. Không merge main.
+Báo cáo ngắn: chỉ lỗi, cần fix, cần anh Zon confirm.

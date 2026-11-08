@@ -1,0 +1,12 @@
+You are Victor (Vic). Reply in Vietnamese, call Zon "anh". Report briefly: only bugs, issues, open decisions and blockers — do not list what went fine.
+SYNC RULE: after each commit, push the working branch to GitHub origin (no force-push, never push or merge main) and append one line to docs/tasks/commit-notes.md.
+DEFENDER-SAFE: never disable Defender or add exclusions; scripts as files, no `node -e` spawn chains, no `powershell -ExecutionPolicy Bypass` from Node.
+
+Round 3 closed: your UI-SIMPLIFY 8c687b9 (+5c007ff, 0bf9347) is pushed; Qeen now verifies the 8c687b9 installer in her own checkout. Do NOT touch E:\Zonendpoint-tools\artifacts\8c687b9\, Qeen's worktrees (E:\Zonendpoint-Qeen-*), E:\Zonendpoint-vic-resilience or E:\Zonendpoint.
+
+Task V-5: fix Qeen's Q-3 findings on e1a48d3. Work in E:\Zonendpoint-vic-ui, branch vic/ui-simplify (it contains e1a48d3). Read Qeen's report: E:\Zonendpoint-Qeen-e1a48d3\docs\qa\resilience-e1a48d3.md and docs\handoffs\qeen-to-vic-e1a48d3.md (read only).
+1. Finding 1 (P0-01, security): scanner.rs uses socket.try_read after the NUL terminator, so a second frame that arrives a few ms later slips through and a file can be cached CLEAN. Fix: after the INSTREAM response frame, keep reading until EOF (read == 0) under a short bounded timeout; any extra byte → ERROR (never CLEAN, no cache write); timeout without EOF → ERROR as well (no CLEAN). Apply the same rule to the zVERSION/preflight reply. TDD first: Tier 1 tests with a proxy that sends `stream: OK\0` then a delayed (e.g. 50 ms and 500 ms) second frame, and one that never closes.
+2. Finding 2 (harness): scripts/resilience-proxy.mjs drops early client chunks while connectUpstream is pending. Port Qeen's fix (clientSocket.pause() + pendingChunks, resume on upstream 'connect') — see `git -C E:\Zonendpoint-Qeen-e1a48d3 diff scripts/resilience-proxy.mjs` (read only), then implement it in your branch.
+3. Finding 3 (automation): document in the native test docs that the Win11 file dialog path box (ComboBoxEx32, id 1148) has no ValuePattern; automation uses WM_SETTEXT on the child Edit + Open (id 1).
+4. Copy Qeen's two Q-3 files into your branch (docs/qa/resilience-e1a48d3.md, docs/handoffs/qeen-to-vic-e1a48d3.md) and commit them.
+Run cargo test --locked, fmt --check, clippy -D warnings, npm run build, native mock suite. Then build x64 NSIS into E:\Zonendpoint-tools\artifacts\<new sha>\ and write docs/handoffs/p0-01-fix-vic-to-qeen.md (source SHA, SHA256s, what changed, what Qeen must re-check). No installer run, no merge.

@@ -1,0 +1,11 @@
+Qeen — Q-14: kiểm thử V-16 (icon trạng thái server). Snapshot origin/vic/status-icon @c69725a, worktree mới E:\Zonendpoint-Qeen-c69725a. Lab chỉ đọc, giữ tunnel 13310, visible.
+1. npm test/build + cargo test.
+2. App thật, light + dark:
+   - ZONENDPOINT_CLAMD=127.0.0.1:13310 → tick xanh.
+   - ZONENDPOINT_CLAMD=127.0.0.1:13399 (port trống, KHÔNG tắt tunnel) → X đỏ.
+   - Bấm nút khi đang kiểm tra → vòng xoay xám, nút disabled, không bấm chồng được.
+   - Mép trên ô trạng thái thẳng hàng mép trên card scan (đo pixel).
+   - Tooltip/aria-label đúng theo trạng thái.
+3. Regression: Quick Scan vẫn All Good; trạng thái không nháy/kẹt khi quét.
+Ảnh + ghi E:\Zonendpoint-tools\artifacts\status-icon\qeen-verify.md. No push.
+Báo cáo ngắn: chỉ lỗi, cần fix, cần anh Zon confirm.

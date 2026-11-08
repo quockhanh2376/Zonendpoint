@@ -1,0 +1,14 @@
+You are Victor (Vic). Reply in Vietnamese, call Zon "anh". Report briefly: only bugs, issues, open decisions and blockers — do not list what went fine.
+SYNC RULE: after each commit, push the working branch to GitHub origin (no force-push, never push or merge main) and append one line to docs/tasks/commit-notes.md.
+DEFENDER-SAFE: never disable Defender or add exclusions; scripts as files, no `node -e` spawn chains, no `powershell -ExecutionPolicy Bypass` from Node.
+
+Round 4 closed: Qeen accepted 0a55516 (UI-SIMPLIFY + P0-01 fix all OK). Her report: E:\Zonendpoint-Qeen-0a55516\docs\qa\ui-simplify-0a55516.md and docs\handoffs\qeen-to-vic-0a55516.md (read only). Do NOT touch Qeen's worktrees (E:\Zonendpoint-Qeen-*), E:\Zonendpoint-tools\artifacts\0a55516\, E:\Zonendpoint-vic-resilience or E:\Zonendpoint.
+
+Task V-6 — finding Q-4-01, Zon's decision: "Remove DriverData from Quick Scan".
+Problem: Quick Scan recurses %SystemRoot%\System32\drivers and hits drivers\DriverData (ACL SYSTEM-only, os error 5), so every normal Quick Scan ends "Scan incomplete" and can never reach All Good.
+Work in E:\Zonendpoint-vic-ui, branch vic/ui-simplify (from 15876b6).
+1. Add an explicit, documented Quick Scan exclusion list containing ONLY %SystemRoot%\System32\drivers\DriverData (resolved from the real system root, compared case-insensitively on the canonical path — not a substring/name match anywhere else). It is simply not part of the Quick Scan target set: not counted, not shown, no row.
+2. Security invariant unchanged: any OTHER access-denied path in Quick Scan still → SKIPPED/ERROR → "Scan incomplete", never All Good. File/Folder scans are unaffected: if the user picks a folder that contains DriverData, access-denied there still makes the scan incomplete.
+3. Update docs/v1.0.0-scope.md (Quick Scan scope + the exclusion and why) first, then code.
+4. TDD: tests for (a) DriverData under the quick root excluded, (b) a different unreadable dir under drivers still yields incomplete, (c) a folder named DriverData elsewhere is NOT excluded, (d) Folder scan of drivers still reports the denied subdir.
+Run cargo test --locked, fmt --check, clippy -D warnings, npm run build, native mock suite. Build x64 NSIS into E:\Zonendpoint-tools\artifacts\<new sha>\; also copy Qeen's 0a55516 report + handoff into docs/qa and docs/handoffs and commit them. Handoff docs/handoffs/quick-scope-vic-to-qeen.md (source SHA, SHA256s, what changed, what Qeen must re-check). No installer run, no merge.

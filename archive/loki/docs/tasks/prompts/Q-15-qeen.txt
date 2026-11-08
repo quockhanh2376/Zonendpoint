@@ -1,0 +1,8 @@
+Qeen — Q-15: kiểm lại fix nháy icon (V-17). Snapshot origin/vic/status-icon @f41f852, worktree mới E:\Zonendpoint-Qeen-f41f852. Lab chỉ đọc, giữ tunnel 13310, visible.
+1. npm test/build + cargo test.
+2. Đang tick xanh → bấm Quick Scan và chờ qua 1 chu kỳ check 30s: icon KHÔNG sang spinner lần nào (theo dõi liên tục).
+3. Bấm tay ô trạng thái → vẫn có spinner, nút disabled, rồi về tick xanh.
+4. Port trống 13399 → X đỏ; bấm tay → spinner → X đỏ.
+5. Quick Scan vẫn All Good.
+Ghi E:\Zonendpoint-tools\artifacts\status-icon\qeen-verify-2.md. No push.
+Báo cáo ngắn: chỉ lỗi, cần fix, cần anh Zon confirm.

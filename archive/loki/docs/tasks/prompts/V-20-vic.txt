@@ -1,0 +1,5 @@
+Vic — V-20: build bản cài từ main. Zon đã duyệt, main đã fast-forward lên 07ce3cc (V-19 tunnel + ô Server).
+Worktree sạch detached tại origin/main 07ce3cc (E:\Zonendpoint-build-07ce3cc). npm ci, npm test, cargo test, npm run build:windows.
+Copy zonendpoint.exe + setup NSIS vào E:\Zonendpoint-tools\artifacts\07ce3cc\, kèm SHA256SUMS.txt.
+Không tag/release, không push main, không chạy setup (anh Zon tự cài). Không đụng task ZonEndpointTunnel.
+Báo cáo ngắn: chỉ lỗi, cần fix, cần anh Zon confirm (kèm 2 SHA256).

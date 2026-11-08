@@ -1,0 +1,7 @@
+Qeen — Q-8: review bảo mật nguồn YARA Forge (desk review, không chạy lab; Vic đang làm V-10 ở E:\Zonendpoint-vic-feed — không đụng worktree Vic, E:\Zonendpoint, server lab).
+1. Supply chain: tự kiểm release YARA Forge (tag, SHA256, ký/attestation?), rủi ro repo bị chiếm (regex DoS, FP storm); đề xuất control tối thiểu (pin tag+SHA256, diff mỗi tuần, giới hạn số rule, load-test gate, rollback).
+2. License rule: lấy mẫu metadata, đánh dấu license hạn chế; OK với dùng cá nhân phi thương mại không.
+3. ClamAV: rule nào làm hỏng load cả DB; hit `YARA.<rule>.UNOFFICIAL` hiển thị đúng trên client không (đọc code origin/main: threat name, cache, never CLEAN khi lỗi).
+4. Checklist nghiệm thu cho vòng sau (FP corpus, positive control, load/rollback timing).
+Ghi E:\Zonendpoint-tools\artifacts\feedlab\yaraforge\qeen-review.md (P0/P1/P2). No push.
+Báo cáo ngắn: chỉ rủi ro, bug, việc cần anh Zon confirm.

@@ -1,0 +1,9 @@
+Qeen — Q-11: kiểm độc lập gia cố lab (V-13). Đọc E:\Zonendpoint-vic-harden\docs\ops\hardening-2026-11-08.md. Lab: ssh -i ~/.ssh/zonendpoint_lab -o BatchMode=yes admzon@100.96.250.245 — CHỈ ĐỌC (được `systemctl start` 2 service oneshot backup/health để thử, rollback chỉ --dry-run). Không restart clamd/sshd, không sửa file, giữ tunnel 13310.
+Kiểm:
+1. Drop-in Restart=on-failure có hiệu lực (systemctl show), clamd không bị restart ngoài kế hoạch.
+2. Backup: bản known-good hợp lệ (sigtool --info), giữ 3 bản, quyền file đúng; rollback --dry-run chạy đúng.
+3. Health check: chạy oneshot, ghi journal; logic >48h đúng (đọc script); không gửi gì ra ngoài.
+4. sshd -T: clientalive 30/3, PasswordAuthentication vẫn yes (Zon cần). Hướng dẫn hoàn tác có đúng không.
+5. Client smoke: app main 4b8f0f4 Quick Scan qua 13310 vẫn All Good.
+Ghi E:\Zonendpoint-tools\artifacts\engine-ops\2026-11-08-harden\qeen-verify.md. No push.
+Báo cáo ngắn: chỉ lỗi, rủi ro, cần anh Zon confirm.

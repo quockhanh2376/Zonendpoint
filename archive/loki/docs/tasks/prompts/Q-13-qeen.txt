@@ -1,0 +1,6 @@
+Qeen — Q-13: xác nhận hết FP sau V-15 (bỏ 87 rule SUSP_). Lab chỉ đọc. App main 4b8f0f4 (artifacts 69d8577), ZONENDPOINT_CLAMD=127.0.0.1:13310, visible, giữ tunnel.
+1. Stream trực tiếp C:\Windows\System32\winevt\Logs\Windows PowerShell.evtx → không còn YARA hit.
+2. Folder scan C:\Windows\System32 (Admin) lại → liệt kê mọi YARA.* hit (kỳ vọng 0).
+3. Positive control marker vẫn báo YARA.ZonQA_Benign_Marker.UNOFFICIAL; xóa file sau test.
+Ghi E:\Zonendpoint-tools\artifacts\feedlab\yaraforge\qeen-live-verify-2.md. No push.
+Báo cáo ngắn: chỉ FP, lỗi, cần anh Zon confirm.

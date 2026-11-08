@@ -1,0 +1,9 @@
+Vic — V-11: sửa P1-01 (Zon duyệt). Branch vic/cache-reason từ origin/main (worktree E:\Zonendpoint-vic-cache). Push sau mỗi commit + 1 dòng commit-notes.md.
+Lỗi: scan_cache không lưu threat name → lần quét trúng cache, INFECTED hiện "verified content cache hit" thay vì tên (vd YARA.<rule>.UNOFFICIAL). Xem src-tauri/src/cache.rs (put ~L120), scanner.rs (~L538).
+Yêu cầu:
+- Lưu threat name cho INFECTED trong cache; cache hit INFECTED trả đúng tên đó. CLEAN giữ nguyên.
+- Migration an toàn cho DB cache cũ (thiếu cột): không crash; entry INFECTED cũ không có tên → coi là miss, quét lại.
+- Test trước (TDD): cache hit giữ tên; DB cũ migrate; ERROR/UNKNOWN không bao giờ cache, không bao giờ CLEAN.
+- cargo test/fmt/clippy, npm run build pass. Build installer → E:\Zonendpoint-tools\artifacts\<sha>\ + SHA256.
+- Handoff docs/handoffs/cache-reason-vic-to-qeen.md (SHA đầy đủ, SHA256, cách test). No merge.
+Báo cáo ngắn: chỉ bug, blocker, việc cần anh Zon quyết.

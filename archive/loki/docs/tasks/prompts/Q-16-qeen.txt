@@ -1,0 +1,11 @@
+Qeen — Q-16: kiểm thử V-19 (tunnel tự chạy + ô cài đặt server). Snapshot origin/vic/connect-setup @07ce3cc, worktree mới E:\Zonendpoint-Qeen-07ce3cc. Lab chỉ đọc, visible.
+1. npm test/build + cargo test (chạy 3 lần, báo nếu test env/config chập chờn).
+2. Tunnel (task ZonEndpointTunnel đã cài, đang chạy): kill ssh con → tự nối lại, zPING 13310 = PONG trong ≤60s; log không chứa secret. Không gỡ task khi xong.
+3. App (máy anh Zon đang có biến User ZONENDPOINT_CLAMD; test trong process riêng, không sửa biến User):
+   - Không biến, không config → mặc định 127.0.0.1:13310 → tick xanh.
+   - Lưu 127.0.0.1:13399 → X đỏ; lưu lại 13310 → tick xanh; IP public (8.8.8.8:3310), tên miền, thiếu port → bị từ chối, báo lỗi rõ.
+   - Có biến env → env thắng cấu hình đã lưu.
+   - Light/dark, gọn, không vỡ layout.
+4. Rủi ro: tunnel script nằm ở %LOCALAPPDATA%\ZonEndpoint, trùng thư mục app cũ — đọc uninstaller NSIS xem gỡ app có xóa mất script/cache.db không (KHÔNG gỡ app thật).
+Ghi E:\Zonendpoint-tools\artifacts\connect-setup\qeen-verify.md. No push.
+Báo cáo ngắn: chỉ lỗi, cần fix, cần anh Zon confirm.

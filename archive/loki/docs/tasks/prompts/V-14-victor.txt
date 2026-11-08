@@ -1,0 +1,8 @@
+Vic — V-14: BẬT YARA Forge trên clamd live (Zon duyệt). Lab qua ssh (sudo -n). Docs trên branch vic/yara-live từ origin/main (worktree E:\Zonendpoint-vic-yara). Push + commit-notes.
+Trước: chạy backup known-good (systemctl start clamav-backup-known-good) + xác nhận; ghi PING/VERSION, sig count, RSS clamd.
+1. Kiểm lại SHA256 ~/zon-feedlab/staging/yara-forge-core-clamav.yar = cf07261b…bf1bd8. Load test lần cuối: clamscan -d (bản copy DB live + file .yar) → 0 lỗi.
+2. Cài: /var/lib/clamav/yara-forge-core.yar + zonqa-control.yar (rule ZonQA_Benign_Marker), owner clamav, 0644. Reload: printf 'zRELOAD\0' tới 127.0.0.1:3310 (không restart service).
+3. Sau reload: log clamd không lỗi, sig count tăng ~3.766, PING OK, RSS clamd, tunnel 13310 OK. Scan file marker trên lab qua clamdscan → YARA.ZonQA_Benign_Marker.UNOFFICIAL FOUND.
+4. Bất kỳ lỗi nào → rollback ngay (xóa 2 file .yar + zRELOAD), đo thời gian, báo.
+Ghi docs/ops/yara-live-2026-11-08.md (đã đổi gì, SHA, cách rollback 1 lệnh). Không sửa clamd.conf/freshclam.conf. No merge.
+Báo cáo ngắn: chỉ lỗi, rủi ro, việc cần anh Zon quyết.

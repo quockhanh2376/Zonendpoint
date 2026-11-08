@@ -1,0 +1,6 @@
+Qeen — Q-12: kiểm YARA live end-to-end từ Windows. Đọc E:\Zonendpoint-vic-yara\docs\ops\yara-live-2026-11-08.md. App = main 4b8f0f4 (artifacts 69d8577), env ZONENDPOINT_CLAMD=127.0.0.1:13310. Visible, giữ tunnel. Lab chỉ đọc (không reload/sửa).
+1. FP gate: Quick Scan + Folder scan C:\Windows\System32 (chạy Admin) và C:\Program Files → liệt kê MỌI hit YARA.* (rule, file). Có FP → báo ngay, KHÔNG tự rollback (Loki/Vic xử lý).
+2. Positive control: tạo file .txt trong evidence chứa đúng chuỗi marker (lấy từ zonqa-control.yar trên lab) → app báo Threat detected, tên YARA.ZonQA_Benign_Marker.UNOFFICIAL; quét lại → cache hit giữ tên. Xóa file sau test.
+3. Thời gian Quick Scan trước/sau (cache miss do sig count đổi là bình thường).
+Ghi E:\Zonendpoint-tools\artifacts\feedlab\yaraforge\qeen-live-verify.md. No push.
+Báo cáo ngắn: chỉ FP, lỗi, cần anh Zon confirm.

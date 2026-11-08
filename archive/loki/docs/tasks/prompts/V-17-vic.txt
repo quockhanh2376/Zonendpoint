@@ -1,0 +1,5 @@
+Vic — V-17: sửa nháy icon (Q-14 P2-UX). Nhánh vic/status-icon, worktree E:\Zonendpoint-vic-status.
+checkServer(manual = false): chỉ khi manual (bấm nút trạng thái) mới set "checking"/spinner. Preflight trong startScan và check định kỳ 30s giữ nguyên icon hiện tại, chỉ đổi khi kết quả khác.
+Thêm test cho cả 2 nhánh. npm test/build + cargo test xanh.
+Commit, push nhánh, ghi commit-notes.md. Không merge main.
+Báo cáo ngắn: chỉ lỗi, cần fix, cần anh Zon confirm.

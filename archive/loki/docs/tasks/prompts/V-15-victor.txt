@@ -1,0 +1,6 @@
+Vic — V-15: bỏ toàn bộ rule SUSP_ khỏi YARA live (Zon duyệt; Q-12 FP: SIGNATURE_BASE_SUSP_PS1_JAB_Pattern_Jun22_1 trên Windows PowerShell.evtx). Branch vic/yara-live (worktree E:\Zonendpoint-vic-yara). Push + commit-notes.
+1. scripts/feeds/filter_yara_clamav.py: thêm reject reason `heuristic_susp_rule` cho tên rule chứa `SUSP_` (ghi trong report). Không đổi logic khác.
+2. Lọc lại bản 20261103 → yara-forge-core-clamav.yar mới (kỳ vọng 3.765 − 87 = 3.678 rule); SHA256 mới. clamscan -d load test 0 lỗi; positive control vẫn FOUND.
+3. Live: thay /var/lib/clamav/yara-forge-core.yar (giữ bản cũ ở ~/zon-feedlab/rollback/), owner clamav 0644, zRELOAD (không restart). Kiểm log, sig count, PING, tunnel 13310. Lỗi → khôi phục file cũ + reload.
+4. Cập nhật docs/ops/yara-live-2026-11-08.md + docs/feeds/yaraforge-provenance.md (danh sách bị loại).
+Báo cáo ngắn: chỉ lỗi, rủi ro, việc cần anh Zon quyết.

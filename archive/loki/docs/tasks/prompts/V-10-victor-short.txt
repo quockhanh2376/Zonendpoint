@@ -1,0 +1,10 @@
+Vic — V-10: FEED-LAB YARA Forge, STAGING ONLY. Branch vic/feed-yaraforge từ origin/main (worktree E:\Zonendpoint-vic-feed). Push branch sau mỗi commit + 1 dòng commit-notes.md.
+Lab (ssh -i ~/.ssh/zonendpoint_lab -o BatchMode=yes admzon@100.96.250.245): chỉ làm trong ~/zon-feedlab/. KHÔNG đụng DatabaseDirectory live, clamd.conf/freshclam.conf, không restart/reload, không cài package. Tunnel 13310 phải chạy liên tục.
+1. Tải YARA Forge **core** (GitHub YARAHQ/yara-forge) 1 lần; ghi tag, URL, SHA256, số rule, license → docs/feeds/yaraforge-provenance.md (scope: cá nhân, phi thương mại).
+2. Script lọc rule tương thích ClamAV (không import/global/external vars, ≤64 strings, string ≥2 byte) → scripts/feeds/; accepted/rejected + lý do. Load test bằng `clamscan -d <staging copy>`; kiểm tra RAM trước, nguy cơ swap thì DỪNG báo.
+3. Positive control: rule `ZonQA_Benign_Marker` + file text chứa marker (không malware/EICAR); ghi cách clamd báo hit.
+4. FP: scan /usr/bin /usr/lib /etc; liệt kê mọi hit. Đo load time, RSS, scan time có/không YARA.
+5. Chỉ đề xuất (không làm): kế hoạch bật live + rollback <1 phút; mọi bước "cần Zon duyệt".
+0. Nhanh: sửa SHA đầy đủ trong E:\Zonendpoint-vic-compact\docs\handoffs\ui-compact-vic-to-qeen.md thành 321d32b2024a0676937cf1cd6946c6189674ed64 (Qeen Q-7 báo lệch), commit + push vic/ui-compact.
+Ghi docs/qa/feedlab-yaraforge-2026-11-08.md, evidence ở E:\Zonendpoint-tools\artifacts\feedlab\yaraforge\. No merge.
+Báo cáo ngắn: chỉ bug, rủi ro, FP, việc cần anh Zon quyết.

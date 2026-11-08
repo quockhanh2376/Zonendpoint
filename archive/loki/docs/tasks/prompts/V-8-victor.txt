@@ -1,0 +1,14 @@
+You are Victor (Vic). Reply in Vietnamese, call Zon "anh". Report briefly: only bugs, issues, open decisions and blockers — do not list what went fine.
+SYNC RULE: after each commit, push the working branch to GitHub origin (no force-push, never push or merge main) and append one line to docs/tasks/commit-notes.md.
+DEFENDER-SAFE: never disable Defender or add exclusions; scripts as files, no `node -e` spawn chains, no `powershell -ExecutionPolicy Bypass` from Node.
+
+News: Zon approved the merge. GitHub main was fast-forwarded to ed1088c (= vic/ui-simplify incl. RC 79f0f59). Zon tested RC manually: OK. No release/tag yet (Zon decides later). Do NOT touch E:\Zonendpoint (user-owned dirty files), Qeen's worktrees (E:\Zonendpoint-Qeen-*) or old artifact folders.
+
+Task V-8 — Zon's UI request (compact layout):
+Create worktree E:\Zonendpoint-vic-compact with new branch vic/ui-compact from origin/main (ed1088c).
+0. Housekeeping first commit: add commit-notes line(s) recording "main fast-forwarded 2db42a8 → ed1088c (Zon approved, Loki pushed)" and note in docs/project-status.md that draft PR #1 is fully contained in main and can be closed (no gh CLI here — anh closes it on GitHub).
+1. Move the server status dot (green/red/grey, tooltips unchanged: "Connected to ZonEndpoint server" / "Cannot connect to ZonEndpoint server. Check your connection." / "Checking connection…", click red = re-check) out of the top-right corner to sit right next to the ZonEndpoint logo (left column, aligned with the shield/wordmark).
+2. Move the Light/Dark theme toggle out of the top-right corner into the "Scan files and folders" card (top-right corner of the card, same row as the card title).
+3. Result: no floating buttons left in the window's top-right; the UI is more compact. Keep accessibility: 44×44 px hit targets, aria-labels, keyboard focus order (logo/status → card title row incl. theme toggle → Select target → main button → results), visible focus ring, contrast OK in Light and Dark. Use the ui-ux-pro-max skill. Keep the compact default window size; no new scrollbars at the default size.
+4. Update docs/v1.0.0-scope.md (header layout) before code; update native mock checks for status-dot position next to logo and theme toggle inside the scan card (both themes); all existing checks must still pass.
+Run cargo test --locked, fmt --check, clippy -D warnings, npm run build, native mock suite. Build x64 NSIS into E:\Zonendpoint-tools\artifacts\<sha>\, take Light + Dark screenshots of the idle window and the All Good state into that folder. Handoff docs/handoffs/ui-compact-vic-to-qeen.md (SHA, SHA256s, screenshots, what changed). No installer run, no merge.

@@ -1,0 +1,9 @@
+Vic — V-13: gia cố server lab (Zon duyệt). Làm trên lab qua ssh (sudo -n). Docs trên branch vic/engine-hardening từ origin/main (worktree E:\Zonendpoint-vic-harden). Push + commit-notes.
+Làm (theo runbook V-9, mục 1–5):
+1. clamd drop-in Restart=on-failure, RestartSec=5s; freshclam Restart=on-failure, RestartSec=30s. Chỉ daemon-reload, KHÔNG restart clamd.
+2. Backup known-good: copy main/daily/bytecode → /var/backups/clamav-known-good/<date>/ sau khi sigtool --info OK; systemd timer hằng ngày, giữ 3 bản. Script rollback (chỉ test dry-run, không rollback thật).
+3. Cảnh báo cập nhật lỗi: timer kiểm tra daily cũ >48h hoặc freshclam lỗi → ghi WARNING vào journal (không gửi ra ngoài).
+4. sshd: ClientAliveInterval 30, ClientAliveCountMax 3 (drop-in), `sshd -t` trước, reload (không restart). KHÔNG đổi PasswordAuthentication.
+Quy tắc: backup mọi file trước khi sửa; không sửa clamd.conf/freshclam.conf; clamd 3310 loopback + tunnel 13310 phải chạy suốt (kiểm PING trước/sau). Lỗi → hoàn tác, báo.
+Ghi docs/ops/hardening-2026-11-08.md (đã đổi gì, file nào, cách hoàn tác) + evidence E:\Zonendpoint-tools\artifacts\engine-ops\2026-11-08-harden\. No merge.
+Báo cáo ngắn: chỉ lỗi, rủi ro, việc cần anh Zon quyết.

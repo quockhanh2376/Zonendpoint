@@ -1,0 +1,6 @@
+Vic — V-12: tích hợp (Zon duyệt merge cả hai). Branch vic/integrate-ui-cache từ origin/main (worktree E:\Zonendpoint-vic-integrate).
+1. git merge --no-ff origin/vic/ui-compact rồi origin/vic/cache-reason. Conflict chỉ ở docs (daily.md, project-status.md, commit-notes.md): giữ đủ dòng của cả hai. Code conflict → DỪNG báo.
+2. cargo test/fmt/clippy, npm run build, native mock suite pass. Build installer → E:\Zonendpoint-tools\artifacts\<sha>\ + SHA256.
+3. Push branch + commit-notes. KHÔNG push/merge main (Loki fast-forward main sau khi Qeen smoke pass).
+4. Handoff docs/handoffs/integrate-vic-to-qeen.md (SHA đầy đủ, SHA256).
+Báo cáo ngắn: chỉ conflict, bug, blocker.

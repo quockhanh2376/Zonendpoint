@@ -1,0 +1,5 @@
+Vic — V-18: build bản cài từ main. Zon đã duyệt, main đã fast-forward lên f41f852 (icon trạng thái V-16/V-17).
+Worktree sạch detached tại origin/main f41f852 (E:\Zonendpoint-build-f41f852). npm ci, npm test, cargo test, npm run build:windows.
+Copy zonendpoint.exe + setup NSIS vào E:\Zonendpoint-tools\artifacts\f41f852\, kèm SHA256SUMS.txt.
+Không tag/release, không push main, không cài đè app của anh Zon. Ghi commit-notes nếu có commit.
+Báo cáo ngắn: chỉ lỗi, cần fix, cần anh Zon confirm (kèm 2 SHA256).
