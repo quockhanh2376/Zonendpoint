@@ -43,3 +43,5 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-08 | vic/status-icon | 5199892 | YES | fix(ui): eliminate status icon flicker on preflight and periodic check (V-17) |
 | 2026-11-08 | vic/status-icon | 718c359 | YES | docs: handoff status-icon flicker fix V-17 to qeen and update project status |
 | 2026-11-08 | vic/status-icon | 434124e | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-08 | vic/connect-setup | f12ae41 | YES | feat(connect): persistent SSH tunnel supervisor and in-app server settings (V-19) |
+| 2026-11-08 | vic/connect-setup | a203f1f | YES | docs(tasks): track final commit in commit-notes |
