@@ -518,6 +518,26 @@ try {
       assert.equal(await browser.$('.server-status').getAttribute('data-status'), 'disconnected');
       await startMockServer(serverPort);
     });
+
+    await check('server settings input and validation', async () => {
+      const input = await browser.$('#server-address-input');
+      assert.equal(await input.isExisting(), true, 'Server address input exists');
+      const saveBtn = await browser.$('.server-save-btn');
+      assert.equal(await saveBtn.isExisting(), true, 'Server save button exists');
+
+      // Test rejection of public IP
+      await input.setValue('8.8.8.8:3310');
+      await saveBtn.click();
+      await browser.waitUntil(async () => await browser.$('.server-msg-error').isExisting(), { timeout: 5000 });
+      assert.match(await browser.$('.server-msg-error').getText(), /must use loopback, private/);
+
+      // Test saving valid loopback address
+      await input.setValue(`127.0.0.1:${serverPort}`);
+      await saveBtn.click();
+      await browser.waitUntil(async () => await browser.$('.server-msg-ok').isExisting(), { timeout: 5000 });
+      assert.match(await browser.$('.server-msg-ok').getText(), /Connected to/);
+    });
+
   }
 
   await browser.saveScreenshot(path.join(artifacts, 'final.png'));

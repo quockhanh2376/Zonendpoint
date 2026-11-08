@@ -145,6 +145,84 @@ h2 { margin: 0 0 12px; font-size: 20px; }
 .result-path { overflow-wrap: anywhere; }
 .results small { grid-column: 2; color: var(--muted); overflow-wrap: anywhere; }
 
+
+.server-config-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.server-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.server-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 220px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-family: Consolas, monospace;
+  border: 1px solid var(--button-border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--text);
+}
+.server-input:disabled {
+  background: var(--disabled-bg);
+  color: var(--disabled-text);
+  border-color: var(--disabled-border);
+  cursor: not-allowed;
+}
+.server-save-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--button-border);
+  border-radius: 6px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.server-save-btn:hover:not(:disabled) {
+  background: var(--button-hover-bg);
+}
+.server-save-btn:active:not(:disabled) {
+  background: var(--button-active-bg);
+}
+.server-save-btn:disabled {
+  background: var(--disabled-bg);
+  color: var(--disabled-text);
+  border-color: var(--disabled-border);
+  cursor: not-allowed;
+}
+.server-env-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--disabled-bg);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+.server-msg {
+  margin: 4px 0 0;
+  font-size: 11px;
+}
+.server-msg-ok {
+  color: var(--clean);
+}
+.server-msg-error {
+  color: var(--infected);
+}
+
 @media (max-width: 600px) {
   .app-shell { padding: 16px; }
   .topbar { grid-template-columns: 1fr; }

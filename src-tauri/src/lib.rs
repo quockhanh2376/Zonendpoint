@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod config;
 pub mod directory;
 pub mod quick;
 pub mod scanner;
@@ -248,6 +249,17 @@ async fn check_server_status() -> Result<String, String> {
         scanner::configured_clamd_addr().map_err(|_| scanner::PREFLIGHT_ERROR_MSG.to_string())?;
     let (_tx, cancel) = watch::channel(false);
     scanner::clamd_preflight(addr, cancel).await
+}
+
+#[tauri::command]
+fn get_server_config() -> Result<config::ServerConfigDto, String> {
+    config::get_server_config()
+}
+
+#[tauri::command]
+async fn save_server_config(addr: String) -> Result<config::ServerConfigDto, String> {
+    config::save_server_address(&addr)?;
+    config::get_server_config()
 }
 
 async fn run_scan(
@@ -503,7 +515,9 @@ pub fn run() {
             cache_stats,
             set_guard,
             set_window_theme_icon,
-            check_server_status
+            check_server_status,
+            get_server_config,
+            save_server_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

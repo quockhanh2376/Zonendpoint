@@ -7,6 +7,12 @@ import "./App.css";
 
 type Status = "CLEAN" | "INFECTED" | "UNKNOWN" | "ERROR" | "SKIPPED" | "CANCELLED";
 type ServerStatus = "checking" | "connected" | "disconnected";
+type ServerConfig = {
+  effective_addr: string;
+  source: string;
+  saved_addr: string | null;
+  env_override: boolean;
+};
 type ScanResult = {
   path: string;
   sha256: string | null;
@@ -79,6 +85,41 @@ function App() {
   const [error, setError] = useState("");
   const [serverStatus, setServerStatus] = useState<ServerStatus>("checking");
   const serverStatusRef = useRef<ServerStatus>("checking");
+  const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
+  const [serverInput, setServerInput] = useState("");
+  const [serverSaving, setServerSaving] = useState(false);
+  const [serverConfigMsg, setServerConfigMsg] = useState<{ text: string; error: boolean } | null>(null);
+
+  useEffect(() => {
+    void invoke<ServerConfig>("get_server_config")
+      .then((cfg) => {
+        setServerConfig(cfg);
+        setServerInput(cfg.saved_addr || (cfg.env_override ? cfg.effective_addr : "127.0.0.1:13310"));
+      })
+      .catch(() => {});
+  }, []);
+
+  async function handleSaveServer(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    if (serverSaving || !!scanId) return;
+    setServerSaving(true);
+    setServerConfigMsg(null);
+    setError("");
+    try {
+      const updated = await invoke<ServerConfig>("save_server_config", { addr: serverInput });
+      setServerConfig(updated);
+      const ok = await checkServer(true);
+      if (ok) {
+        setServerConfigMsg({ text: `Connected to ${updated.effective_addr}`, error: false });
+      } else {
+        setServerConfigMsg({ text: `Saved, but cannot connect to ${updated.effective_addr}`, error: true });
+      }
+    } catch (err) {
+      setServerConfigMsg({ text: String(err), error: true });
+    } finally {
+      setServerSaving(false);
+    }
+  }
 
   const checkServer = async (manual = false) => {
     if (manual) {
@@ -444,7 +485,45 @@ function App() {
               {scanButtonLabel}
             </button>
           </div>
-          {!scanId && !summary && <p className="selected-path">{selectedTarget?.path || "Windows core files + drivers"}</p>}
+          {!scanId && !summary && (
+            <>
+              <p className="selected-path">{selectedTarget?.path || "Windows core files + drivers"}</p>
+              <form className="server-config-form" onSubmit={(e) => void handleSaveServer(e)}>
+                <label htmlFor="server-address-input" className="server-label">Server</label>
+                <input
+                  id="server-address-input"
+                  className="server-input"
+                  type="text"
+                  value={serverInput}
+                  placeholder="127.0.0.1:13310"
+                  onChange={(e) => {
+                    setServerInput(e.target.value);
+                    setServerConfigMsg(null);
+                  }}
+                  disabled={!!scanId || serverSaving}
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <button
+                  type="submit"
+                  className="server-save-btn"
+                  disabled={!!scanId || serverSaving}
+                >
+                  {serverSaving ? "Saving…" : "Save"}
+                </button>
+                {serverConfig?.env_override && (
+                  <span className="server-env-badge" title={`Active: ${serverConfig.effective_addr}`}>
+                    Env active
+                  </span>
+                )}
+              </form>
+              {serverConfigMsg && (
+                <p className={`server-msg ${serverConfigMsg.error ? "server-msg-error" : "server-msg-ok"}`}>
+                  {serverConfigMsg.text}
+                </p>
+              )}
+            </>
+          )}
 
           {scanId && (
             <section className="scan-feedback" aria-live="polite">

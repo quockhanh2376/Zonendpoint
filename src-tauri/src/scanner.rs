@@ -49,11 +49,12 @@ pub enum ScanStatus {
     Cancelled,
 }
 
-pub fn configured_clamd_addr() -> Result<SocketAddr, String> {
-    let value = std::env::var("ZONENDPOINT_CLAMD").unwrap_or_else(|_| "127.0.0.1:3310".into());
-    let addr: SocketAddr = value
-        .parse()
-        .map_err(|_| "ZONENDPOINT_CLAMD must be a private IP address and port".to_owned())?;
+pub const DEFAULT_CLAMD_ADDR: &str = "127.0.0.1:13310";
+
+pub fn validate_clamd_addr(raw: &str) -> Result<SocketAddr, String> {
+    let addr: SocketAddr = raw.trim().parse().map_err(|_| {
+        "Server address must be an IP address and port (e.g. 127.0.0.1:13310)".to_owned()
+    })?;
     let allowed = match addr.ip() {
         std::net::IpAddr::V4(ip) => {
             ip.is_private()
@@ -67,10 +68,29 @@ pub fn configured_clamd_addr() -> Result<SocketAddr, String> {
     };
     if !allowed {
         return Err(
-            "ZONENDPOINT_CLAMD must use loopback, private, link-local, or VPN addressing".into(),
+            "Server address must use loopback, private, link-local, or VPN addressing".into(),
         );
     }
     Ok(addr)
+}
+
+pub fn configured_clamd_addr() -> Result<SocketAddr, String> {
+    // 1. ZONENDPOINT_CLAMD takes priority
+    if let Ok(value) = std::env::var("ZONENDPOINT_CLAMD") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return validate_clamd_addr(trimmed);
+        }
+    }
+    // 2. Saved configuration in app config dir
+    if let Ok(Some(saved)) = crate::config::load_saved_server_address() {
+        let trimmed = saved.trim();
+        if !trimmed.is_empty() {
+            return validate_clamd_addr(trimmed);
+        }
+    }
+    // 3. Default fallback: 127.0.0.1:13310
+    validate_clamd_addr(DEFAULT_CLAMD_ADDR)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -985,5 +1005,67 @@ mod tests {
         assert_eq!(preflight.unwrap_err(), PREFLIGHT_ERROR_MSG);
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn validate_clamd_addr_allows_private_and_vpn_ips() {
+        assert!(validate_clamd_addr("127.0.0.1:13310").is_ok());
+        assert!(validate_clamd_addr("100.96.250.245:3310").is_ok());
+        assert!(validate_clamd_addr("192.168.1.100:3310").is_ok());
+        assert!(validate_clamd_addr("10.0.0.5:3310").is_ok());
+        assert!(validate_clamd_addr("172.16.5.10:3310").is_ok());
+        assert!(validate_clamd_addr("[::1]:3310").is_ok());
+    }
+
+    #[test]
+    fn validate_clamd_addr_rejects_public_and_invalid_inputs() {
+        assert!(validate_clamd_addr("8.8.8.8:3310").is_err());
+        assert!(validate_clamd_addr("1.1.1.1:3310").is_err());
+        assert!(validate_clamd_addr("example.com:3310").is_err());
+        assert!(validate_clamd_addr("127.0.0.1").is_err());
+        assert!(validate_clamd_addr("not-an-ip:3310").is_err());
+    }
+
+    #[test]
+    fn priority_env_overrides_saved_and_default() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("zonendpoint-cfg-prio-{}", uuid::Uuid::new_v4()));
+        let cfg_file = temp_dir.join("config.json");
+        unsafe {
+            std::env::set_var("ZONENDPOINT_CONFIG_FILE", &cfg_file);
+        }
+
+        // 1. Neither env nor saved -> default 127.0.0.1:13310
+        unsafe {
+            std::env::remove_var("ZONENDPOINT_CLAMD");
+        }
+        let _ = std::fs::remove_file(&cfg_file);
+        assert_eq!(
+            configured_clamd_addr().unwrap().to_string(),
+            "127.0.0.1:13310"
+        );
+
+        // 2. Saved set -> uses saved
+        crate::config::save_server_address("192.168.1.200:3310").unwrap();
+        assert_eq!(
+            configured_clamd_addr().unwrap().to_string(),
+            "192.168.1.200:3310"
+        );
+
+        // 3. Env var set -> env overrides saved
+        unsafe {
+            std::env::set_var("ZONENDPOINT_CLAMD", "100.96.250.245:3310");
+        }
+        assert_eq!(
+            configured_clamd_addr().unwrap().to_string(),
+            "100.96.250.245:3310"
+        );
+
+        // Cleanup
+        unsafe {
+            std::env::remove_var("ZONENDPOINT_CLAMD");
+            std::env::remove_var("ZONENDPOINT_CONFIG_FILE");
+        }
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
