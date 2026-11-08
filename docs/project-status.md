@@ -30,6 +30,30 @@ Phase: current scan candidate stabilization for an **internal company pilot**. I
 ## Current scope/UI
 See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Windows core files + drivers, excluding `%SystemRoot%\System32\drivers\DriverData`) or picked file/folder Scan; Windows x64 app builds only. English, persisted Light/Dark, Guard OFF. SecConnect/licensing/quarantine deferred. Compact 800x240 UI, 168x162 logo and 13px slogan; Target dropdown has File / Folder only; default and post-scan auto-return to "Quick Scan"; summary-first result view (All Good card on clean, threats-only on infected, non-clean rows + warning on incomplete); server status dot (green / red / grey) with 30s idle poll next to logo; preflight checking `zVERSION` with generic "Cannot connect to ZonEndpoint server" copy; theme toggle inside scan card header row.
 
+
+## Task V-16 — Server Status Icon & Alignment (2026-11-08)
+- Branch: vic/status-icon (base origin/main at 4b8f0f4), worktree E:\Zonendpoint-vic-status.
+- Code commit: 87992b0.
+- Changes:
+  1. **Inline SVG Icons**:
+     - connected: checkmark ✓ (--clean-button-text) on green circle (--clean).
+     - disconnected: X mark (--clean-button-text) on red circle (--infected).
+     - checking: spinning grey ring (--muted arc with --button-border track) with prefers-reduced-motion animation-off override.
+     - 44×44px button hit target maintained; title and aria-label preserved and dynamically updated; contrast compliant in Light and Dark themes.
+  2. **Top-Alignment**:
+     - .brand-identity changed to align-items: flex-start.
+     - Top edge of .server-status box is collinear with top edge of "Scan files and folders" card (.selection-panel) (Math.abs(s.top - c.top) <= 2).
+  3. **Quality Gates & Artifacts**:
+     - npm test / node tests/native/run.mjs: 17/17 PASS (mock daemon).
+     - npm run build: PASS (TypeScript + Vite).
+     - cargo test: 58/58 PASS (39 lib, 1 main, 18 resilience).
+     - cargo fmt --check: PASS.
+     - cargo clippy -- -D warnings: PASS.
+     - 6 screenshots saved in E:\Zonendpoint-tools\artifacts\status-icon\:
+       - connected-light.png, connected-dark.png
+       - checking-light.png, checking-dark.png
+       - disconnected-light.png, disconnected-dark.png
+
 ## Verification/evidence
 - Core 8e8204a: Rust 20, extended native mock 11 (incl 60s timeout/51-file threat visibility), real lab 6 PASS; fmt/clippy PASS, npm audit 0. Release test-hook guard verified.
 - Real native File Unicode selection and Folder/Cancel/rescan PASS. [Core QA report](qa/report-8e8204a.md), [Folder follow-up](qa/folder-picker-8e8204a.md).
