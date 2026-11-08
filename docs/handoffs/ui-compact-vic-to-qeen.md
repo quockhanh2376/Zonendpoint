@@ -3,7 +3,7 @@
 Date: 2026-11-07  
 Author: Victor (Vic)  
 Branch: `vic/ui-compact`  
-Code snapshot: `321d32b8fa58890aa974bfa58882ca6c934f07a7` (`321d32b`)  
+Code snapshot: `321d32b2024a0676937cf1cd6946c6189674ed64` (`321d32b`)  
 Base commit: `ed1088c` (`origin/main`, fast-forwarded from `2db42a8` after Zon approval)  
 Artifacts directory: `E:\Zonendpoint-tools\artifacts\321d32b\`  
 
