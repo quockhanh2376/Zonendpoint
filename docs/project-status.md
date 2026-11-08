@@ -1,18 +1,23 @@
-# Project status — 2026-11-07
+# Project status — 2026-11-08
 
-Phase: current scan candidate stabilization for an **internal company pilot**. Release Candidate package staged for Qeen verification and Zon manual test. Recommended next task: Qeen independent test of RC package `79f0f59`, followed by Zon manual test of native picker/auto-return/All Good card.
+Phase: current scan candidate stabilization for an **internal company pilot**. Fix for finding P1-01 (cache threat name preservation) implemented and packaged for Qeen verification. Recommended next task: Qeen independent test of package `d91cc29`, followed by Zon manual test of native picker/auto-return/All Good card.
 
 ## Active checkout/snapshot
-- Implementation: E:\Zonendpoint-vic-ui, branch vic/ui-simplify.
-- Latest product code: 79f0f596a8fc3a6a17d093283fedd09693c72847 (`79f0f59`): Release Candidate (RC) for Zon. Resolved finding Q-5-01 by adding `overflow-wrap: anywhere;` to `.results small` in `src/App.css` (threat name text wrapping); added native mock test verifying `scrollWidth <= clientWidth` in `.results` in both Light and Dark themes. All quality gates pass (51/51 Rust tests, fmt/clippy pass, npm build pass, native mock 15/15 pass).
-- Completed on branch `vic/ui-simplify`:
+- Implementation: E:\Zonendpoint-vic-cache, branch vic/cache-reason.
+- Latest product code: d91cc2942cf2055c60234386e5e6a4453b6abb74 (`d91cc29`): Fix finding P1-01 (`scan_cache` preserves threat name on cache hit for INFECTED verdicts). Schema migration `user_version` 1 -> 2 adds `threat_name TEXT`; legacy v1 rows with NULL threat safely treated as cache miss; CLEAN preserved. All quality gates pass (58/58 Rust tests, fmt/clippy pass, npm build pass).
+- Artifacts: NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`34E5DE6027FB89029CE951D2D33F68C2007D2354E2965854CBBD6E944F1E0E7E`) and standalone `zonendpoint.exe` (`AE298A429F0B3B8D3EFF6AEB2A694BF3C32092BBF115B65DAD59541AAC0618F7`) at `E:\Zonendpoint-tools\artifacts\d91cc29\`.
+- Handoff doc: [cache-reason-vic-to-qeen.md](handoffs/cache-reason-vic-to-qeen.md).
+- Completed on branch `vic/cache-reason`:
+  1. **P1-01 Cache Threat Name**: Added `threat_name TEXT` to SQLite `scan_cache` schema (migrated `user_version` 1 -> 2).
+  2. **INFECTED Preservation**: Cache hits for infected entries return exact threat name (e.g. `YARA.<rule>.UNOFFICIAL`) instead of "verified content cache hit".
+  3. **Safe Migration**: Legacy schema v1 cache rows with NULL threat names treated as cache miss (`Ok(None)`) to force live re-scan without crashing.
+  4. **Security Invariants**: `ERROR` and `UNKNOWN` are never cached and never become `CLEAN`.
+- Previously completed on branch `vic/ui-simplify`:
   1. **UI-SIMPLIFY**: Target dropdown simplified to File/Folder only (removed Quick Scan menu item); primary button dynamically toggles "Quick Scan" / "Scan"; summary-first results view ("All Good" card on clean, threats-only on infected, non-clean rows + warning banner on incomplete).
   2. **Preflight & Status Icon**: Connection preflight on `zVERSION` with friendly error copy; topbar status dot (green / red / grey) with 30s background poll.
   3. **P0-01 Security Fix**: Required bounded EOF drain after clamd response frame to prevent frame desynchronization and pipelined response attacks.
   4. **DriverData Exclusion (Q-4-01)**: Excluded `%SystemRoot%\System32\drivers\DriverData` from Quick Scan target set (canonical path resolution, case-insensitive comparison, not counted, not shown, no row) while preserving security invariants for all other access-denied paths and user Folder scans.
   5. **Q-5-01 Layout Fix**: Text wrapping for unbroken long threat names (150+ chars).
-- Artifacts: NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`3F69A4D54BFB6B71DE671FB76320DBB6BF4A3968D53DE8621304B1319483F807`) and standalone `zonendpoint.exe` (`94C42548B59D34A2C5900F5945FB103A248EEA77671D01F8972B098801CA7257`) at `E:\Zonendpoint-tools\artifacts\79f0f59\`.
-- Handoff doc: [rc-vic-to-qeen.md](handoffs/rc-vic-to-qeen.md).
 - Draft PR: https://github.com/quockhanh2376/Zonendpoint/pull/1 . No main merge or public release performed.
 - Original source checkout E:\Zonendpoint/main and user changes remain preserved. Previously omitted architecture/licensing specs were restored under the same canonical relative filenames in this branch; architecture has a current addendum and Ed25519 content is unchanged. No alternate-name specs created.
 
