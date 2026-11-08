@@ -39,3 +39,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-08 | vic/integrate-ui-cache | 8d6e2cc | YES | docs(tasks): track integration commits in commit-notes |
 | 2026-11-08 | vic/yara-live | 2808633 | YES | docs(ops): record YARA-Forge Core live enablement on clamd lab |
 | 2026-11-08 | vic/yara-live | ba10f83 | YES | docs(tasks): track live enablement commit in commit-notes |
+| 2026-11-08 | vic/yara-live | a56aea1 | YES | feat(feeds): prune heuristic SUSP_ rules from live YARA feed (V-15) |
