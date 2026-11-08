@@ -4,7 +4,7 @@ Date: 2026-11-08
 Author: Victor (Vic)  
 Branch: `vic/status-icon`  
 Base commit: `4b8f0f40df060d506e059bfc808118f35ee4aecd` (`origin/main`)  
-Code snapshot: `87992b0051e7399a9cfadfb25381aa92baeb795f` (`87992b0`)  
+Code snapshot: `51998921867c26d833959bc2dbe3c6cfbc2a6f2d` (`5199892`)  
 Artifacts directory: `E:\Zonendpoint-tools\artifacts\status-icon\`  
 
 ---
@@ -30,6 +30,12 @@ In response to Zon's request (Task V-16), the server status indicator in the top
 
 ---
 
+
+4. **Flicker Fix (Task V-17 / Q-14 P2-UX)**:
+   - `checkServer(manual = false)`: only manual clicks (`onClick={() => void checkServer(true)}`) set "checking" state and display the spinner.
+   - Preflight in `startScan` and periodic 30s background poll run with `manual = false`, preserving the current status icon without flashing, and transitioning only when verdict changes.
+   - Added automated check `automatic preflight and background check preserves icon without flashing checking (Q-14)` covering both execution branches.
+
 ## 2. Artifacts & SHA256 Checksums
 
 Directory: `E:\Zonendpoint-tools\artifacts\status-icon\`
@@ -53,7 +59,7 @@ All quality gates pass:
 2. **`cargo fmt --check`**: Clean, 0 diffs.
 3. **`cargo clippy -- -D warnings`**: Clean, 0 warnings.
 4. **`npm run build`**: Clean TypeScript compilation (`tsc`) and Vite asset bundling.
-5. **`npm test` / `node tests/native/run.mjs`**: 17/17 native mock checks pass, including:
+5. **`npm test` / `node tests/native/run.mjs`**: 18/18 native mock checks pass, including:
    - `status dot position next to logo and theme toggle inside scan card in both themes` (including `statusAlignedWithCardTop: Math.abs(s.top - c.top) <= 2`)
    - `status icon connected→checking→disconnected in Light and Dark` (verifies `.status-icon-connected`, `.status-icon-disconnected`, `.server-status-spinner`, dynamic titles, and captures all 6 artifacts)
    - Zero regressions across focus order, theme toggle, auto-return, and scan flows.

@@ -54,6 +54,15 @@ See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Window
        - checking-light.png, checking-dark.png
        - disconnected-light.png, disconnected-dark.png
 
+
+## Task V-17 — Fix Status Icon Flicker (Q-14 P2-UX, 2026-11-08)
+- Branch: vic/status-icon, worktree E:\Zonendpoint-vic-status.
+- Code commit: 5199892.
+- Fix:
+  1. `checkServer(manual = false)`: only manual invocation (`onClick` on status button) sets `serverStatus = "checking"` and displays the spinner.
+  2. Preflight in `startScan` and periodic 30s background checks run with `manual = false`, keeping the current status icon without flicker, and updating only if verdict differs.
+  3. Added native mock check in `tests/native/run.mjs` validating both branches (18/18 native mock checks PASS, 58/58 cargo tests PASS).
+
 ## Verification/evidence
 - Core 8e8204a: Rust 20, extended native mock 11 (incl 60s timeout/51-file threat visibility), real lab 6 PASS; fmt/clippy PASS, npm audit 0. Release test-hook guard verified.
 - Real native File Unicode selection and Folder/Cancel/rescan PASS. [Core QA report](qa/report-8e8204a.md), [Folder follow-up](qa/folder-picker-8e8204a.md).
