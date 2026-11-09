@@ -58,3 +58,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-09 | vic/v22 | 5240013 | YES | feat(v22): 36px icon buttons, tunnel path migration, and 25 MiB stream limit alignment (V-22) |
 | 2026-11-09 | vic/v22 | 09d6373 | YES | docs(tasks): track V-22 commit in commit-notes |
 | 2026-11-09 | vic/release-0.2.0 | 5f1a421 | YES | feat(release): bump version to 0.2.0 and add CHANGELOG (V-23) |
+| 2026-11-09 | vic/release-0.2.0 | f725c10 | YES | docs(tasks): track final commit in commit-notes |
