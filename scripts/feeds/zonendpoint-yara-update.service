@@ -1,0 +1,14 @@
+[Unit]
+Description=Zonendpoint Daily YARA-Forge Core Feed Update
+Documentation=https://github.com/YARAHQ/yara-forge
+After=network-online.target clamav-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /usr/local/bin/zonendpoint-yara-update.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zonendpoint-yara-update
+TimeoutStartSec=600
