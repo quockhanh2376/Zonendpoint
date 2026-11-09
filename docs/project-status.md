@@ -19,6 +19,7 @@ Phase: current scan candidate stabilization for an **internal company pilot**. I
 - Completed on branch `vic/ui-compact`:
   1. **UI-COMPACT (Task V-8)**: Status dot positioned directly beside logo; theme toggle integrated into scan card header row; no floating controls in window top-right; keyboard focus order: logo/status → card title/toggle → target picker → primary action button; added 2 native mock checks (17/17 PASS).
 - Previously completed on branch `vic/ui-simplify`:
+- Operations audit (V-9): Branch `vic/engine-ops`, worktree `E:\Zonendpoint-vic-ops`. Read-only audit completed for lab ClamAV server on `100.96.250.245`. Audit findings in [engine-ops-audit-2026-11-07.md](qa/engine-ops-audit-2026-11-07.md), operations runbook in [engine-ops-runbook.md](ops/engine-ops-runbook.md), raw artifacts under `E:\Zonendpoint-tools\artifacts\engine-ops\2026-11-07\.`
   1. **UI-SIMPLIFY**: Target dropdown simplified to File/Folder only (removed Quick Scan menu item); primary button dynamically toggles "Quick Scan" / "Scan"; summary-first results view ("All Good" card on clean, threats-only on infected, non-clean rows + warning banner on incomplete).
   2. **Preflight & Status Icon**: Connection preflight on `zVERSION` with friendly error copy; topbar status dot (green / red / grey) with 30s background poll.
   3. **P0-01 Security Fix**: Required bounded EOF drain after clamd response frame to prevent frame desynchronization and pipelined response attacks.
@@ -64,6 +65,7 @@ See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Window
   3. Added native mock check in `tests/native/run.mjs` validating both branches (18/18 native mock checks PASS, 58/58 cargo tests PASS).
 
 ## Verification/evidence
+- ENGINE-OPS read-only audit (V-9) on `vic/engine-ops`: Ubuntu 26.04 ClamAV 1.5.4 (3.64M sigs) audited on `100.96.250.245`. Audit findings in [engine-ops-audit-2026-11-07.md](qa/engine-ops-audit-2026-11-07.md), operations runbook in [engine-ops-runbook.md](ops/engine-ops-runbook.md), raw evidence in `E:\Zonendpoint-tools\artifacts\engine-ops\2026-11-07\`. Key risks noted: `Restart=no` on daemons, missing CVD backup, unconfigured freshclam alert hook, SSH keepalive 0, and 25M stream limit decision.
 - Core 8e8204a: Rust 20, extended native mock 11 (incl 60s timeout/51-file threat visibility), real lab 6 PASS; fmt/clippy PASS, npm audit 0. Release test-hook guard verified.
 - Real native File Unicode selection and Folder/Cancel/rescan PASS. [Core QA report](qa/report-8e8204a.md), [Folder follow-up](qa/folder-picker-8e8204a.md).
 - Release package 0de3208: NSIS 0.1.0 x64 setup (`EE35537DBF8ABCBA2038F68B63A4396568F5D00AE757B2D1EBBC6F9CACD7AECD`) Qeen independent acceptance A–H PASS. Details in [quick-package-0de3208.md](qa/quick-package-0de3208.md) and [quick-package-vic-to-qeen.md](handoffs/quick-package-vic-to-qeen.md).
