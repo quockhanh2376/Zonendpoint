@@ -1,7 +1,7 @@
 import { remote } from 'webdriverio';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -196,7 +196,9 @@ try {
   });
 
   await check('status dot position, app version, and theme toggle in both themes (V-24)', async () => {
-    await browser.waitUntil(async () => (await browser.$('.app-version').getText()) === 'v0.2.0', { timeout: 10000 });
+    const tauriConf = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
+    const expectedVersion = `v${tauriConf.version}`;
+    await browser.waitUntil(async () => (await browser.$('.app-version').getText()) === expectedVersion, { timeout: 10000 });
     const verifyPositions = async (themeName) => {
       const info = await browser.execute(() => {
         const status = document.querySelector('.server-status');
@@ -254,7 +256,7 @@ try {
         };
       });
       assert.ok(info, `Elements must exist in ${themeName} theme`);
-      assert.equal(info.versionText, 'v0.2.0', `Version label must show v0.2.0 in ${themeName}`);
+      assert.equal(info.versionText, expectedVersion, `Version label must show ${expectedVersion} in ${themeName}`);
       assert.ok(info.versionBelowStatus, `Version label must sit directly below status dot in ${themeName}`);
       assert.ok(info.versionInLeftColumn, `Version label must be in left column in ${themeName}`);
       assert.ok(info.versionContrast >= 4.5, `Version text contrast must be >= 4.5:1 in ${themeName} (got ${info.versionContrast.toFixed(2)})`);
