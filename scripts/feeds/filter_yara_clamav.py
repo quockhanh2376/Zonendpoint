@@ -183,6 +183,10 @@ def inspect_rule(rule: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
     body = rule['body']
     name = rule['name']
     
+    # 0. Heuristic SUSP_ rules
+    if 'SUSP_' in name:
+        return False, "heuristic_susp_rule", {}
+        
     # 1. Global / Private
     if hdr.startswith('global ') or hdr.startswith('private '):
         return False, "global_or_private_rule", {}
