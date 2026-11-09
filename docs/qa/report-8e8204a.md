@@ -38,7 +38,7 @@ From fixed checkout with PATH including Node/cargo, EDGE_DRIVER matching Edge, a
 - cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 - cargo check --locked --release --features native-ui-tests --manifest-path src-tauri/Cargo.toml (expect explicit guard failure)
 - node docs/qa/evidence-8e8204a/qeen-timeout.mjs
-- Set ZONENDPOINT_CLAMD=127.0.0.1:13310; node docs/qa/evidence-8e8204a/qeen-eicar.mjs --skip-build --real (AV may block).
+- script đã gỡ 2026-11-09 (quy tắc không EICAR trên ổ)
 - Custom harmless-signature diagnostic requires the included install/cleanup Python scripts run only on the authorized Ubuntu lab via sudo; qeen-real-detection.mjs then runs with --skip-build --real. Always clean up afterward. The included picker script records the first WebDriver attempt; final successful file selection used desktop control on a directly launched app.
 
 Raw JSON reports/scripts are in evidence-8e8204a. Full local logs: E:\Zonendpoint-tools\qeen-fixed-rust.log, qeen-clippy.log, qeen-fixed-release-guard.log, qeen-native-matrix.log, qeen-real-matrix.log, qeen-real-detection.log. Screenshots in printed temp artifacts; actual EICAR sample not committed. No credentials captured.
