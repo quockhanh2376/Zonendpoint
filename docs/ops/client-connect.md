@@ -13,14 +13,14 @@ Chạy PowerShell với quyền người dùng thông thường:
 ```powershell
 powershell -ExecutionPolicy Bypass -File "scripts\windows\install-tunnel-task.ps1"
 ```
-- **Hành động**: Sao chép `zon-tunnel.ps1` vào `%LOCALAPPDATA%\ZonEndpoint\zon-tunnel.ps1` và đăng ký Scheduled Task `ZonEndpointTunnel`.
+- **Hành động**: Sao chép `zon-tunnel.ps1` vào `%LOCALAPPDATA%\ZonEndpoint\tunnel\zon-tunnel.ps1`, tự dọn file cũ ở thư mục gốc và đăng ký Scheduled Task `ZonEndpointTunnel`.
 - **Kích hoạt**: Tự động chạy khi người dùng đăng nhập Windows (`At logon`), khởi chạy ngay lập tức sau khi đăng ký.
 - **Giám sát tự động**: Tự động kết nối lại khi SSH rớt mạng với thuật toán backoff (5s → 10s → 20s → 40s → tối đa 60s). Nếu phiên kết nối ổn định ≥ 30 giây, backoff được đặt lại về 5s.
 - **Lệnh SSH thực thi**:
   ```powershell
   ssh -i "$env:USERPROFILE\.ssh\zonendpoint_lab" -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -N -L 127.0.0.1:13310:127.0.0.1:3310 admzon@100.96.250.245
   ```
-- **Nhật ký (Log)**: Ghi ngắn gọn vào `%LOCALAPPDATA%\ZonEndpoint\tunnel.log`. Tự động xoay vòng sang `tunnel.log.1` khi vượt quá 256 KB. Tuyệt đối không ghi thông tin nhạy cảm hoặc khóa bí mật.
+- **Nhật ký (Log)**: Ghi ngắn gọn vào `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log`. Tự động xoay vòng sang `tunnel.log.1` khi vượt quá 256 KB. Tuyệt đối không ghi thông tin nhạy cảm hoặc khóa bí mật.
 
 ### Gỡ bỏ Task
 Khi cần tạm dừng hoặc gỡ bỏ tunnel tự động:

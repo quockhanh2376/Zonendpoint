@@ -4,12 +4,14 @@
 .DESCRIPTION
     Creates a user-level Scheduled Task that runs zon-tunnel.ps1 at user logon in the background
     without requiring administrator privileges.
+    Stores zon-tunnel.ps1 and tunnel.log in %LOCALAPPDATA%\ZonEndpoint\tunnel\.
 #>
 
 $ErrorActionPreference = 'Stop'
 
 $taskName = "ZonEndpointTunnel"
-$targetDir = Join-Path $env:LOCALAPPDATA "ZonEndpoint"
+$rootDir = Join-Path $env:LOCALAPPDATA "ZonEndpoint"
+$targetDir = Join-Path $rootDir "tunnel"
 if (-not (Test-Path $targetDir)) {
     New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 }
@@ -17,16 +19,38 @@ if (-not (Test-Path $targetDir)) {
 $sourceScript = Join-Path $PSScriptRoot "zon-tunnel.ps1"
 $installedScript = Join-Path $targetDir "zon-tunnel.ps1"
 
-# Copy supervisor script to user appdata for permanence across worktree changes
+# Clean up legacy files in root appdata directory (%LOCALAPPDATA%\ZonEndpoint\)
+$legacyFiles = @("zon-tunnel.ps1", "tunnel.log", "tunnel.log.1")
+foreach ($f in $legacyFiles) {
+    $oldPath = Join-Path $rootDir $f
+    if (Test-Path $oldPath) {
+        $destPath = Join-Path $targetDir $f
+        if ($f -like "tunnel.log*" -and (-not (Test-Path $destPath))) {
+            Move-Item -Path $oldPath -Destination $destPath -Force -ErrorAction SilentlyContinue
+            Write-Host "Migrated legacy log $f to $targetDir"
+        } else {
+            Remove-Item -Path $oldPath -Force -ErrorAction SilentlyContinue
+            Write-Host "Removed legacy file: $oldPath"
+        }
+    }
+}
+
+# Copy supervisor script to user appdata tunnel directory for permanence across worktree changes
 Copy-Item -Path $sourceScript -Destination $installedScript -Force
 Write-Host "Installed tunnel script to: $installedScript"
 
-# Unregister existing task if present
+# Unregister existing task and stop running supervisor if present
 $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existing) {
     Write-Host "Removing existing Scheduled Task '$taskName'..."
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+}
+
+$supervisors = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*zon-tunnel.ps1*" }
+foreach ($p in $supervisors) {
+    Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
 }
 
 $action = New-ScheduledTaskAction `

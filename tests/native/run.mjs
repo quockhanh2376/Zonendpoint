@@ -233,8 +233,8 @@ try {
       assert.ok(info.toggleInsideCard, `Theme toggle must be inside scan card in ${themeName}`);
       assert.ok(info.toggleSameRowAsTitle, `Theme toggle must be in same row as card title in ${themeName}`);
       assert.ok(info.toggleInTopRightOfCard, `Theme toggle must be in top-right of card in ${themeName}`);
-      assert.ok(info.statusWidth >= 44 && info.statusHeight >= 44, `Status dot target must be >=44x44px in ${themeName}`);
-      assert.ok(info.toggleWidth >= 44 && info.toggleHeight >= 44, `Theme toggle target must be >=44x44px in ${themeName}`);
+      assert.ok(info.statusWidth >= 36 && info.statusHeight >= 36, `Status dot target must be >=36x36px in ${themeName}`);
+      assert.ok(info.toggleWidth >= 36 && info.toggleHeight >= 36, `Theme toggle target must be >=36x36px in ${themeName}`);
       assert.ok(info.noFloatingHeaderControls, `No floating buttons left in topbar in ${themeName}`);
     };
 

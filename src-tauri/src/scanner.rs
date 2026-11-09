@@ -20,7 +20,7 @@ use tokio::{
 
 const STREAM_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_RESPONSE_BYTES: usize = 1024;
-pub const MAX_FILE_BYTES: u64 = 100_000_000;
+pub const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
 pub const CACHE_TTL_SECONDS: i64 = 12 * 60 * 60;
 pub const POLICY_VERSION: &str = "zonendpoint-mvp-1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1066,6 +1066,33 @@ mod tests {
             std::env::remove_var("ZONENDPOINT_CLAMD");
             std::env::remove_var("ZONENDPOINT_CONFIG_FILE");
         }
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn max_file_bytes_is_25_mib_and_oversize_file_is_skipped() {
+        assert_eq!(MAX_FILE_BYTES, 25 * 1024 * 1024);
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("zonendpoint-oversize-{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let file_path = temp_dir.join("oversize.bin");
+
+        let file = std::fs::File::create(&file_path).unwrap();
+        file.set_len(MAX_FILE_BYTES + 1).unwrap();
+        drop(file);
+
+        let cache_path = temp_dir.join("cache.db");
+        let addr = "127.0.0.1:13310".parse().unwrap();
+        let semaphore = Arc::new(Semaphore::new(1));
+        let (_tx, cancel) = watch::channel(false);
+        let result = scan_file(file_path.clone(), cache_path, addr, cancel, semaphore).await;
+        assert_eq!(result.status, ScanStatus::Skipped);
+        assert_eq!(
+            result.reason.as_deref(),
+            Some("file exceeds scan size limit")
+        );
+
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 }

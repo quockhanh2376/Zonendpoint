@@ -92,9 +92,9 @@ progress { accent-color: var(--primary-bg); }
 .scan-feedback { margin-top: 12px; }
 .scan-feedback h2 { margin-bottom: 6px; font-size: 16px; }
 .topbar .selection-panel { grid-column: 2; grid-row: 1; min-width: 0; min-height: max(208px, calc(100vh - 32px)); margin-top: 0; padding: 18px; }
-.theme-toggle, .server-status { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--button-border); border-radius: 10px; color: var(--button-text); background: var(--button-bg); cursor: pointer; padding: 0; flex-shrink: 0; }
+.theme-toggle, .server-status { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid var(--button-border); border-radius: 8px; color: var(--button-text); background: var(--button-bg); cursor: pointer; padding: 0; flex-shrink: 0; }
 .server-status { cursor: pointer; }
-.server-status-icon { width: 20px; height: 20px; display: block; }
+.server-status-icon { width: 18px; height: 18px; display: block; }
 .server-status-spinner {
   animation: server-status-spin 0.85s linear infinite;
   transform-origin: 50% 50%;
@@ -108,7 +108,7 @@ progress { accent-color: var(--primary-bg); }
     animation: none;
   }
 }
-.theme-toggle svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.theme-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .all-good-card { display: flex; align-items: center; gap: 12px; margin: 16px 0; padding: 14px 18px; background: var(--panel-bg); border: 1px solid var(--panel-border); border-left: 4px solid var(--clean); border-radius: 10px; }
 .all-good-card .all-good-line { margin: 0; font-size: 18px; font-weight: 700; color: var(--clean); }
 .all-good-check { width: 22px; height: 22px; flex-shrink: 0; fill: none; stroke: var(--clean); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }

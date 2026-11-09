@@ -3,18 +3,18 @@
     ZonEndpoint persistent SSH tunnel supervisor for Windows.
 .DESCRIPTION
     Monitors and automatically restarts the SSH tunnel to the ClamAV lab server.
-    Logs events with rotation to %LOCALAPPDATA%\ZonEndpoint\tunnel.log (no secrets logged).
+    Logs events with rotation to %LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log (no secrets logged).
 #>
 
 $ErrorActionPreference = 'Continue'
 
-$logDir = Join-Path $env:LOCALAPPDATA "ZonEndpoint"
-if (-not (Test-Path $logDir)) {
-    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+$tunnelDir = Join-Path $env:LOCALAPPDATA "ZonEndpoint\tunnel"
+if (-not (Test-Path $tunnelDir)) {
+    New-Item -ItemType Directory -Path $tunnelDir -Force | Out-Null
 }
 
-$logFile = Join-Path $logDir "tunnel.log"
-$logBackup = Join-Path $logDir "tunnel.log.1"
+$logFile = Join-Path $tunnelDir "tunnel.log"
+$logBackup = Join-Path $tunnelDir "tunnel.log.1"
 $maxLogBytes = 256 * 1024 # 256 KB
 
 function Write-TunnelLog {
