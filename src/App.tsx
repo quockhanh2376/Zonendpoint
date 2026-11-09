@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, currentMonitor, LogicalSize } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import "./App.css";
 
 type Status = "CLEAN" | "INFECTED" | "UNKNOWN" | "ERROR" | "SKIPPED" | "CANCELLED";
@@ -89,6 +90,13 @@ function App() {
   const [serverInput, setServerInput] = useState("");
   const [serverSaving, setServerSaving] = useState(false);
   const [serverConfigMsg, setServerConfigMsg] = useState<{ text: string; error: boolean } | null>(null);
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    void getVersion()
+      .then((ver) => setAppVersion(`v${ver}`))
+      .catch((err) => console.error("Failed to get app version:", err));
+  }, []);
 
   useEffect(() => {
     void invoke<ServerConfig>("get_server_config")
@@ -376,7 +384,8 @@ function App() {
               src={theme === "dark" ? "/brand/logo-dark-slogan-transparent.png" : "/brand/logo-light-slogan-transparent.png"}
               alt="ZonEndpoint"
             />
-            <button
+            <div className="server-status-col">
+              <button
               type="button"
               className={`server-status status-${serverStatus}`}
               data-status={serverStatus}
@@ -433,7 +442,9 @@ function App() {
                   />
                 </svg>
               )}
-            </button>
+              </button>
+              {appVersion && <span className="app-version">{appVersion}</span>}
+            </div>
           </div>
           <p className="brand-slogan">Protect your digital life</p>
         </div>

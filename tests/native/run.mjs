@@ -195,21 +195,48 @@ try {
     assert.equal(await browser.$('.server-status').isExisting(), true);
   });
 
-  await check('status dot position next to logo and theme toggle inside scan card in both themes', async () => {
+  await check('status dot position, app version, and theme toggle in both themes (V-24)', async () => {
+    await browser.waitUntil(async () => (await browser.$('.app-version').getText()) === 'v0.2.0', { timeout: 10000 });
     const verifyPositions = async (themeName) => {
       const info = await browser.execute(() => {
         const status = document.querySelector('.server-status');
+        const version = document.querySelector('.app-version');
         const logo = document.querySelector('.brand-logo');
         const card = document.querySelector('.selection-panel');
         const toggle = document.querySelector('.selection-panel .theme-toggle');
         const cardTitle = document.querySelector('.selection-panel h1');
-        if (!status || !logo || !card || !toggle || !cardTitle) return null;
+        if (!status || !logo || !card || !toggle || !cardTitle || !version) return null;
         const s = status.getBoundingClientRect();
+        const v = version.getBoundingClientRect();
         const l = logo.getBoundingClientRect();
         const c = card.getBoundingClientRect();
         const t = toggle.getBoundingClientRect();
         const h = cardTitle.getBoundingClientRect();
+
+        function parseRgb(str) {
+          const m = str ? str.match(/\d+/g) : null;
+          return m ? m.slice(0, 3).map(Number) : [0, 0, 0];
+        }
+        function lum(r, g, b) {
+          const a = [r, g, b].map(val => {
+            val /= 255;
+            return val <= 0.03928 ? val / 12.92 : Math.pow((val + 0.055) / 1.055, 2.4);
+          });
+          return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+        }
+        function contrast(rgb1, rgb2) {
+          const l1 = lum(...rgb1), l2 = lum(...rgb2);
+          return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+        }
+        const vColor = getComputedStyle(version).color;
+        const pageBg = getComputedStyle(document.body).backgroundColor;
+        const contrastRatio = contrast(parseRgb(vColor), parseRgb(pageBg));
+
         return {
+          versionText: version.textContent.trim(),
+          versionBelowStatus: v.top >= s.bottom - 1,
+          versionInLeftColumn: v.right <= c.left + 5,
+          versionContrast: contrastRatio,
           statusInLeftColumn: s.right <= c.left + 5,
           statusNextToLogo: s.left >= l.left,
           statusAlignedWithLogo: s.top >= l.top - 10 && s.bottom <= l.bottom + 10,
@@ -222,10 +249,16 @@ try {
           statusHeight: s.height,
           toggleWidth: t.width,
           toggleHeight: t.height,
-          noFloatingHeaderControls: document.querySelector('.header-controls') === null
+          noFloatingHeaderControls: document.querySelector('.header-controls') === null,
+          noDocHScroll: document.documentElement.scrollWidth <= window.innerWidth
         };
       });
       assert.ok(info, `Elements must exist in ${themeName} theme`);
+      assert.equal(info.versionText, 'v0.2.0', `Version label must show v0.2.0 in ${themeName}`);
+      assert.ok(info.versionBelowStatus, `Version label must sit directly below status dot in ${themeName}`);
+      assert.ok(info.versionInLeftColumn, `Version label must be in left column in ${themeName}`);
+      assert.ok(info.versionContrast >= 4.5, `Version text contrast must be >= 4.5:1 in ${themeName} (got ${info.versionContrast.toFixed(2)})`);
+      assert.ok(info.noDocHScroll, `Document must not horizontally overflow in ${themeName} at 800px`);
       assert.ok(info.statusInLeftColumn, `Status dot must be in left column (left of card) in ${themeName}`);
       assert.ok(info.statusNextToLogo, `Status dot must sit next to logo in ${themeName}`);
       assert.ok(info.statusAlignedWithLogo, `Status dot must be vertically aligned with logo in ${themeName}`);

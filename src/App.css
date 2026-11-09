@@ -32,6 +32,7 @@
   --warning-bg: #fff2d4;
   --error-text: #8b1d29;
   --error-bg: #fde8e9;
+  --brand-purple: #6b21a8;
 }
 
 :root[data-theme="dark"] {
@@ -65,6 +66,7 @@
   --warning-bg: #4a3a1f;
   --error-text: #ffb0b4;
   --error-bg: #4a252c;
+  --brand-purple: #c084fc;
 }
 
 :root {
@@ -92,6 +94,8 @@ progress { accent-color: var(--primary-bg); }
 .scan-feedback { margin-top: 12px; }
 .scan-feedback h2 { margin-bottom: 6px; font-size: 16px; }
 .topbar .selection-panel { grid-column: 2; grid-row: 1; min-width: 0; min-height: max(208px, calc(100vh - 32px)); margin-top: 0; padding: 18px; }
+.server-status-col { display: flex; flex-direction: column; align-items: center; width: 36px; flex-shrink: 0; }
+.app-version { display: block; margin-top: 4px; font-size: 11px; font-weight: 600; line-height: 1.2; color: var(--brand-purple); text-align: center; white-space: nowrap; letter-spacing: 0.2px; user-select: none; }
 .theme-toggle, .server-status { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid var(--button-border); border-radius: 8px; color: var(--button-text); background: var(--button-bg); cursor: pointer; padding: 0; flex-shrink: 0; }
 .server-status { cursor: pointer; }
 .server-status-icon { width: 18px; height: 18px; display: block; }
