@@ -26,7 +26,9 @@ pub const POLICY_VERSION: &str = "zonendpoint-mvp-1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub const PREFLIGHT_ERROR_MSG: &str = "Cannot connect to ZonEndpoint server";
 const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(3);
-const TOTAL_SCAN_TIMEOUT: Duration = Duration::from_secs(60);
+pub const TOTAL_SCAN_TIMEOUT: Duration = Duration::from_secs(120);
+pub const CLAMD_RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
+const RESPONSE_CHUNK_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn default_scan_timeout() -> Duration {
     #[cfg(all(feature = "native-ui-tests", debug_assertions))]
@@ -162,6 +164,7 @@ fn parse_response(response: &[u8]) -> Result<(ScanStatus, Option<String>), Strin
 async fn read_nul_frame<R: AsyncRead + Unpin>(
     reader: &mut R,
     limit: usize,
+    initial_timeout: Duration,
 ) -> Result<Vec<u8>, String> {
     let mut response = Vec::with_capacity(64);
     loop {
@@ -169,7 +172,12 @@ async fn read_nul_frame<R: AsyncRead + Unpin>(
             return Err("server response exceeded limit".into());
         }
         let mut byte = [0];
-        let read_result = timeout(Duration::from_secs(5), reader.read(&mut byte)).await;
+        let byte_timeout = if response.is_empty() {
+            initial_timeout
+        } else {
+            RESPONSE_CHUNK_TIMEOUT
+        };
+        let read_result = timeout(byte_timeout, reader.read(&mut byte)).await;
         let count = match read_result {
             Ok(Ok(n)) => n,
             Ok(Err(error)) => return Err(format!("read server response: {error}")),
@@ -226,9 +234,12 @@ pub async fn clamd_version_with_timeout(
             .write_all(b"zVERSION\0")
             .await
             .map_err(|error| format!("write VERSION command: {error}"))?;
-        let response = timeout(connect_timeout, read_nul_frame(&mut socket, 256))
-            .await
-            .map_err(|_| "VERSION command timed out".to_owned())??;
+        let response = timeout(
+            connect_timeout,
+            read_nul_frame(&mut socket, 256, connect_timeout),
+        )
+        .await
+        .map_err(|_| "VERSION command timed out".to_owned())??;
         read_until_eof(&mut socket, EOF_DRAIN_TIMEOUT).await?;
         if response.is_empty() || response[response.len() - 1] != 0 {
             return Err("VERSION response is not NUL terminated".into());
@@ -316,7 +327,8 @@ async fn stream_scan<R: AsyncRead + Unpin>(
             .write_all(&0u32.to_be_bytes())
             .await
             .map_err(|error| format!("finish stream: {error}"))?;
-        let response = read_nul_frame(&mut socket, MAX_RESPONSE_BYTES).await?;
+        let response =
+            read_nul_frame(&mut socket, MAX_RESPONSE_BYTES, CLAMD_RESPONSE_TIMEOUT).await?;
         read_until_eof(&mut socket, EOF_DRAIN_TIMEOUT).await?;
         let (status, reason) = parse_response(&response)?;
         Ok(StreamOutcome {
@@ -704,7 +716,8 @@ mod tests {
         assert!(parse_response(b"stream: \n FOUND\0").is_err());
     }
 
-    async fn mock_clamd(
+    async fn mock_clamd_delayed(
+        initial_delay: Duration,
         parts: Vec<Vec<u8>>,
         hold_open: bool,
     ) -> (std::net::SocketAddr, tokio::task::JoinHandle<Vec<u8>>) {
@@ -728,6 +741,9 @@ mod tests {
                 payload.resize(start + size as usize, 0);
                 socket.read_exact(&mut payload[start..]).await.unwrap();
             }
+            if !initial_delay.is_zero() {
+                tokio::time::sleep(initial_delay).await;
+            }
             for part in parts {
                 socket.write_all(&part).await.unwrap();
                 tokio::time::sleep(Duration::from_millis(5)).await;
@@ -738,6 +754,13 @@ mod tests {
             payload
         });
         (addr, task)
+    }
+
+    async fn mock_clamd(
+        parts: Vec<Vec<u8>>,
+        hold_open: bool,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<Vec<u8>>) {
+        mock_clamd_delayed(Duration::ZERO, parts, hold_open).await
     }
 
     async fn bytes_reader(bytes: &[u8]) -> tokio::io::DuplexStream {
@@ -835,6 +858,53 @@ mod tests {
         let result = stream_scan(&mut reader, addr, 1024, cancel, Duration::from_millis(30)).await;
         assert_eq!(result.status, ScanStatus::Error);
         assert_eq!(result.reason.as_deref(), Some("scan timed out"));
+        let _ = daemon.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mock_daemon_response_delayed_over_5s_succeeds() {
+        let payload = b"fixture-delayed";
+        let (addr, daemon) = mock_clamd_delayed(
+            Duration::from_millis(5200),
+            vec![b"stream: OK\0".to_vec()],
+            false,
+        )
+        .await;
+        let mut reader = bytes_reader(payload).await;
+        let (_tx, cancel) = watch::channel(false);
+        let result = stream_scan(&mut reader, addr, 1024, cancel, Duration::from_secs(10)).await;
+        assert_eq!(result.status, ScanStatus::Clean);
+        let expected_hash = hex::encode(Sha256::digest(payload));
+        assert_eq!(result.sha256.as_deref(), Some(expected_hash.as_str()));
+        assert_eq!(daemon.await.unwrap(), payload);
+    }
+
+    #[tokio::test]
+    async fn mock_daemon_cancel_during_response_wait_stops_immediately() {
+        let payload = b"fixture-cancel";
+        let (addr, daemon) = mock_clamd_delayed(
+            Duration::from_secs(10),
+            vec![b"stream: OK\0".to_vec()],
+            false,
+        )
+        .await;
+        let mut reader = bytes_reader(payload).await;
+        let (tx, cancel) = watch::channel(false);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _ = tx.send(true);
+        });
+        let start = std::time::Instant::now();
+        let result = stream_scan(&mut reader, addr, 1024, cancel, Duration::from_secs(10)).await;
+        let elapsed = start.elapsed();
+
+        assert_eq!(result.status, ScanStatus::Cancelled);
+        assert_eq!(result.reason.as_deref(), Some("cancelled"));
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "Cancellation must stop immediately, elapsed: {:?}",
+            elapsed
+        );
         let _ = daemon.await.unwrap();
     }
 
