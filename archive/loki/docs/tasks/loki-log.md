@@ -127,3 +127,12 @@ Short daily notes for Zon. Newest first. Detailed evidence stays in docs/qa and 
 - V-20 xong: artifacts/07ce3cc — setup 764a230e…d762, exe e3afda90…07ab (Loki tính lại khớp; build HEAD 07ce3cc sạch). Chạy KHÔNG biến env → mặc định 13310 → tick xanh. Chờ Zon gỡ bản ở sandbox Qeen, cài lại chỗ chuẩn, xóa biến User, reboot thử tunnel.
 - 2026-11-09: Zon gỡ/cài lại bản 07ce3cc vào %LOCALAPPDATA%\Zonendpoint, xóa biến User, reboot 05:34 → task tunnel tự chạy (lần đầu exit 255 lúc mạng chưa lên, 6s sau nối lại), app tick xanh + Quick Scan All Good. Hoàn tất V-19/V-20.
 - 2026-11-09 Audit folders: mọi nhánh vic/* đã push (ahead=0). Chưa lên GitHub: 2 commit QA local (Qeen-0a55516 825c901, Qeen-321d32b 58ddeb4), báo cáo QA untracked trong ~9 worktree Qeen, prompts+loki-log untracked ở restored/Zonendpoint-vic. E: 88% đầy (worktree ~5GB mỗi cái). Đề xuất dọn chờ Zon duyệt.
+- 2026-11-09 Dọn E: (Zon duyệt): push archive/qa-coordination 9e016af (54 file: QA report + prompt/log Loki; loại qeen-eicar.mjs), qa/q4-0a55516, qa/compact-321d32b. Xóa 31 worktree (Qeen/build/vic). E: 88% → 15% (128 GB trống). Giữ: Zonendpoint (24 dirty y nguyên), restored, recovery-export, tools. Tunnel PONG, app cài vẫn còn. Phát hiện: origin/main có docs/qa/evidence-8e8204a/qeen-eicar.mjs (ghi EICAR ra đĩa) — chờ Zon.
+
+## 2026-11-09 — V-21 gỡ script EICAR
+- Zon duyệt "Cho xóa". Antigravity tắt sau reboot → Loki mở lại, gửi V-21 (conversation "Remove EICAR Script From Main").
+- Vic: nhánh `vic/remove-eicar-script` 38dde9d + 5a861e4 (commit-notes), fast-forward được từ main 07ce3cc. Worktree đã tự xóa.
+- Loki kiểm: chỉ 3 file (xóa qeen-eicar.mjs, sửa 1 dòng report-8e8204a.md, 1 dòng commit-notes). Không còn chuỗi EICAR trên nhánh. Rust chỉ có tên signature trong test (không ghi ổ) — OK.
+- Chờ Zon: fast-forward main lên 5a861e4.
+- Zon duyệt "Gộp vào main" → Loki fast-forward origin/main 07ce3cc..5a861e4 (không force). Main không còn qeen-eicar.mjs.
+- Zon: lưu 6 file chỉ có ở repo gốc → archive/qa-coordination e58c58c, thư mục archive/root-zonendpoint/. Root không đổi (HEAD 2db42a8, 24 dirty).

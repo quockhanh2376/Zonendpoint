@@ -1,0 +1,15 @@
+﻿RESTORE INTO NEW EMPTY DIRECTORIES ONLY. Keep original workspaces untouched.
+For each manifest entry:
+  git clone <entry>/repository.bundle <new-directory>
+  git -C <new-directory> checkout --detach <Head from manifest>
+If staged.patch is nonempty:
+  git -C <new-directory> apply --index <absolute staged.patch path>
+If unstaged.patch is nonempty:
+  git -C <new-directory> apply <absolute unstaged.patch path>
+Copy CONTENTS of entry/untracked into new-directory, including hidden files.
+Compare git status against manifest. working-tree.patch is an alternative combined
+patch; DO NOT apply it in addition to staged.patch/unstaged.patch.
+Each bundle is independent of the original worktree paths. Restore submodules,
+Git LFS objects and ignored files separately if present. Review ignored-files list.
+Ignored files (including node_modules, target, dist, .env) are NOT included.
+Export may contain private source/untracked files: transfer privately.

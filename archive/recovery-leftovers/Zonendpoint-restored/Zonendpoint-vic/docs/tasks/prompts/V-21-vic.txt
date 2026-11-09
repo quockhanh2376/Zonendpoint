@@ -1,0 +1,8 @@
+Vic — V-21: gỡ script ghi EICAR khỏi main. Zon đã duyệt.
+Worktree mới từ repo E:\Zonendpoint: git worktree add E:\Zonendpoint-vic-v21 -b vic/remove-eicar-script origin/main (07ce3cc). Không đụng file trong E:\Zonendpoint.
+1. git rm docs/qa/evidence-8e8204a/qeen-eicar.mjs (KHÔNG chạy script, không tạo EICAR ở đâu cả).
+2. docs/qa/report-8e8204a.md dòng 41: thay lệnh chạy script bằng ghi chú "script đã gỡ 2026-11-09 (quy tắc không EICAR trên ổ)". Giữ eicar-raw-report.json.
+3. Commit mới (không rewrite history, không force-push), push nhánh, thêm 1 dòng vào docs/tasks/commit-notes.md.
+Không push/merge main.
+Báo cáo ngắn: chỉ lỗi, cần anh Zon confirm (kèm SHA).
+Xong thì xóa worktree của mình: git worktree remove E:\Zonendpoint-vic-v21.

@@ -1,0 +1,30 @@
+﻿[
+    {
+        "Folder":  "0-Zonendpoint",
+        "Source":  "E:\\Zonendpoint",
+        "Head":  "2db42a8124f19384d154588fac41d7bab791bb97",
+        "Branch":  "main",
+        "Status":  " M package-lock.json\n M src-tauri/icons/128x128.png\n M src-tauri/icons/128x128@2x.png\n M src-tauri/icons/32x32.png\n M src-tauri/icons/Square107x107Logo.png\n M src-tauri/icons/Square142x142Logo.png\n M src-tauri/icons/Square150x150Logo.png\n M src-tauri/icons/Square284x284Logo.png\n M src-tauri/icons/Square30x30Logo.png\n M src-tauri/icons/Square310x310Logo.png\n M src-tauri/icons/Square44x44Logo.png\n M src-tauri/icons/Square71x71Logo.png\n M src-tauri/icons/Square89x89Logo.png\n M src-tauri/icons/StoreLogo.png\n M src-tauri/icons/icon.ico\n M src-tauri/icons/icon.png\n?? AGENTS.md\n?? Zonendpoint_App_Icons-v3.zip\n?? Zonendpoint_App_Icons-v3/public/brand/badge-dark-slogan-1024.png\n?? Zonendpoint_App_Icons-v3/public/brand/badge-light-slogan-1024.png\n?? Zonendpoint_App_Icons-v3/public/brand/logo-dark-full.png\n?? Zonendpoint_App_Icons-v3/public/brand/logo-dark-slogan-transparent.png\n?? Zonendpoint_App_Icons-v3/public/brand/logo-dark-slogan.png\n?? Zonendpoint_App_Icons-v3/public/brand/logo-light-full.png\n?? Zonendpoint_App_Icons-v3/public/brand/logo-light-slogan-transparent.png\n?? Zonendpoint_App_Icons-v3/public/brand/logo-light-slogan.png\n?? Zonendpoint_App_Icons-v3/public/brand/shield-dark-1024.png\n?? Zonendpoint_App_Icons-v3/public/brand/shield-light-1024.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/128x128.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/128x128@2x.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/32x32.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/Square107x107Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/Square142x142Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/Square150x150Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/Square284x284Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/Square30x30Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/Square310x310Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/Square44x44Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/Square71x71Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/Square89x89Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/StoreLogo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/128x128.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/128x128@2x.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/32x32.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/Square107x107Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/Square142x142Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/Square150x150Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/Square284x284Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/Square30x30Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/Square310x310Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/Square44x44Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/Square71x71Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/Square89x89Logo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/StoreLogo.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/icon.ico\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/dark/icon.png\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/icon.ico\n?? Zonendpoint_App_Icons-v3/src-tauri/icons/icon.png\n?? docs/Zonendpoint_Vic_Qeen_Codex_Prompts.md\n?? docs/architecture-review.md\n?? docs/daily.md\n?? docs/handoffs/qeen-to-vic.md\n?? docs/implementation-plan.md\n?? docs/project-status.md\n?? docs/qa/report-2db42a8.md\n?? docs/qa/test-plan.md\n?? docs/roadmap.md\n?? docs/v1.0.0-scope.md\n?? docs/zonendpoint_ed25519_secure_gateway_licensing_spec.md\n?? docs/zonendpoint_system_architecture_specs.md\n?? src-tauri/Cargo.lock\n?? src-tauri/icons/dark/128x128.png\n?? src-tauri/icons/dark/128x128@2x.png\n?? src-tauri/icons/dark/32x32.png\n?? src-tauri/icons/dark/Square107x107Logo.png\n?? src-tauri/icons/dark/Square142x142Logo.png\n?? src-tauri/icons/dark/Square150x150Logo.png\n?? src-tauri/icons/dark/Square284x284Logo.png\n?? src-tauri/icons/dark/Square30x30Logo.png\n?? src-tauri/icons/dark/Square310x310Logo.png\n?? src-tauri/icons/dark/Square44x44Logo.png\n?? src-tauri/icons/dark/Square71x71Logo.png\n?? src-tauri/icons/dark/Square89x89Logo.png\n?? src-tauri/icons/dark/StoreLogo.png\n?? src-tauri/icons/dark/icon.ico\n?? src-tauri/icons/dark/icon.png\n?? src-tauri/icons/public/brand/badge-dark-slogan-1024.png\n?? src-tauri/icons/public/brand/badge-light-slogan-1024.png\n?? src-tauri/icons/public/brand/logo-dark-full.png\n?? src-tauri/icons/public/brand/logo-dark-slogan-transparent.png\n?? src-tauri/icons/public/brand/logo-dark-slogan.png\n?? src-tauri/icons/public/brand/logo-light-full.png\n?? src-tauri/icons/public/brand/logo-light-slogan-transparent.png\n?? src-tauri/icons/public/brand/logo-light-slogan.png\n?? src-tauri/icons/public/brand/shield-dark-1024.png\n?? src-tauri/icons/public/brand/shield-light-1024.png"
+    },
+    {
+        "Folder":  "1-Zonendpoint-vic",
+        "Source":  "E:\\Zonendpoint-vic",
+        "Head":  "24876647ebf1f621b3c0a567e60efd40500d6154",
+        "Branch":  "vic/mvp-first-scan",
+        "Status":  ""
+    },
+    {
+        "Folder":  "2-Zonendpoint-QA-e3ed872",
+        "Source":  "E:\\Zonendpoint-QA-e3ed872",
+        "Head":  "e3ed872ddfd4a95d9bb28a3cc6da53a656e0b0ae",
+        "Branch":  "HEAD",
+        "Status":  "?? docs/handoffs/qeen-to-vic.md\n?? docs/qa/report-e3ed872.md"
+    },
+    {
+        "Folder":  "3-Zonendpoint-QA-2db42a8",
+        "Source":  "E:\\Zonendpoint-QA-2db42a8",
+        "Head":  "2db42a8124f19384d154588fac41d7bab791bb97",
+        "Branch":  "HEAD",
+        "Status":  " M package-lock.json\n?? docs/Zonendpoint_Vic_Qeen_Codex_Prompts.md\n?? docs/architecture-review.md\n?? docs/daily.md\n?? docs/handoffs/qeen-to-vic.md\n?? docs/implementation-plan.md\n?? docs/qa/report-2db42a8.md\n?? docs/qa/test-plan.md\n?? docs/zonendpoint_system_architecture_specs.md\n?? src-tauri/Cargo.lock"
+    }
+]

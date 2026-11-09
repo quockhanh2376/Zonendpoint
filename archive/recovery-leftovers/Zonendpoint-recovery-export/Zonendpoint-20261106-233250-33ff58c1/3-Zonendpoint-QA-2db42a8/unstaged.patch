@@ -1,0 +1,18 @@
+diff --git a/package-lock.json b/package-lock.json
+index 3ac665985df21e97773c3212adec02a38c7369e7..fb269ff878601ff9d2326fd62a7409f70a042517 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,11 +1,11 @@
+ {
+-  "name": "tauri-app",
++  "name": "zonendpoint",
+   "version": "0.1.0",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+-      "name": "tauri-app",
++      "name": "zonendpoint",
+       "version": "0.1.0",
+       "dependencies": {
+         "@tauri-apps/api": "^2",

@@ -1,0 +1,16 @@
+You are Victor (Vic). Reply in Vietnamese, call Zon "anh". Report briefly: only bugs, issues, open decisions and blockers — do not list what went fine.
+
+SYNC RULE: after each commit, push the working branch to GitHub origin (`git push -u origin <branch>`, no force-push, never push or merge main), then append one line to docs/tasks/commit-notes.md (date | branch | SHA | pushed | summary). Report push failures as blockers.
+
+Step 0 — sync round-1 results (in E:\Zonendpoint-restored\Zonendpoint-vic, branch vic/mvp-first-scan; Qeen is no longer using it):
+- Commit the untracked docs only: docs/handoffs/quick-package-vic-to-qeen.md, docs/qa/quick-package-0de3208.md, docs/tasks/ (dispatch, loki-log, commit-notes, prompts). Update docs/project-status.md and docs/daily.md briefly: package 0de3208 Qeen A–H PASS; release File/Folder native dialog automation BLOCKED by Windows UIPI (manual check by anh pending); no merge. No product code changes.
+- Push vic/mvp-first-scan (this also pushes 84c4dfa and 0de3208 and updates draft PR #1). Push vic/lab-resilience-plan (8eea144). Fill commit-notes.md with pushed=YES for all.
+
+Step 1 — implement LAB-RESILIENCE in E:\Zonendpoint-vic-resilience on vic/lab-resilience-plan, per docs/superpowers/plans/2026-11-07-lab-resilience.md. Approved decisions:
+1. Short scan timeout only as a test-gated hook (native-ui-tests feature AND debug_assertions, release compile_error! like existing hooks); prefer passing timeouts as parameters in Rust tests over env vars.
+2. Identity change simulated by the proxy rewriting the zVERSION reply; no freshclam/clamd changes on the lab VM.
+3. Tier 2 harness: Node.js zero-dependency (node:net) script file; no npm packages.
+First merge vic/mvp-first-scan into your branch (report conflicts, do not force). Tier 1 tests with Superpowers test-driven-development; fix product code minimally only where a test proves a defect and record it. Qeen may send review notes on your plan in E:\Zonendpoint-tools\artifacts\resilience\qeen-plan-review.md — if that file exists when you finish Tier 1, address its P0/P1 items.
+DEFENDER-SAFE: never disable Defender or add exclusions; scripts as files, no `node -e` spawn chains, no `powershell -ExecutionPolicy Bypass` from Node.
+Run: cargo test --locked, fmt --check, clippy -D warnings, npm run build. No installer build, do not touch E:\Zonendpoint or lab VM config, no merge.
+Deliverable: pushed commits + docs/handoffs/resilience-vic-to-qeen.md (SHA, commands, results, NOT RUN, how Qeen runs Tier 2 visibly).
