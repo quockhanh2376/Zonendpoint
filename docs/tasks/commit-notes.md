@@ -71,5 +71,6 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-10 | vic/malwarebazaar | fb00733 | YES | docs(tasks): track final commit in commit-notes |
 | 2026-11-10 | vic/malwarebazaar | 717ed4a | YES | feat(feeds): verify live MalwareBazaar ingestion, resolve Q-22 review items, and update personal non-commercial scope (Task V-34) |
 | 2026-11-10 | vic/malwarebazaar | 865a1a4 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-10 | vic/malwarebazaar | 691c44b | YES | feat(feeds): deploy MalwareBazaar hashes to lab clamd and add rollback script (Task V-35) |
 
 
