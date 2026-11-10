@@ -502,7 +502,7 @@ pub async fn scan_cli(path: PathBuf) -> scanner::ScanResult {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(ScanManager::new())
@@ -519,8 +519,60 @@ pub fn run() {
             get_server_config,
             save_server_config
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle().clone();
+                let manager = app.state::<ScanManager>();
+                if let Some(active_id) = manager.active_scan_id() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    manager.request_cancel(&active_id);
+                    let app_clone = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let start = std::time::Instant::now();
+                        while app_clone.state::<ScanManager>().active_scan_id().is_some() {
+                            if start.elapsed() > std::time::Duration::from_secs(5) {
+                                break;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        }
+                        app_clone.cleanup_before_exit();
+                        std::process::exit(0);
+                    });
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
+            let manager = app_handle.state::<ScanManager>();
+            if let Some(active_id) = manager.active_scan_id() {
+                api.prevent_exit();
+                manager.request_cancel(&active_id);
+                let app = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let start = std::time::Instant::now();
+                    while app.state::<ScanManager>().active_scan_id().is_some() {
+                        if start.elapsed() > std::time::Duration::from_secs(5) {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                    app.cleanup_before_exit();
+                    std::process::exit(0);
+                });
+            } else {
+                app_handle.cleanup_before_exit();
+                std::process::exit(code.unwrap_or(0));
+            }
+        }
+        tauri::RunEvent::Exit => {
+            std::process::exit(0);
+        }
+        _ => {}
+    });
 }
 
 #[cfg(test)]
