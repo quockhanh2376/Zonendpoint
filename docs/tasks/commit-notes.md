@@ -67,3 +67,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-09 | vic/version-label | 18cafd5 | YES | test(native): read expected version from tauri.conf.json (V-27) |
 | 2026-11-10 | vic/release-0.2.1 | e5e190d | YES | feat(release): bump version to 0.2.1 and add CHANGELOG (V-29) |
 | 2026-11-10 | vic/release-0.2.1 | d93d183 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-10 | vic/close-fix | e8b249d | YES | fix(app): ensure graceful window close and scan cancellation on exit (V-30) |
