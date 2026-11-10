@@ -89,6 +89,20 @@ See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Window
   2. **Automated Daily YARA-Forge Core Updates**: Deployed `/usr/local/bin/zonendpoint-yara-update.py`, `/usr/local/bin/zonendpoint-yara-rollback.sh`, and systemd unit/timer `zonendpoint-yara-update.timer` firing nightly between 20:00 and 22:00 UTC (03:00 - 05:00 AM ICT, randomized delay 7200s). Enforces GitHub API release check, core zip download, `filter_yara_clamav.py` (SUSP_ excluded), temporary DB pre-flight checks (reasonable rule count, benign clean, ZonQA marker detected), atomic file replacement, backup retention, zero-downtime clamd reload, and PING verification.
   3. **Verification**: Manual run upgraded ruleset to release `20261108` (3,676 accepted rules, active file SHA256 `fdbf84cff5e50a274f8e53476f22cff38c06bb65dc38fdeae4ef5d689433d6cc`, total signatures 3,631,934, clamd PONG verified). Immediate second manual run confirmed idempotency (exited in <1s without download). Invariants strictly maintained: clamd on 127.0.0.1:3310, PasswordAuthentication yes preserved, timers active. Full operations report: [yara-daily-update.md](ops/yara-daily-update.md). Branch `vic/yara-daily`. No merge.
 
+## Task V-33 — MalwareBazaar (abuse.ch) Server Feed Integration (2026-11-10)
+- Branch: `vic/malwarebazaar` (base `0979f5f`).
+- Implemented `scripts/feeds/zonendpoint-malwarebazaar.py` with commands: `check`, `fetch-recent`, `export-hsb`, and `test-hsb`.
+- Key security invariants: Auth-Key read strictly from `/etc/zonendpoint/abusech.key` (root:root 0600), never logged, output, or passed in argv; header `Auth-Key` authentication; no malware binary downloads (`get_file` forbidden); no sample uploads.
+- Hard rate limit: maximum 3 requests/minute and 500 requests/day persisted on disk (`/opt/zonendpoint/malwarebazaar/rate_limit.json`); fail-fast on 429, invalid key, or blocked account (no continuous retry); bounded backoff for transient errors.
+- SQLite storage in `/opt/zonendpoint/malwarebazaar/malwarebazaar.db` with ACID transactions and rollback on partial errors; SHA-256 normalized to 64 lowercase hex, invalid rows dropped, duplicates merged.
+- Manual execution only: NO systemd timer/cron. Proposed bootstrap/backfill options (CSV/dump export) documented and awaiting Zon's approval.
+- ClamAV hash signature (.hsb) export verified via `clamscan -d` on temporary DB with 0 False Positives on benign system files; live clamd on `/var/lib/clamav/` preserved untouched.
+- Quality gate: Automated test suite `scripts/feeds/test_zonendpoint_malwarebazaar.py` (10/10 PASS on lab Ubuntu 26.04).
+- Deployed `/usr/local/bin/zonendpoint-malwarebazaar.py` on lab host `100.96.250.245`.
+- Status: Live ingestion BLOCKED awaiting Zon to input Auth-Key into `/etc/zonendpoint/abusech.key`; client synchronization NOT IMPLEMENTED (server-only storage).
+- Operations runbook: [malwarebazaar.md](ops/malwarebazaar.md); handoff: [malwarebazaar-vic-to-qeen.md](handoffs/malwarebazaar-vic-to-qeen.md).
+
+
 ## Limits / next acceptance
 PASS is scoped to observed core/native and unsigned NSIS current-user tests, not production readiness. Exact EICAR through Windows remains BLOCKED by Microsoft Defender (Operational 1116/1117, quarantine); app reported error 225, never CLEAN. ClamAV EICAR on Ubuntu and native positive detection via temporary harmless lab signature passed; signature removed/cleanup verified.
 
