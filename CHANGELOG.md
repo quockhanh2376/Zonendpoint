@@ -2,6 +2,15 @@
 
 All notable changes to Zonendpoint are documented in this file.
 
+## [0.2.1] - 2026-11-10
+
+### Added
+- **Version label**: Hiện version dưới nút trạng thái.
+- **Lab feed**: YARA Forge tự cập nhật hằng đêm, gỡ luật test ZonQA khỏi clamd.
+
+### Fixed
+- **Quét file lớn**: Quét file lớn không còn "read server response timed out" (chờ clamd tới 120s, Cancel vẫn dừng ngay).
+
 ## [0.2.0] - 2026-11-09
 
 ### Added
