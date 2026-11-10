@@ -69,5 +69,6 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-10 | vic/release-0.2.1 | d93d183 | YES | docs(tasks): track final commit in commit-notes |
 | 2026-11-10 | vic/malwarebazaar | 24e2fa7 | YES | feat(feeds): integrate MalwareBazaar feed ingestion and hash normalization on server (Task V-33) |
 | 2026-11-10 | vic/malwarebazaar | fb00733 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-10 | vic/malwarebazaar | 717ed4a | YES | feat(feeds): verify live MalwareBazaar ingestion, resolve Q-22 review items, and update personal non-commercial scope (Task V-34) |
 
 
