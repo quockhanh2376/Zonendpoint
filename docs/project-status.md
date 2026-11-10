@@ -89,24 +89,31 @@ See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Window
   2. **Automated Daily YARA-Forge Core Updates**: Deployed `/usr/local/bin/zonendpoint-yara-update.py`, `/usr/local/bin/zonendpoint-yara-rollback.sh`, and systemd unit/timer `zonendpoint-yara-update.timer` firing nightly between 20:00 and 22:00 UTC (03:00 - 05:00 AM ICT, randomized delay 7200s). Enforces GitHub API release check, core zip download, `filter_yara_clamav.py` (SUSP_ excluded), temporary DB pre-flight checks (reasonable rule count, benign clean, ZonQA marker detected), atomic file replacement, backup retention, zero-downtime clamd reload, and PING verification.
   3. **Verification**: Manual run upgraded ruleset to release `20261108` (3,676 accepted rules, active file SHA256 `fdbf84cff5e50a274f8e53476f22cff38c06bb65dc38fdeae4ef5d689433d6cc`, total signatures 3,631,934, clamd PONG verified). Immediate second manual run confirmed idempotency (exited in <1s without download). Invariants strictly maintained: clamd on 127.0.0.1:3310, PasswordAuthentication yes preserved, timers active. Full operations report: [yara-daily-update.md](ops/yara-daily-update.md). Branch `vic/yara-daily`. No merge.
 
-## Tasks V-33 & V-34 — MalwareBazaar (abuse.ch) Server Feed Integration (2026-11-10)
+## Tasks V-33, V-34 & V-35 — MalwareBazaar (abuse.ch) Server Feed & clamd Ingestion (2026-11-10)
 - Branch: `vic/malwarebazaar` (base `0979f5f`).
-- Implemented `scripts/feeds/zonendpoint-malwarebazaar.py` with commands: `check`, `fetch-recent`, `export-hsb`, and `test-hsb`.
+- Implemented `scripts/feeds/zonendpoint-malwarebazaar.py` with commands: `check`, `fetch-recent`, `export-hsb`, `test-hsb`, and `deploy-hsb`.
 - Key security invariants: Auth-Key read strictly from `/etc/zonendpoint/abusech.key` (root:root 0600), never logged, output, or passed in argv; header `Auth-Key` authentication; no malware binary downloads (`get_file` forbidden); no sample uploads.
 - Hard rate limit: maximum 3 requests/minute and 500 requests/day persisted on disk (`/opt/zonendpoint/malwarebazaar/rate_limit.json`); fail-fast on 429, invalid key, or blocked account (no continuous retry); bounded backoff for transient errors.
 - SQLite storage in `/opt/zonendpoint/malwarebazaar/malwarebazaar.db` with ACID transactions and rollback on partial errors; SHA-256 normalized to 64 lowercase hex, invalid rows dropped, duplicates merged.
 - Manual execution only: NO systemd timer/cron. Proposed bootstrap/backfill options (CSV/dump export) documented and awaiting Zon's approval.
 - ClamAV hash signature (.hsb) export verified via `clamscan -d` on temporary DB with 0 False Positives on benign system files; live clamd on `/var/lib/clamav/` preserved untouched (127.0.0.1:3310 PONG verified).
 - Scope: Zon confirmed 2026-11-10 strictly for non-commercial use on 1–2 personal machines (corporate use requires reviewing abuse.ch / Spamhaus terms).
-- Quality gate: Automated test suite `scripts/feeds/test_zonendpoint_malwarebazaar.py` expanded per Q-22 (13/13 PASS on lab Ubuntu 26.04: timeout, user_blacklisted, 500/day persistence, DB rollback checksum).
-- Deployed `/usr/local/bin/zonendpoint-malwarebazaar.py` on lab host `100.96.250.245`.
+- Quality gate: Automated test suite `scripts/feeds/test_zonendpoint_malwarebazaar.py` expanded per Q-22 and V-35 to 19/19 PASS on lab Ubuntu 26.04 (timeout, user_blacklisted, 500/day persistence, DB rollback checksum, empty DB abort, signature naming format, pre-flight failure halt, reload failure automatic rollback, first-deploy cleanup, signature count delta verification).
+- Deployed `/usr/local/bin/zonendpoint-malwarebazaar.py` and `/usr/local/bin/zonendpoint-malwarebazaar-rollback.sh` on lab host `100.96.250.245`.
 - Live Execution Verification (Task V-34):
   - Zon entered Auth-Key (48 chars) into `/etc/zonendpoint/abusech.key` (`0600 root:root`).
   - Loki ran initial `check` (1 request, status ok, 100 items).
   - Vic ran live `fetch-recent` Run 1: 100 received, 100 valid, 100 inserted, 0 updated, 0 dropped, total 100 in DB.
   - Vic ran live `fetch-recent` Run 2 (dedup proof): 100 received, 100 valid, 0 inserted, 100 updated, 0 dropped, total in DB 100 (0 duplicate rows created; idempotency confirmed).
   - Total requests used: 3/500 daily budget (2 requests used in Task V-34, ≤ 5 task limit).
-- Status: Server feed operational on lab host. Client synchronization: NOT IMPLEMENTED / BLOCKED (client queries clamd via tunnel and cannot consume SQLite hash data; server-only storage).
+- Task V-35 Live clamd Ingestion & Rollback (Zon approved 2026-11-10):
+  - Server-only architecture: server calls abuse.ch API and persists to SQLite; 2–3 desktop clients benefit transparently through live clamd via SSH tunnel (`127.0.0.1:13310 -> 127.0.0.1:3310`, `zINSTREAM`). Client requires zero changes and zero keys.
+  - Ingested 100 normalized hashes into active clamd database `/var/lib/clamav/malwarebazaar.hsb` (`clamav:clamav 0644`).
+  - Staging `.hsb` generation -> temporary DB verification with base DBs (0 errors, benign clean) -> backup (`/var/backups/clamav-malwarebazaar/`) -> atomic replace -> zero-downtime `zRELOAD\0` -> PING verified (`PONG`) -> clamd signature count delta verified.
+  - Live clamd signatures: **7,421,508 -> 7,421,608** (+100 signatures, exactly matching the 100 hashes).
+  - Live rollback verified: tested standalone `/usr/local/bin/zonendpoint-malwarebazaar-rollback.sh` restoring backup, reloaded clamd, verified PONG; redeployed active signatures successfully.
+  - Real API requests used in Task V-35: **0** (used existing SQLite hashes).
+  - Schedule: **NO AUTOMATED SCHEDULE** (updates remain strictly manual).
 - Operations runbook: [malwarebazaar.md](ops/malwarebazaar.md); handoff: [malwarebazaar-vic-to-qeen.md](handoffs/malwarebazaar-vic-to-qeen.md).
 
 
