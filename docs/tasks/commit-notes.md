@@ -85,5 +85,10 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-11 | vic/merge-v38 | de51ffe | YES | fix(feeds): sanitize Auth-Key in MalwareBazaar URL export errors and update J-01 handoff |
 | 2026-11-11 | main | de51ffe | YES | main fast-forwarded 0979f5f → de51ffe (Zon approved "Merge cả hai", pushed to origin) |
 | 2026-11-11 | vic/merge-v38 | 42f662a | YES | docs(v38): record V-38 merge of adaptive-concurrency and malwarebazaar into main |
+| 2026-11-11 | jacky/threatfox | b8490d7 | YES | fix(feeds): resolve Q-28 ThreatFox defects and verify lab live first run (Task V-39) |
+| 2026-11-11 | jacky/threatfox | da74fc0 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-11 | jacky/threatfox | 8eb08e7 | YES | feat(feeds): complete ThreatFox live deployment and real export parser (Task V-40) |
+| 2026-11-11 | jacky/threatfox | 3e9afcb | YES | docs(tasks): track Task V-40 snapshot SHA and commit-notes |
+
 
 
