@@ -284,6 +284,60 @@ class ThreatFoxTests(unittest.TestCase):
             with db.connect() as c:
                 self.assertEqual(c.execute("SELECT count(*) FROM iocs").fetchone()[0], 0)
 
+    def test_import_rows_log_reports_unique_sha256_and_matches_hsb_export(self):
+        # Verify Q-29: duplicate sha256 rows in CSV are merged in DB;
+        # log outputs unique sha256 count from DB (not raw CSV count) and net_deployable matches .hsb line count.
+        rows = [
+            {"ioc": "a" * 64, "ioc_type": "sha256", "malware": "OldFam", "confidence_level": 50},
+            {"ioc": "a" * 64, "ioc_type": "sha256", "malware": "NewFam", "confidence_level": 90},
+            {"ioc": "b" * 64, "ioc_type": "sha256", "malware": "SecondFam", "confidence_level": 80},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            db_path = pathlib.Path(d) / "tf.db"
+            db = tf.ThreatDatabase(db_path)
+
+            # Setup mock MalwareBazaar DB with one overlapping hash ('b'*64)
+            mb_path = pathlib.Path(d) / "mb.db"
+            import sqlite3
+            with sqlite3.connect(mb_path) as c:
+                c.execute("CREATE TABLE malware_hashes(sha256 TEXT)")
+                c.execute("INSERT INTO malware_hashes VALUES(?)", ("b" * 64,))
+
+            old_env = os.environ.get("MALWAREBAZAAR_DB_PATH")
+            os.environ["MALWAREBAZAAR_DB_PATH"] = str(mb_path)
+            try:
+                buf = io.StringIO()
+                with mock.patch("sys.stdout", buf):
+                    imported = db.import_rows(rows)
+                output = buf.getvalue()
+
+                self.assertEqual(imported, 3)
+                # Raw CSV count of sha256 was 3, but unique hashes in DB is 2.
+                # MalwareBazaar duplicate is 1, so net deployable is 2 - 1 = 1.
+                self.assertIn("sha256=2", output)
+                self.assertIn("mb_dupes_excluded=1", output)
+                self.assertIn("net_deployable_sha256=1", output)
+
+                # Verify DB merged duplicates and retained latest malware name & confidence
+                with db.connect() as c:
+                    self.assertEqual(c.execute("SELECT count(*) FROM hashes").fetchone()[0], 2)
+                    row = c.execute("SELECT malware, confidence FROM hashes WHERE sha256=?", ("a" * 64,)).fetchone()
+                    self.assertEqual(row[0], "NewFam")
+                    self.assertEqual(row[1], 90)
+
+                # Verify exported .hsb line count matches net_deployable_sha256 exactly
+                hsb_path = pathlib.Path(d) / "test.hsb"
+                hsb_count = db.export_hsb(hsb_path)
+                self.assertEqual(hsb_count, 1)
+                self.assertIn("net_deployable_sha256=1", output)
+                hsb_lines = [line for line in hsb_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                self.assertEqual(len(hsb_lines), hsb_count)
+            finally:
+                if old_env is None:
+                    os.environ.pop("MALWAREBAZAAR_DB_PATH", None)
+                else:
+                    os.environ["MALWAREBAZAAR_DB_PATH"] = old_env
+
 
 if __name__ == "__main__":
     unittest.main()

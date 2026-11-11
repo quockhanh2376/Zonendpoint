@@ -165,7 +165,7 @@ class ThreatDatabase:
                 except Exception:
                     pass
 
-            sha256_count = counts_by_type.get("sha256", 0)
+            sha256_count = conn.execute("SELECT count(*) FROM hashes").fetchone()[0]
             net_sha256 = sha256_count - mb_dupes
 
             print(

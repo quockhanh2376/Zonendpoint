@@ -25,6 +25,7 @@ first_seen_utc, ioc_id, ioc_value, ioc_type, threat_type, fk_malware, malware_al
 - Timestamps are `first_seen_utc` and `last_seen_utc`.
 - ThreatFox does NOT provide a `file_size` column in this export (all exported file hashes use ClamAV wildcard size `*` with FLEVEL 73).
 - Rejection threshold: If imported rows = 0 or malformed rejected rows > 5%, import transaction rolls back, halts immediately without deploying, and logs `[ALERT-LOKI]`.
+- Duplicate resolution: File export CSV thật từ ThreatFox chứa các dòng trùng `(ioc, ioc_type)` (thực tế có 899 dòng trùng lặp, trong đó có 1 dòng trùng SHA-256). Hệ thống xử lý qua SQLite `ON CONFLICT(ioc, ioc_type) DO UPDATE` để gộp các bản ghi và giữ lại thông tin mới nhất (malware, confidence, last_seen), theo đúng phê duyệt của Zon. Bảng `hashes` lưu 45.040 SHA-256 duy nhất (từ 45.041 dòng thô). Log của `import_rows` đếm trực tiếp số SHA-256 duy nhất từ DB (45.040) thay vì số dòng CSV thô (45.041), giúp `net_deployable_sha256 = 45.040 - 23.564 = 21.476` khớp chính xác 100% với số dòng chữ ký thực tế xuất ra file `threatfox.hsb`.
 
 ## Security and architecture
 
@@ -65,15 +66,15 @@ sudo /usr/local/bin/zonendpoint-threatfox-rollback.sh
      - Imported valid rows: 135,585
      - Rejected rows (malformed): 0 (0.00% <= 5% threshold)
      - Breakdown by IOC type:
-       - `sha256`: 45,041
+       - `sha256`: 45,041 (dòng thô) -> 45,040 (hash duy nhất trong DB)
        - `ip:port`: 29,323
        - `domain`: 29,125
        - `url`: 19,026
        - `md5`: 7,058
        - `sha1`: 6,012
-     - SHA-256 hashes in ThreatFox: 45,041
+     - SHA-256 hashes duy nhất trong ThreatFox DB: 45,040 (từ 45,041 dòng thô, 1 hash trùng gộp bản mới nhất)
      - Duplicates with MalwareBazaar excluded: 23,564
-     - Net unique deployable SHA-256 for clamd: 21,476
+     - Net unique deployable SHA-256 for clamd: 21,476 (45,040 - 23,564) khớp số dòng .hsb
    - Offline replay verification (`import-file`): Tested on `/tmp/test_import.db` using saved dump file; 135,585 rows imported cleanly with 0 requests consumed.
 
 3. **Live ClamAV Deployment (`deploy-hsb`)**:
