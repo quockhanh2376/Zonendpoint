@@ -78,3 +78,10 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-11 | jacky/adaptive-concurrency | bab14a0 | YES | feat(scan): adapt folder concurrency to client capacity (J-01; pushed by Loki) |
 | 2026-11-11 | vic/malwarebazaar | 0109d5a | YES | docs(feeds): polish MalwareBazaar docs and docstrings per QA Q-25 review (Task V-37) |
 | 2026-11-11 | vic/malwarebazaar | 86a6b7f | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-11 | vic/malwarebazaar | 4f13d3f | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-11 | jacky/adaptive-concurrency | 81984ad | YES | docs(handoff): record J-01 push blocker (resolved: pushed by Loki) |
+| 2026-11-11 | vic/merge-v38 | 3c91fcf | YES | Merge branch 'origin/jacky/adaptive-concurrency' into vic/merge-v38 |
+| 2026-11-11 | vic/merge-v38 | f8aa4d8 | YES | Merge branch 'origin/vic/malwarebazaar' into vic/merge-v38 |
+| 2026-11-11 | vic/merge-v38 | de51ffe | YES | fix(feeds): sanitize Auth-Key in MalwareBazaar URL export errors and update J-01 handoff |
+| 2026-11-11 | main | de51ffe | YES | main fast-forwarded 0979f5f → de51ffe (Zon approved "Merge cả hai", pushed to origin) |
+

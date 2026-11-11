@@ -1,16 +1,14 @@
-# Project status â€” 2026-11-08
+# Project status — 2026-11-11
 
-Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Integration of `vic/ui-compact` (Task V-8) and `vic/cache-reason` (Task V-11 / P1-01) approved by Zon (Task V-12) on branch `vic/integrate-ui-cache`. Zon tested Release Candidate `79f0f59` manually: OK. GitHub main fast-forwarded `2db42a8` â†’ `ed1088c` (Zon approved, Loki pushed). Fix for finding P1-01 (cache threat name preservation) and UI compact layout merged into unified candidate branch for Qeen independent verification.
+Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Integration of J-01 (`jacky/adaptive-concurrency`, Q-26 PASS) and MalwareBazaar server feed (`vic/malwarebazaar`, Q-22..Q-25 PASS) approved by Zon (2026-11-11 "Merge cả hai") in Task V-38. Fast-forwarded `main` from `0979f5f` to `de51ffe` (pushed to origin).
 
 ## Active checkout/snapshot
-- Implementation: E:\Zonendpoint-vic-integrate, branch vic/integrate-ui-cache (base ed1088c).
-- Integrated branches:
-  - `vic/ui-compact` (code SHA `321d32b`): Task V-8 UI compact layout. Moved server status dot next to ZonEndpoint logo (left column, aligned with shield/wordmark); moved Light/Dark theme toggle into scan card header row; no floating controls in window top-right; maintained 44Ã—44px hit targets, aria-labels, and tab focus order. Native mock 17/17 pass.
-  - `vic/cache-reason` (code SHA `d91cc29`): Fix finding P1-01 (`scan_cache` preserves threat name on cache hit for INFECTED verdicts). Schema migration `user_version` 1 -> 2 adds `threat_name TEXT`; legacy v1 rows with NULL threat safely treated as cache miss; CLEAN preserved. Rust tests 58/58 pass.
-- Artifacts & handoffs from source branches:
-  - UI-COMPACT: NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`A29C1ABB19F97E666CA674492029D854A987A3A1C829EDB84FDF42ED6D4092CF`) and standalone `zonendpoint.exe` (`DEA2944DBF1C6203927D5C3328D1BA5D125E259D19D545F3C60D349C4AA22AE2`) at `E:\Zonendpoint-tools\artifacts\321d32b\`. Screenshots (`idle-light.png`, `idle-dark.png`, `all-good-light.png`, `all-good-dark.png`) captured in the same directory. Handoff doc: [ui-compact-vic-to-qeen.md](handoffs/ui-compact-vic-to-qeen.md).
-  - CACHE-REASON: NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`34E5DE6027FB89029CE951D2D33F68C2007D2354E2965854CBBD6E944F1E0E7E`) and standalone `zonendpoint.exe` (`AE298A429F0B3B8D3EFF6AEB2A694BF3C32092BBF115B65DAD59541AAC0618F7`) at `E:\Zonendpoint-tools\artifacts\d91cc29\`. Handoff doc: [cache-reason-vic-to-qeen.md](handoffs/cache-reason-vic-to-qeen.md).
-- Artifacts (Integrated Snapshot 69d8577): NSIS installer `Zonendpoint_0.1.0_x64-setup.exe` (`9B4E8D693E9D47B59C928B2124E0F01A9C17B9A5A74E28515D0A8CC6C052C728`) and standalone `zonendpoint.exe` (`8FC2193767F747E66B71214667DCCEA0E773A2629410E0D7D059EB82B83D913C`) at `E:\Zonendpoint-tools\artifacts\69d8577\`. Handoff doc: [integrate-vic-to-qeen.md](handoffs/integrate-vic-to-qeen.md).
+- Implementation: `main` at commit `de51ffee3d98a47f7d396daccd727ac752310c31` (`de51ffe`).
+- Merged branches:
+  - `origin/jacky/adaptive-concurrency` (tip `81984ad`, code `bab14a0`, Q-26 PASS): client adaptive scan concurrency based on physical RAM and CPU cores, capped at 4, server backoff on pressure.
+  - `origin/vic/malwarebazaar` (tip `4f13d3f`, code `0109d5a`, Q-22..Q-25 PASS): server-only feed ingestion (`scripts/feeds/zonendpoint-malwarebazaar.py`), full dump bootstrap (1,171,240 signatures in `/var/lib/clamav/malwarebazaar.hsb`), live clamd zero-downtime reload (signatures 7,421,608 -> 8,592,748), rollback script.
+  - Key security hardening (`de51ffe`): sanitized Auth-Key in abuse.ch export download URLs across exceptions, logs, and error traces (`<AUTH-KEY>`, `from None`), added mock tests 27 and 28 in `test_zonendpoint_malwarebazaar.py` (28/28 PASS, 0 real requests).
+- Handoff doc: [merge-v38-vic-to-qeen.md](handoffs/merge-v38-vic-to-qeen.md).
 - Completed on branch `vic/cache-reason`:
   1. **P1-01 Cache Threat Name**: Added `threat_name TEXT` to SQLite `scan_cache` schema (migrated `user_version` 1 -> 2).
   2. **INFECTED Preservation**: Cache hits for infected entries return exact threat name (e.g. `YARA.<rule>.UNOFFICIAL`) instead of "verified content cache hit".
@@ -154,9 +152,24 @@ Code snapshot `bab14a0f936670cb58de302fc13352cb01f4f76a` on `jacky/adaptive-conc
 
 Measured on this 8 GiB / 4 logical CPU client against the already-running loopback tunnel and `C:\Program Files` (12,886 files; 12,875 CLEAN, 3 ERROR, 8 SKIPPED; incomplete both runs): baseline first scan 488.6 s, cache scan 239.0 s; updated first scan 613.6 s, cache scan 107.0 s. Client peak working set was 8.3/8.0 MiB baseline and 11.2/9.1 MiB updated; cumulative process CPU was 248.7/207.6 s baseline and 259.0/209.9 s updated. This single miss sample regressed while the cache hit improved 2.24x; do not claim a first-scan speedup. Lab clamd CPU/RSS was NOT RUN: SSH key access was denied and host key verification was unavailable. See `E:\Zonendpoint-tools\artifacts\j01\jacky-report.md` and [J-01 handoff](handoffs/adaptive-concurrency-jacky-to-qeen.md).
 
-**Next acceptance:** Qeen independently verifies code snapshot `bab14a0f936670cb58de302fc13352cb01f4f76a`, including the capacity matrix, cancel/result ordering, timeout backoff, and a repeated same-folder lab run with clamd CPU/RSS when read-only SSH access is available. Do not change lab configuration. `cargo test` (49 lib + 1 main + 18 resilience), `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` PASS on the code snapshot.
+**Next acceptance:** Qeen independently verified code snapshot `bab14a0f936670cb58de302fc13352cb01f4f76a` in QA report Q-26 (PASS).
 
-**Handoff blocker:** local push is pending. HTTPS has no credentials in this session (`SEC_E_NO_CREDENTIALS`); the GitHub connector write was rejected because it requires approval while approval policy is `never`. Keep the local `E:\Zonendpoint-Jacky\j01` checkout until the branch is pushed; do not delete it yet.
+**Push status:** DONE (Loki pushed tip `81984ad`; verified in Q-26 PASS with 3-run measurements: first scan 415→194 s, cache 209→109 s; merged into main in Task V-38).
+
+
+## Task V-38 — Integration of J-01 (Adaptive Concurrency) & MalwareBazaar to main (2026-11-11)
+- **Approval**: Zon approved 2026-11-11 ("Merge cả hai").
+- **Merged Branches**:
+  1. `origin/jacky/adaptive-concurrency` (tip `81984ad`, code `bab14a0`, Q-26 PASS): bounded folder parallelism, adaptive concurrency based on RAM/CPU, client cap in `config.json`, clamd pressure backoff.
+  2. `origin/vic/malwarebazaar` (tip `4f13d3f`, code `0109d5a`, Q-22..Q-25 PASS): server-only MalwareBazaar ingestion, full dump bootstrap (1,171,240 signatures deployed to `/var/lib/clamav/malwarebazaar.hsb`), rate limiting (3/h, 400/24h), rollback script.
+- **Security Hardening (Code Snapshot `de51ffe`)**:
+  - Sanitized sensitive Auth-Key in abuse.ch export download URL: `/v2/files/exports/<AUTH-KEY>/full.csv.zip`.
+  - Added `SensitiveKeyFilter` logging filter and `mask_auth_key()` helper to `scripts/feeds/zonendpoint-malwarebazaar.py`.
+  - Replaced raw Auth-Key in all exceptions, logger records, `URLError`, and `HTTPError` bodies with `<AUTH-KEY>`. Suppressed chained exception raw URLs via `from None`.
+  - Added unit tests `test_27` and `test_28` in `scripts/feeds/test_zonendpoint_malwarebazaar.py` (28/28 PASS, 0 real requests).
+- **J-01 handoff updated**: recorded push status DONE (pushed by Loki) and Q-26 measurements (first scan 415→194 s, cache 209→109 s).
+- **Quality Gates**: `cargo fmt --check` PASS, `cargo clippy --all-targets -- -D warnings` PASS, `cargo test` 68/68 PASS (49 lib + 1 bin + 18 resilience), `python test_zonendpoint_malwarebazaar.py` 28/28 PASS.
+- **Main SHA**: Fast-forwarded from `0979f5f` to `de51ffe` (pushed to origin). Handoff: [merge-v38-vic-to-qeen.md](handoffs/merge-v38-vic-to-qeen.md).
 
 
 ## FEED-LAB YARA Forge Staging Evaluation (V-10) â€” 2026-11-08
