@@ -1,14 +1,19 @@
 # Project status — 2026-11-11
 
-Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Integration of J-01 (`jacky/adaptive-concurrency`, Q-26 PASS) and MalwareBazaar server feed (`vic/malwarebazaar`, Q-22..Q-25 PASS) approved by Zon (2026-11-11 "Merge cả hai") in Task V-38. Fast-forwarded `main` from `0979f5f` to `de51ffe` (pushed to origin).
+Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Integration of ThreatFox server feed (`origin/jacky/threatfox`, Q-28/Q-29 PASS) approved by Zon (2026-11-11 "Merge vào main") in Task V-41. Fast-forwarded `main` from `a915222` to `3e62bf4` (pushed to origin).
 
 ## Active checkout/snapshot
-- Implementation: `main` at commit `de51ffee3d98a47f7d396daccd727ac752310c31` (`de51ffe`).
+- Implementation: `main` at commit `3e62bf47bfbe3b1da207c4273010b9d62cecf2e7` (`3e62bf4`).
+- Feeds status:
+  - MalwareBazaar: 1,171,240 hashes loaded in clamd (`/var/lib/clamav/malwarebazaar.hsb`).
+  - ThreatFox: 21,476 unique SHA-256 signatures loaded in clamd (`/var/lib/clamav/threatfox.hsb`).
+  - ThreatFox DB: 134,686 unique IOCs in `/opt/zonendpoint/threatfox/threatfox.db` (45,040 unique SHA-256 hashes).
+  - Mode: Strictly manual execution, zero automated timer/cron. Shared rate limit: 3 requests/hour, 400 requests/24h.
 - Merged branches:
+  - `origin/jacky/threatfox` (tip `4e25f22`, code `8eb08e7`, Q-28/Q-29 PASS 51/51 tests): ThreatFox CSV export ingestion, SQLite metadata/hash storage, duplicate resolution (899 rows merged via ON CONFLICT DO UPDATE per Zon approval), shared abuse.ch rate limiter with MalwareBazaar, 21,476 unique SHA-256 deployed to clamd, rollback script.
   - `origin/jacky/adaptive-concurrency` (tip `81984ad`, code `bab14a0`, Q-26 PASS): client adaptive scan concurrency based on physical RAM and CPU cores, capped at 4, server backoff on pressure.
   - `origin/vic/malwarebazaar` (tip `4f13d3f`, code `0109d5a`, Q-22..Q-25 PASS): server-only feed ingestion (`scripts/feeds/zonendpoint-malwarebazaar.py`), full dump bootstrap (1,171,240 signatures in `/var/lib/clamav/malwarebazaar.hsb`), live clamd zero-downtime reload (signatures 7,421,608 -> 8,592,748), rollback script.
-  - Key security hardening (`de51ffe`): sanitized Auth-Key in abuse.ch export download URLs across exceptions, logs, and error traces (`<AUTH-KEY>`, `from None`), added mock tests 27 and 28 in `test_zonendpoint_malwarebazaar.py` (28/28 PASS, 0 real requests).
-- Handoff doc: [merge-v38-vic-to-qeen.md](handoffs/merge-v38-vic-to-qeen.md).
+- Handoff doc: [merge-v41-vic-to-qeen.md](handoffs/merge-v41-vic-to-qeen.md).
 - Completed on branch `vic/cache-reason`:
   1. **P1-01 Cache Threat Name**: Added `threat_name TEXT` to SQLite `scan_cache` schema (migrated `user_version` 1 -> 2).
   2. **INFECTED Preservation**: Cache hits for infected entries return exact threat name (e.g. `YARA.<rule>.UNOFFICIAL`) instead of "verified content cache hit".
@@ -235,3 +240,18 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
      - Key leak audit across `/opt/zonendpoint`, `/var/lib/clamav`, `/var/backups`, `/var/log`, `/tmp`, `~/.bash_history` returned 0 matches (100% clean).
      - Invariants preserved: zero clamd.conf/freshclam.conf modification, clamd on `127.0.0.1:3310`, no timers.
 - Handoff doc: [threatfox-vic-to-qeen.md](handoffs/threatfox-vic-to-qeen.md).
+
+## Task V-41 — Merge ThreatFox into main & Q-29 polish (2026-11-11)
+- Branch `vic/merge-v41`, worktree `E:\Zonendpoint-worktrees\v41-merge`, base `origin/main` (`a915222`).
+- Per Zon approval (2026-11-11 "Merge vào main"), merged `origin/jacky/threatfox` (tip `4e25f22`, code `8eb08e7`, Q-28/Q-29 PASS 51/51 tests) into `main` via merge commit `bae722d`.
+- **Q-29 Log Fix**: Updated `ThreatDatabase.import_rows()` in `scripts/feeds/zonendpoint-threatfox.py` to query unique SHA-256 count directly from SQLite (`SELECT count(*) FROM hashes`, 45,040) instead of raw CSV row count (45,041), ensuring `net_deployable_sha256 = 45,040 - 23,564 = 21,476` matches `.hsb` line count exactly. Added unit test in `scripts/feeds/test_zonendpoint_threatfox.py` (15/15 PASS).
+- **Duplicate Rows Policy**: Documented that real export CSV contains 899 duplicate `(ioc, ioc_type)` rows; SQLite merges them via `ON CONFLICT DO UPDATE` retaining the latest record per Zon's explicit approval.
+- **Quality Gates**:
+  - `cargo fmt --check`: PASS.
+  - `cargo clippy --all-targets -- -D warnings`: PASS.
+  - `cargo test`: 68/68 PASS (49 lib + 1 bin + 18 resilience).
+  - Python test suites on lab temporary directory (`/tmp/v41_verify`): `test_abusech_rate_limit.py` 4/4 PASS, `test_zonendpoint_threatfox.py` 15/15 PASS, `test_zonendpoint_malwarebazaar.py` 28/28 PASS (Total: 47/47 PASS, 0 real requests).
+- **Lab Deployment**: Reinstalled `zonendpoint-threatfox.py` to `/usr/local/bin` (755 root:root). Only log calculation line changed; 0 fetch/deploy executed; clamd PID 2245, DB, `.hsb` untouched.
+- **Main SHA**: Fast-forwarded `main` from `a915222` to `3e62bf4` and pushed to `origin main`.
+- **Feeds Status**: MalwareBazaar 1,171,240 hashes + ThreatFox 21,476 unique SHA-256 signatures in clamd (total 1,192,716 feed signatures; clamd total 8,614,224 signatures); 134,686 unique IOCs in DB; strictly manual execution; 0 timers.
+- Handoff doc: [merge-v41-vic-to-qeen.md](handoffs/merge-v41-vic-to-qeen.md).
