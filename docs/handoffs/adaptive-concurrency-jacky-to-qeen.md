@@ -6,6 +6,7 @@
 - Branch: `jacky/adaptive-concurrency`
 - Base: `origin/main` at `0979f5fab4ea59912c5ad59a21f01c605f93eaab`
 - Local commit: `bab14a0` — `feat(scan): adapt folder concurrency to client capacity (J-01)`
+- Push status: **PENDING**. HTTPS Git has no session credentials (`SEC_E_NO_CREDENTIALS`); the connected GitHub write tool required approval, which the session policy does not provide. The local branch is retained.
 - No changes to main, clamd configuration, protocol, or lab server.
 
 ## Changes for review
