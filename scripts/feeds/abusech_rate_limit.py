@@ -52,6 +52,19 @@ class RateLimiter:
             return self._read(self.legacy_file)
         return []
 
+    def get_status(self, now=None):
+        now = time.time() if now is None else now
+        rows = [r for r in self._records() if 0 <= now - r["timestamp"] < DAY]
+        hourly = [r for r in rows if now - r["timestamp"] < HOUR]
+        return {
+            "hourly_used": len(hourly),
+            "hourly_max": MAX_PER_HOUR,
+            "daily_used": len(rows),
+            "daily_max": MAX_PER_DAY,
+            "hourly_remaining": max(0, MAX_PER_HOUR - len(hourly)),
+            "daily_remaining": max(0, MAX_PER_DAY - len(rows)),
+        }
+
     def check_and_record(self, source="malwarebazaar", now=None, other_waiting=None):
         if source not in ORDER:
             raise ValueError("unknown abuse.ch feed source")

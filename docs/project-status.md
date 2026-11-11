@@ -1,19 +1,21 @@
 # Project status — 2026-11-11
 
-Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Integration of ThreatFox server feed (`origin/jacky/threatfox`, Q-28/Q-29 PASS) approved by Zon (2026-11-11 "Merge vào main") in Task V-41. Fast-forwarded `main` from `a915222` to `3e62bf4` (pushed to origin).
+Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Implementation of hourly automated update scheduler for MalwareBazaar + ThreatFox (Task V-42) approved by Zon (2026-11-11 "Bật mỗi giờ") on branch `vic/abusech-timer`. Base: `origin/main 1399604` (Q-30 PASS).
 
 ## Active checkout/snapshot
-- Implementation: `main` at commit `3e62bf47bfbe3b1da207c4273010b9d62cecf2e7` (`3e62bf4`).
+- Implementation: branch `vic/abusech-timer` (base `origin/main 1399604`).
 - Feeds status:
-  - MalwareBazaar: 1,171,240 hashes loaded in clamd (`/var/lib/clamav/malwarebazaar.hsb`).
-  - ThreatFox: 21,476 unique SHA-256 signatures loaded in clamd (`/var/lib/clamav/threatfox.hsb`).
-  - ThreatFox DB: 134,686 unique IOCs in `/opt/zonendpoint/threatfox/threatfox.db` (45,040 unique SHA-256 hashes).
-  - Mode: Strictly manual execution, zero automated timer/cron. Shared rate limit: 3 requests/hour, 400 requests/24h.
+  - MalwareBazaar: 1,171,422 hashes in DB (`/opt/zonendpoint/malwarebazaar/malwarebazaar.db`), 1,171,422 loaded in clamd (`/var/lib/clamav/malwarebazaar.hsb`).
+  - ThreatFox: 45,298 unique SHA-256 in DB (`/opt/zonendpoint/threatfox/threatfox.db`), 21,625 net unique signatures loaded in clamd (`/var/lib/clamav/threatfox.hsb`).
+  - Total custom feed signatures: 1,193,047 signatures in clamd (clamd live total: 8,614,555 signatures).
+  - Mode: Hourly timer installed (`zonendpoint-abusech-update.timer`), but **LEFT DISABLED and INACTIVE** (`disabled`, `dead`) pending activation approval. Shared rate limit: 3 requests/hour (sliding 3600s), 400 requests/24h.
+  - Recent endpoints: MalwareBazaar (`https://mb-api.abuse.ch/v2/files/exports/<AUTH-KEY>/recent.csv`), ThreatFox (`https://threatfox-api.abuse.ch/v2/files/exports/<AUTH-KEY>/recent.csv`).
+  - Reload policy: Single clamd reload per hour; 0 new hashes across feeds = 0 reload; pre-flight temp DB check + RAM $\ge 3.0$ GB + timeout $\le 120$ s.
+- Handoff doc: [abusech-timer-vic-to-qeen.md](handoffs/abusech-timer-vic-to-qeen.md).
 - Merged branches:
   - `origin/jacky/threatfox` (tip `4e25f22`, code `8eb08e7`, Q-28/Q-29 PASS 51/51 tests): ThreatFox CSV export ingestion, SQLite metadata/hash storage, duplicate resolution (899 rows merged via ON CONFLICT DO UPDATE per Zon approval), shared abuse.ch rate limiter with MalwareBazaar, 21,476 unique SHA-256 deployed to clamd, rollback script.
   - `origin/jacky/adaptive-concurrency` (tip `81984ad`, code `bab14a0`, Q-26 PASS): client adaptive scan concurrency based on physical RAM and CPU cores, capped at 4, server backoff on pressure.
   - `origin/vic/malwarebazaar` (tip `4f13d3f`, code `0109d5a`, Q-22..Q-25 PASS): server-only feed ingestion (`scripts/feeds/zonendpoint-malwarebazaar.py`), full dump bootstrap (1,171,240 signatures in `/var/lib/clamav/malwarebazaar.hsb`), live clamd zero-downtime reload (signatures 7,421,608 -> 8,592,748), rollback script.
-- Handoff doc: [merge-v41-vic-to-qeen.md](handoffs/merge-v41-vic-to-qeen.md).
 - Completed on branch `vic/cache-reason`:
   1. **P1-01 Cache Threat Name**: Added `threat_name TEXT` to SQLite `scan_cache` schema (migrated `user_version` 1 -> 2).
   2. **INFECTED Preservation**: Cache hits for infected entries return exact threat name (e.g. `YARA.<rule>.UNOFFICIAL`) instead of "verified content cache hit".

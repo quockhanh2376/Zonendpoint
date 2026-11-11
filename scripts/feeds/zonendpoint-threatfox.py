@@ -8,6 +8,8 @@ DEFAULT_KEY = "/etc/zonendpoint/abusech.key"
 DEFAULT_DB = "/opt/zonendpoint/threatfox/threatfox.db"
 DEFAULT_URL = "https://threatfox-api.abuse.ch/v2/files/exports/{auth_key}/full.csv.zip"
 DEFAULT_DUMP = "/opt/zonendpoint/threatfox/last-full.csv.zip"
+DEFAULT_RECENT_URL = "https://threatfox-api.abuse.ch/v2/files/exports/{auth_key}/recent.csv"
+DEFAULT_RECENT_DUMP = "/opt/zonendpoint/threatfox/last-recent.csv"
 MAX_BYTES = 512 * 1024 * 1024
 HASH = re.compile(r"^[0-9a-f]{64}$")
 MD5_REGEX = re.compile(r"^[0-9a-f]{32}$")
@@ -61,6 +63,32 @@ class ThreatDatabase:
 
     def connect(self):
         return sqlite3.connect(self.path, uri=True)
+
+    def get_hash_count(self):
+        with self.connect() as c:
+            return c.execute("SELECT count(*) FROM hashes").fetchone()[0]
+
+    def get_ioc_count(self):
+        with self.connect() as c:
+            return c.execute("SELECT count(*) FROM iocs").fetchone()[0]
+
+    def get_net_deployable_count(self, mb_db=None):
+        conn = self.connect()
+        try:
+            mb_path = mb_db or os.getenv("MALWAREBAZAAR_DB_PATH", "/opt/zonendpoint/malwarebazaar/malwarebazaar.db")
+            total = conn.execute("SELECT count(*) FROM hashes").fetchone()[0]
+            dupes = 0
+            if pathlib.Path(mb_path).exists():
+                uri = f"file:{pathlib.Path(mb_path).resolve().as_posix()}?immutable=1"
+                try:
+                    conn.execute(f"ATTACH DATABASE '{uri}' AS mbdb")
+                except Exception:
+                    conn.execute("ATTACH DATABASE ? AS mbdb", (mb_path,))
+                dupes = conn.execute("SELECT count(*) FROM hashes WHERE EXISTS (SELECT 1 FROM mbdb.malware_hashes mb WHERE mb.sha256=hashes.sha256)").fetchone()[0]
+                conn.execute("DETACH DATABASE mbdb")
+            return max(0, total - dupes)
+        finally:
+            conn.close()
 
     def import_rows(self, rows):
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -337,6 +365,70 @@ def fetch_full(url, key, limiter, dump_path=None, timeout=120, temp_dir=None):
             tmp_dump.unlink(missing_ok=True)
 
 
+def fetch_recent(url, key, limiter, dump_path=None, timeout=120, temp_dir=None):
+    limiter.check_and_record("threatfox")
+    actual = url.format(auth_key=key)
+    req = urllib.request.Request(actual, headers={"User-Agent": "Zonendpoint ThreatFox importer/1.0"})
+
+    if dump_path is None:
+        target_dump = pathlib.Path(temp_dir) / "last-recent.csv" if temp_dir else pathlib.Path(DEFAULT_RECENT_DUMP)
+    else:
+        target_dump = pathlib.Path(dump_path)
+
+    target_dump.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dump = target_dump.with_suffix(".tmp")
+
+    try:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                total_bytes = 0
+                with open(tmp_dump, "wb") as f:
+                    while True:
+                        chunk = response.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        total_bytes += len(chunk)
+                        if total_bytes > MAX_BYTES:
+                            raise ValueError("ThreatFox export exceeds download size limit")
+        except Exception as exc:
+            if isinstance(exc, (ValueError, RateLimitError)):
+                raise
+            raise RuntimeError(mask(exc, key)) from None
+
+        is_zip = False
+        try:
+            with zipfile.ZipFile(tmp_dump) as z:
+                is_zip = True
+                items = [i for i in z.infolist() if not i.is_dir() and i.filename.lower().endswith(".csv")]
+                if len(items) != 1 or items[0].file_size > MAX_BYTES:
+                    raise ValueError("Unexpected CSV ZIP contents or size")
+        except zipfile.BadZipFile:
+            is_zip = False
+
+        if not is_zip:
+            with open(tmp_dump, "rb") as test_f:
+                header_bytes = test_f.read(1024)
+                if b"\x00" in header_bytes:
+                    raise ValueError("Downloaded recent export is neither a valid zip nor text CSV")
+
+        # Atomically move to final dump location and set root 600
+        shutil.move(str(tmp_dump), str(target_dump))
+        try:
+            os.chmod(str(target_dump), 0o600)
+        except OSError:
+            pass
+        print(f"Preserved ThreatFox recent dump file: {target_dump} (mode 0600)")
+
+        if is_zip:
+            csv_path = extract_csv_from_zip(str(target_dump), temp_dir=temp_dir)
+            return csv_path
+        return str(target_dump)
+    finally:
+        if tmp_dump.exists():
+            tmp_dump.unlink(missing_ok=True)
+
+
 def check_api(key, limiter, timeout=30):
     limiter.check_and_record("threatfox")
     req = urllib.request.Request(
@@ -360,14 +452,16 @@ def check_api(key, limiter, timeout=30):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["check", "fetch-full", "import-file", "export-hsb", "deploy-hsb"])
+    ap.add_argument("command", choices=["check", "fetch-full", "fetch-recent", "import-file", "export-hsb", "deploy-hsb"])
     ap.add_argument("--key-file", default=DEFAULT_KEY)
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--rate-limit-file", default=DEFAULT_STATE)
     ap.add_argument("--output", default="/tmp/threatfox.hsb")
     ap.add_argument("--dump-file", default=DEFAULT_DUMP)
+    ap.add_argument("--recent-dump-file", default=DEFAULT_RECENT_DUMP)
     ap.add_argument("--file", default=None, help="Local ZIP or CSV file for import-file command")
     ap.add_argument("--url", default=DEFAULT_URL)
+    ap.add_argument("--recent-url", default=DEFAULT_RECENT_URL)
     ap.add_argument("--hsb-path", default="/var/lib/clamav/threatfox.hsb")
     ap.add_argument("--malwarebazaar-pending", action="store_true", help="Enforce MalwareBazaar's alternating turn when both feeds are waiting")
     ap.add_argument("--backup-dir", default="/var/backups/clamav-threatfox")
@@ -395,6 +489,24 @@ def main():
                 print(f"ThreatFox export imported: rows={count}")
             finally:
                 if os.path.exists(csv_path):
+                    os.unlink(csv_path)
+        elif args.command == "fetch-recent":
+            key = mb.load_auth_key(args.key_file)
+            csv_path = fetch_recent(
+                args.recent_url,
+                key,
+                RateLimiter(args.rate_limit_file, other_waiting=args.malwarebazaar_pending),
+                dump_path=args.recent_dump_file,
+            )
+            try:
+                db = ThreatDatabase(args.db)
+                before_hashes = db.get_hash_count()
+                count = db.import_csv(csv_path)
+                after_hashes = db.get_hash_count()
+                new_hashes = after_hashes - before_hashes
+                print(f"ThreatFox recent export imported: rows={count}, new_hashes={new_hashes}")
+            finally:
+                if csv_path != args.recent_dump_file and os.path.exists(csv_path):
                     os.unlink(csv_path)
         elif args.command == "import-file":
             input_file = pathlib.Path(args.file or args.dump_file)

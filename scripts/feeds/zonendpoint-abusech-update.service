@@ -1,0 +1,19 @@
+[Unit]
+Description=Zonendpoint Hourly abuse.ch (MalwareBazaar + ThreatFox) Feed Update
+Documentation=https://bazaar.abuse.ch/ https://threatfox.abuse.ch/
+After=network-online.target clamav-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /usr/local/bin/zonendpoint-abusech-update.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zonendpoint-abusech-update
+TimeoutStartSec=600
+
+# Basic hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only

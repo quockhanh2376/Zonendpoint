@@ -1,0 +1,11 @@
+[Unit]
+Description=Zonendpoint Hourly abuse.ch (MalwareBazaar + ThreatFox) Feed Update Timer
+Documentation=https://bazaar.abuse.ch/ https://threatfox.abuse.ch/
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target
