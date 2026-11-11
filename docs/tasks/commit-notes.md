@@ -94,6 +94,7 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-11 | vic/merge-v41 | 3e62bf4 | YES | fix(feeds): count unique sha256 in ThreatFox import log to match hsb export (Q-29) |
 | 2026-11-11 | main | 3e62bf4 | YES | main fast-forwarded a915222 → 3e62bf4 (Zon approved "Merge vào main", pushed to origin) |
 | 2026-11-11 | main | 61b3136 | YES | docs(v41): record V-41 merge of ThreatFox into main and handoff |
+| 2026-11-11 | vic/abusech-timer | 1b6834c | YES | feat(feeds): implement hourly automatic scheduler for MalwareBazaar + ThreatFox (Task V-42) |
 
 
 
