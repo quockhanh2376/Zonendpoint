@@ -30,7 +30,9 @@ class RateLimiter:
         if not path.exists():
             return []
         raw = json.loads(path.read_text(encoding="utf-8"))
-        rows = raw.get("requests", []) if isinstance(raw, dict) else []
+        if not isinstance(raw, dict) or "requests" not in raw:
+            raise ValueError(f"invalid abuse.ch rate-limit history in {path}; refusing requests")
+        rows = raw["requests"]
         if not isinstance(rows, list):
             raise ValueError(f"invalid abuse.ch rate-limit history in {path}; refusing requests")
         result = []
@@ -72,9 +74,12 @@ class RateLimiter:
             raise RateLimitError(f"Shared abuse.ch rate limit exceeded: {len(hourly)}/3 requests in last 60 minutes; stopping without retry.")
         if len(rows) >= MAX_PER_DAY:
             raise RateLimitError(f"Daily rate limit exceeded: {len(rows)}/400 requests in 24h window across abuse.ch feeds; stopping without retry.")
-        if hourly and other_waiting:
-            last = max(hourly, key=lambda r: r["timestamp"])
-            waiting = ORDER[1] if last["source"] == ORDER[0] else ORDER[0]
+        if other_waiting:
+            if hourly:
+                last = max(hourly, key=lambda r: r["timestamp"])
+                waiting = ORDER[1] if last["source"] == ORDER[0] else ORDER[0]
+            else:
+                waiting = ORDER[0]
             if source != waiting:
                 raise RateLimitError(f"Shared abuse.ch turn belongs to {waiting}; stopping without retry.")
         rows.append({"timestamp": now, "source": source})

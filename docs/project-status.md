@@ -177,8 +177,24 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
 
 ## Task J-02 — ThreatFox server feed + shared abuse.ch budget (2026-11-11)
 - Branch `jacky/threatfox`, base snapshot `a9152229b4024da2b65a934dd4fa9fc81c612e55` (V-38 merge). Implemented ThreatFox manual importer, SQLite metadata/hash storage, `.hsb` export/deploy through the MalwareBazaar guarded atomic deployment flow, standalone rollback, shared rate limiter and mock tests.
-- Code implementation commit / handoff snapshot: `de960f956fc2571ed90bc230d5cbf28789111c5b` (local only; not pushed).
-- Combined persisted limiter: 3 requests/rolling hour and 400/24h across both feeds. Migrates legacy MalwareBazaar timestamp history, labels each new source, alternates waiting requests, and uses a file lock around limit check/write.
-- ThreatFox terms/export research: personal non-commercial use aligns with the documented Community API fair-use scope; company/commercial use needs a fresh terms review. Public docs identify sha256/md5/ip:port/domain/url and six-month IOC expiry. Authenticated CSV field schema remains gated; header-based mock parser is implemented, but real-export verification is pending. Details: [ThreatFox ops](ops/threatfox.md).
-- Verification status: NOT RUN in this Windows execution environment (`python`, `python3`, and `py` are unavailable). No live API, SSH, lab, clamd or deployment operation. Qeen acceptance pending.
-- **Next acceptance:** run both feed test suites and ThreatFox tests in Linux QA; verify a real authenticated export header and masked-key behavior; then operator may run manual check/fetch/deploy on lab. Do not schedule a timer or change clamd/freshclam configuration.
+- Code implementation commit / handoff snapshot: `de960f956fc2571ed90bc230d5cbf28789111c5b`.
+
+## Task V-39 — ThreatFox Q-28 fixes & lab first run (2026-11-11)
+- Branch `jacky/threatfox`, worktree `E:\Zonendpoint-worktrees\v39-threatfox`. Fixed 5 defects from Q-28 QA review:
+  1. `zonendpoint-threatfox-rollback.sh`: CRLF -> LF converted, header updated to J-02, `.gitattributes` added (`*.sh text eol=lf`, `*.py text eol=lf`). Verified `bash -n` on lab host: PASS.
+  2. `abusech_rate_limit.py`: Strict validation in `_read` refusing non-dict or missing "requests" JSON without overwriting file. Test added and PASS.
+  3. Alternation priority: On empty hourly window with `other_waiting=True`, MalwareBazaar is strictly prioritized (`MB -> TF -> MB`). Test added and PASS.
+  4. Test suite fix: Corrected `test_hsb_wildcard_and_malwarebazaar_hash_exclusion` in `test_zonendpoint_threatfox.py` line ~52 to `assertNotIn ThreatFox.Fam` (hash collision exclusion).
+  5. Forwarded `--log-file` to `mb.deploy_hsb`; refactored `fetch_full` to stream HTTP chunks (64 KB) directly to disk temp file without reading entire ZIP/CSV into RAM; enforced 512 MB limits. Tests added and PASS.
+- Quality Gates on lab Ubuntu 26.04 (Python 3.14.4):
+  - `test_abusech_rate_limit.py`: 4/4 PASS.
+  - `test_zonendpoint_threatfox.py`: 11/11 PASS.
+  - `test_zonendpoint_malwarebazaar.py`: 28/28 PASS. Total 43/43 PASS.
+- Installed binaries to `/usr/local/bin`: `abusech_rate_limit.py`, `zonendpoint-malwarebazaar.py` (with `de51ffe` key sanitization), `zonendpoint-threatfox.py`, `zonendpoint-threatfox-rollback.sh` (chmod 755 root:root).
+- Migrated legacy state to `/opt/zonendpoint/abusech/rate_limit.json`: preserved all 6 original timestamps with source `malwarebazaar`.
+- Lab real execution:
+  - `check`: 1 request used (1/3 hourly, 7/400 daily). Upstream API response `query_status: ok`.
+  - `fetch-full`: 1 request used (2/3 hourly, 8/400 daily). Real authenticated CSV header retrieved: `first_seen_utc, ioc_id, ioc_value, ioc_type, threat_type, fk_malware, malware_alias, malware_printable, last_seen_utc, confidence_level, is_compromised, reference, tags, anonymous, reporter`. Safeguard tripped on comment preamble/parsing mismatch. Database `/opt/zonendpoint/threatfox/threatfox.db` kept strictly clean at 0 rows. No unverified signatures ingested into clamd.
+  - Live clamd: PID 2245, RSS ~2.35 GB, signatures 8,592,748 (stable, unchanged). Zero clamd.conf/freshclam.conf change, no timers. Benign scans verified via tunnel `127.0.0.1:13310 -> 3310` (`stream: OK`).
+  - Secret leak audit: `sudo sh -c 'grep -rlFf /etc/zonendpoint/abusech.key ...'` on `/opt/zonendpoint`, `/var/lib/clamav`, `/var/backups`, `/var/log`, `/tmp`, `~/.bash_history` returned 0 matches (100% clean).
+- Handoff doc: [threatfox-vic-to-qeen.md](handoffs/threatfox-vic-to-qeen.md).

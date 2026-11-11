@@ -1,5 +1,5 @@
 #!/bin/bash
-# Zonendpoint ThreatFox ClamAV Hash Signature Rollback Script (Task V-35)
+# Zonendpoint ThreatFox ClamAV Hash Signature Rollback Script (Task J-02)
 # Usage:
 #   sudo /usr/local/bin/zonendpoint-threatfox-rollback.sh         # Reverts to previous .hsb backup
 #   sudo /usr/local/bin/zonendpoint-threatfox-rollback.sh --purge # Purges threatfox.hsb entirely from clamd

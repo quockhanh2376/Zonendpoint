@@ -37,6 +37,7 @@ class ThreatDatabase:
         imported = 0
         try:
             conn.execute("BEGIN IMMEDIATE")
+            counts_by_type = {}
             for row in rows:
                 ioc = str(row.get("ioc", "")).strip()
                 typ = str(row.get("ioc_type", "")).strip().lower()
@@ -50,6 +51,7 @@ class ThreatDatabase:
                 if typ == "md5" and not re.fullmatch(r"[0-9a-f]{32}", normalized):
                     continue
                 conn.execute("INSERT INTO iocs VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(ioc,ioc_type) DO UPDATE SET malware=excluded.malware, confidence=excluded.confidence, first_seen=COALESCE(iocs.first_seen,excluded.first_seen), last_seen=excluded.last_seen, source=excluded.source, updated_at=excluded.updated_at", (normalized, typ, row.get("malware") or "Unknown", row.get("confidence_level"), row.get("first_seen"), row.get("last_seen"), "ThreatFox", now))
+                counts_by_type[typ] = counts_by_type.get(typ, 0) + 1
                 if typ == "sha256":
                     size = row.get("file_size")
                     size = int(size) if str(size or "").isdigit() and int(size or 0) > 0 else None
@@ -58,6 +60,7 @@ class ThreatDatabase:
             if not imported:
                 raise ValueError("No valid ThreatFox IOC rows found; database left unchanged")
             conn.commit()
+            print(f"Imported {imported} IOCs: by_type={counts_by_type}")
         except Exception:
             conn.rollback()
             raise
@@ -66,11 +69,43 @@ class ThreatDatabase:
         return imported
 
     def import_csv(self, path):
-        with open(path, encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            if not reader.fieldnames:
+        with open(path, encoding="utf-8-sig", errors="replace", newline="") as f:
+            header_line = None
+            for raw_line in f:
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                if stripped.startswith("#"):
+                    cleaned = stripped.lstrip("#").strip()
+                    parts = next(csv.reader([cleaned]))
+                    parts_lower = [p.strip().strip('"').lower() for p in parts if p.strip()]
+                    if any(n in parts_lower for n in ("ioc", "ioc_value", "indicator", "value", "sha256", "sha256_hash", "md5", "md5_hash")):
+                        header_line = cleaned + "\n"
+                        break
+                    continue
+                else:
+                    parts = next(csv.reader([stripped]))
+                    parts_lower = [p.strip().strip('"').lower() for p in parts if p.strip()]
+                    if any(n in parts_lower for n in ("ioc", "ioc_value", "indicator", "value", "sha256", "sha256_hash", "md5", "md5_hash")):
+                        header_line = stripped + "\n"
+                        break
+                    else:
+                        raise ValueError("CSV header not found before data lines")
+
+            if header_line is None:
                 raise ValueError("CSV has no header")
-            fields = {n.strip().lower(): n for n in reader.fieldnames if n}
+
+            def line_iter():
+                yield header_line
+                for l in f:
+                    if not l.strip() or l.strip().startswith("#"):
+                        continue
+                    yield l
+
+            reader = csv.DictReader(line_iter())
+            raw_header = [n.strip().strip('"') for n in (reader.fieldnames or []) if n]
+            print(f"CSV header detected: {raw_header}")
+            fields = {n.strip().strip('"').strip().lower(): n for n in (reader.fieldnames or []) if n}
             if not any(n in fields for n in ("ioc", "ioc_value", "indicator", "value", "sha256", "sha256_hash", "md5", "md5_hash")):
                 raise ValueError("CSV header has no recognized IOC value column")
             if not any(n in fields for n in ("ioc_type", "type", "ioc_type_desc")):
@@ -105,25 +140,53 @@ class ThreatDatabase:
             if mb_conn: mb_conn.close()
 
 
-def fetch_full(url, key, limiter, timeout=120):
+def fetch_full(url, key, limiter, timeout=120, temp_dir=None):
     limiter.check_and_record("threatfox")
     actual = url.format(auth_key=key)
     req = urllib.request.Request(actual, headers={"User-Agent":"Zonendpoint ThreatFox importer/1.0"})
+    zip_tmp = None
+    csv_tmp = None
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            data = response.read(MAX_BYTES + 1)
-    except Exception as exc:
-        raise RuntimeError(mask(exc, key)) from None
-    if len(data) > MAX_BYTES: raise ValueError("ThreatFox export exceeds download size limit")
-    try:
-        with zipfile.ZipFile(io.BytesIO(data)) as z:
-            items=[i for i in z.infolist() if not i.is_dir() and i.filename.lower().endswith(".csv")]
-            if len(items)!=1 or items[0].file_size > MAX_BYTES: raise ValueError("Unexpected CSV ZIP contents or size")
-            raw=z.read(items[0])
-            if len(raw)>MAX_BYTES: raise ValueError("Uncompressed CSV exceeds size limit")
-            return raw
-    except zipfile.BadZipFile:
-        raise ValueError("ThreatFox export is not a valid ZIP") from None
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                fd, zip_path = tempfile.mkstemp(suffix=".zip.tmp", prefix="tf_zip_", dir=temp_dir)
+                zip_tmp = pathlib.Path(zip_path)
+                total_bytes = 0
+                with os.fdopen(fd, "wb") as f:
+                    while True:
+                        chunk = response.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        total_bytes += len(chunk)
+                        if total_bytes > MAX_BYTES:
+                            raise ValueError("ThreatFox export exceeds download size limit")
+        except Exception as exc:
+            if isinstance(exc, (ValueError, RateLimitError)):
+                raise
+            raise RuntimeError(mask(exc, key)) from None
+
+        try:
+            with zipfile.ZipFile(zip_tmp) as z:
+                items = [i for i in z.infolist() if not i.is_dir() and i.filename.lower().endswith(".csv")]
+                if len(items) != 1 or items[0].file_size > MAX_BYTES:
+                    raise ValueError("Unexpected CSV ZIP contents or size")
+                fd, csv_path = tempfile.mkstemp(suffix=".csv", prefix="tf_extracted_", dir=temp_dir)
+                csv_tmp = pathlib.Path(csv_path)
+                with z.open(items[0]) as src, os.fdopen(fd, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                if csv_tmp.stat().st_size > MAX_BYTES:
+                    raise ValueError("Uncompressed CSV exceeds size limit")
+                return str(csv_tmp)
+        except zipfile.BadZipFile:
+            raise ValueError("ThreatFox export is not a valid ZIP") from None
+    except Exception:
+        if csv_tmp and csv_tmp.exists():
+            csv_tmp.unlink(missing_ok=True)
+        raise
+    finally:
+        if zip_tmp and zip_tmp.exists():
+            zip_tmp.unlink(missing_ok=True)
 
 
 def check_api(key, limiter, timeout=30):
@@ -154,12 +217,12 @@ def main():
         if args.command == "check":
             key=mb.load_auth_key(args.key_file); print(f"ThreatFox API check: {check_api(key,RateLimiter(args.rate_limit_file,other_waiting=args.malwarebazaar_pending))}")
         elif args.command == "fetch-full":
-            key=mb.load_auth_key(args.key_file); raw=fetch_full(args.url,key,RateLimiter(args.rate_limit_file,other_waiting=args.malwarebazaar_pending))
-            with tempfile.NamedTemporaryFile(suffix=".csv",delete=False) as f: f.write(raw); csv_path=f.name
+            key=mb.load_auth_key(args.key_file); csv_path=fetch_full(args.url,key,RateLimiter(args.rate_limit_file,other_waiting=args.malwarebazaar_pending))
             try:
                 db=ThreatDatabase(args.db); count=db.import_csv(csv_path)
                 print(f"ThreatFox export imported: rows={count}")
-            finally: os.unlink(csv_path)
+            finally:
+                if os.path.exists(csv_path): os.unlink(csv_path)
         elif args.command=="export-hsb":
             count=ThreatDatabase(args.db).export_hsb(args.output); print(f"Exported {count} signatures")
         else:
@@ -175,7 +238,16 @@ def main():
                     else:
                         c.execute("CREATE TEMP VIEW malware_hashes AS SELECT sha256,file_size,malware AS signature FROM hashes")
                     return c
-            mb.deploy_hsb(Adapter(),active_hsb_path=args.hsb_path,backup_dir=args.backup_dir,clamav_db_dir=args.clamav_db_dir,clamd_host=args.clamd_host,clamd_port=args.clamd_port,prefix="ThreatFox",allow_wildcard=True)
+            with db.connect() as conn:
+                tf_hashes = conn.execute("SELECT count(*) FROM hashes").fetchone()[0]
+                mb_db = os.getenv("MALWAREBAZAAR_DB_PATH", "/opt/zonendpoint/malwarebazaar/malwarebazaar.db")
+                dupes = 0
+                if pathlib.Path(mb_db).exists():
+                    conn.execute("ATTACH DATABASE ? AS mbdb", (mb_db,))
+                    dupes = conn.execute("SELECT count(*) FROM hashes WHERE EXISTS (SELECT 1 FROM mbdb.malware_hashes mb WHERE mb.sha256=hashes.sha256)").fetchone()[0]
+                print(f"ThreatFox total hashes: {tf_hashes}, duplicates with MalwareBazaar excluded: {dupes}, net unique to deploy: {tf_hashes - dupes}")
+            result = mb.deploy_hsb(Adapter(),active_hsb_path=args.hsb_path,backup_dir=args.backup_dir,clamav_db_dir=args.clamav_db_dir,clamd_host=args.clamd_host,clamd_port=args.clamd_port,log_file=args.log_file,prefix="ThreatFox",allow_wildcard=True)
+            print(f"Deploy result: {result}")
     except Exception as exc:
         print(f"ERROR: {mask(exc,key)}",file=sys.stderr); return 1
     return 0
