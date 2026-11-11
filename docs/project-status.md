@@ -198,3 +198,40 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - Live clamd: PID 2245, RSS ~2.35 GB, signatures 8,592,748 (stable, unchanged). Zero clamd.conf/freshclam.conf change, no timers. Benign scans verified via tunnel `127.0.0.1:13310 -> 3310` (`stream: OK`).
   - Secret leak audit: `sudo sh -c 'grep -rlFf /etc/zonendpoint/abusech.key ...'` on `/opt/zonendpoint`, `/var/lib/clamav`, `/var/backups`, `/var/log`, `/tmp`, `~/.bash_history` returned 0 matches (100% clean).
 - Handoff doc: [threatfox-vic-to-qeen.md](handoffs/threatfox-vic-to-qeen.md).
+
+## Task V-40 — ThreatFox real run & production deployment (2026-11-11)
+- Branch `jacky/threatfox`, worktree `E:\Zonendpoint-worktrees\v40-threatfox`. Completed production deployment of ThreatFox on lab server `100.96.250.245`:
+  1. **Export CSV Parser Fixes**:
+     - Supported comment lines `#` at head, mid-file, and end-of-file.
+     - Supported `# ` header lines with quoted field names and spaces after commas (`skipinitialspace=True`).
+     - Defensive quote and whitespace stripping on all field values while preserving internal spaces (e.g. malware names, timestamps).
+     - Standard IOC type mapping: `sha256_hash` -> `sha256`, `md5_hash` -> `md5`, `sha1_hash` -> `sha1`, `ip:port` -> `ip:port`, `domain` -> `domain`, `url` -> `url`.
+     - Malware family resolution: `malware_printable` (empty, `"None"`, or whitespace -> `"Unknown"`).
+     - Confidence level resolution: `confidence_level` -> integer.
+     - Timestamps: `first_seen_utc` and `last_seen_utc`.
+     - Transactional DB insertion with safety threshold: aborts and alerts Loki (`[ALERT-LOKI]`) if imported = 0 or rejected > 5%.
+  2. **Dump File Preservation & Offline Replay**:
+     - Export dump saved to `/opt/zonendpoint/threatfox/last-full.csv.zip` (`0600 root:root`, no key in path/filename).
+     - Added CLI command `import-file --file <path>` to re-import from local ZIP/CSV with 0 API requests consumed.
+  3. **Quality Gates on Lab Host (Python 3.14.4)**:
+     - `test_abusech_rate_limit.py`: 4/4 PASS.
+     - `test_zonendpoint_threatfox.py`: 14/14 PASS (added real format fixture, dump preservation, import-file, and 5% reject threshold tests).
+     - `test_zonendpoint_malwarebazaar.py`: 28/28 PASS.
+     - Total: **46/46 PASS**.
+  4. **Lab Real Run Execution (1 request consumed)**:
+     - Consumed 1 request (3/3 hourly sliding window, 9/400 daily total).
+     - Total data rows: 135,585; imported: 135,585; rejected: 0 (0.00%).
+     - IOC counts by type: `sha256`: 45,041; `ip:port`: 29,323; `domain`: 29,125; `url`: 19,026; `md5`: 7,058; `sha1`: 6,012.
+     - SHA-256 total: 45,041; duplicates with MalwareBazaar excluded: 23,564; net unique for clamd: 21,476.
+     - Offline replay verified on `/tmp/test_import.db` with 0 requests.
+  5. **ClamAV Live Deployment (`deploy-hsb`)**:
+     - Host available RAM: 11.96 GB (threshold: 3.00 GB).
+     - Preflight temporary DB check: 3,649,734 known viruses, 0 errors, 0 False Positives on benign files.
+     - Active signature file written: `/var/lib/clamav/threatfox.hsb` (21,476 signatures, mode 0644 clamav:clamav).
+     - ClamAV signatures: **8,592,748 -> 8,614,224** (+21,476 exact match).
+     - clamd reload duration: 26.01s (limit: 120s). clamd RSS: 2,303.66 MB -> 2,305.27 MB (+1.61 MB). Engine PONG verified.
+  6. **Tunnel & Security Audit**:
+     - Benign file scans via tunnel `127.0.0.1:13310`: `package.json`, `README.md`, `Cargo.toml` all return `stream: OK`.
+     - Key leak audit across `/opt/zonendpoint`, `/var/lib/clamav`, `/var/backups`, `/var/log`, `/tmp`, `~/.bash_history` returned 0 matches (100% clean).
+     - Invariants preserved: zero clamd.conf/freshclam.conf modification, clamd on `127.0.0.1:3310`, no timers.
+- Handoff doc: [threatfox-vic-to-qeen.md](handoffs/threatfox-vic-to-qeen.md).

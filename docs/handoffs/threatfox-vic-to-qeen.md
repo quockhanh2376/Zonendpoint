@@ -1,73 +1,77 @@
-# V-39 ThreatFox & Shared Limiter — Vic to Qeen handoff
+# V-40 ThreatFox Real Run & Deployment — Vic to Qeen handoff
 
 ## Code snapshot
 - Branch: `jacky/threatfox`
-- Base: `origin/jacky/threatfox` tip `cf0b7f8` (code commit `de960f9`, base `main` `a915222`)
-- Code Snapshot SHA: `b8490d718e593e8b4498449e15d129a825001365` (`b8490d7`)
-- Worktree: `E:\Zonendpoint-worktrees\v39-threatfox`
-- Task: V-39 (Resolve Q-28 review items, live first run on lab server `100.96.250.245`)
+- Base: `origin/jacky/threatfox` tip `fefa9db` (Task V-39)
+- Code Snapshot SHA: Pending commit in this task
+- Worktree: `E:\Zonendpoint-worktrees\v40-threatfox`
+- Task: V-40 (Complete real ThreatFox run, export CSV parser fixes, dump preservation, 0-request import-file, clamd deployment)
 
-## 1. Resolved Q-28 Defects
+## 1. Resolved Defects & Parser Enhancements
 
-1. **Rollback Script CRLF & Header Fix**:
-   - Converted `scripts/feeds/zonendpoint-threatfox-rollback.sh` to LF line endings.
-   - Updated header comment to `# Zonendpoint ThreatFox ClamAV Hash Signature Rollback Script (Task J-02)`.
-   - Added root `.gitattributes` enforcing LF (`*.sh text eol=lf`, `*.py text eol=lf`).
-   - Verified `bash -n` on lab host: PASS.
+1. **Abuse.ch Export CSV Parser Compliance**:
+   - Handled `#` comment preambles, mid-file comments, and `#` postamble records.
+   - Handled `# ` header prefix and quoted column names with spaces after commas via `csv.DictReader(..., skipinitialspace=True)`.
+   - Stripped leading/trailing quotes and spaces defensively on all data values while preserving internal whitespace.
+   - Standard IOC type mapping: `sha256_hash` -> `sha256`, `md5_hash` -> `md5`, `sha1_hash` -> `sha1`, `ip:port` -> `ip:port`, `domain` -> `domain`, `url` -> `url`.
+   - Malware family resolution: `malware_printable` with fallback to `malware`/`signature`; empty, `"None"`, or whitespace normalized to `"Unknown"`.
+   - Confidence level: `confidence_level` converted to integer.
+   - Timestamps: `first_seen_utc` and `last_seen_utc`.
+   - Wildcard file size `*` and FLEVEL 73 for all ThreatFox hashes.
 
-2. **Rate Limiter Strict JSON Validation (No Silent Overwrite)**:
-   - Modified `abusech_rate_limit.py`: `_read` strictly checks `isinstance(raw, dict)` and `"requests" in raw`, and validates `isinstance(rows, list)`.
-   - Any malformed or non-dict JSON raises `ValueError` and refuses requests immediately without modifying or overwriting state file.
-   - Added automated test `test_invalid_json_or_missing_requests_refuses_without_overwrite`: PASS.
+2. **Dump File Preservation & Offline Replay**:
+   - Streamed download saved to `/opt/zonendpoint/threatfox/last-full.csv.zip` (permissions `0600 root:root`, no key in filename or path).
+   - Added subcommand `import-file` (`--file` / `--dump-file`) to re-import from local ZIP/CSV consuming 0 API requests.
 
-3. **Alternation Logic Priority on Empty Hourly Window**:
-   - Fixed `abusech_rate_limit.py`: when `other_waiting=True` and `hourly` is empty, turn strictly belongs to `malwarebazaar` (`ORDER[0]`). ThreatFox is blocked until MalwareBazaar runs, preserving Zon policy `MB -> TF -> MB`.
-   - Added automated test `test_empty_hourly_with_other_waiting_prioritizes_malwarebazaar`: PASS.
+3. **Rejection Rate Guard**:
+   - Transactional import tracks total rows, imported valid rows, and rejected malformed rows.
+   - If imported rows = 0 or malformed rejection rate > 5%, the transaction immediately rolls back, halts deployment, and logs `[ALERT-LOKI]`.
 
-4. **Self-Contradictory Test Case in ThreatFox Suite**:
-   - Succeeded hash exclusion test `test_hsb_wildcard_and_malwarebazaar_hash_exclusion` in `test_zonendpoint_threatfox.py`: corrected line ~52 to `self.assertNotIn("ThreatFox.Fam.UNOFFICIAL", out.read_text())` as `"a"*64` is excluded due to MalwareBazaar collision.
-
-5. **CLI Parameter Forwarding & Memory-Safe Streaming**:
-   - Forwarded `--log-file` to `mb.deploy_hsb(..., log_file=args.log_file)` in `zonendpoint-threatfox.py`. Added test `test_deploy_hsb_passes_log_file`: PASS.
-   - Refactored `fetch_full` in `zonendpoint-threatfox.py` to stream HTTP chunks (64 KB) to a temporary ZIP file on disk, validating download size $\le 512$ MB without reading archive into RAM. Extracted CSV is streamed directly to disk, enforcing size limits. Added tests `test_fetch_full_streams_to_temp_file_and_extracts_cleanly` and `test_fetch_full_oversized_download_is_rejected`: PASS.
+4. **Multi-DB Read-Only Concurrency Fix**:
+   - Fixed `ATTACH DATABASE` on `/opt/zonendpoint/malwarebazaar/malwarebazaar.db` with `?immutable=1` URI to allow non-root test users (`admzon`) to run hash deduplication checks without triggering SQLite `attempt to write a readonly database` error.
 
 ## 2. Test Execution on Lab Host (`100.96.250.245`, Python 3.14.4)
 
 All three test suites run in temporary directory and passed 100%:
 - `test_abusech_rate_limit.py`: **4/4 PASS** (daily cap, legacy migration, strict non-dict rejection, empty-window alternation).
-- `test_zonendpoint_threatfox.py`: **11/11 PASS** (header resolution, preamble parsing, atomic rollback, hash exclusion, key masking, 429 fail-fast, streaming chunk download, size limits, log-file forwarding).
+- `test_zonendpoint_threatfox.py`: **14/14 PASS** (real format fixture, preamble/quotes/spaces, map ioc_type, dump preservation, import-file 0-request replay, 5% rejection threshold abort, header resolution, atomic rollback, hash exclusion, key masking, 429 fail-fast, streaming chunk download, size limits, log-file forwarding).
 - `test_zonendpoint_malwarebazaar.py`: **28/28 PASS** (full regression suite, key sanitization, zero-downtime deployment, rollback).
-- Total: **43/43 PASS**.
+- Total: **46/46 PASS**.
 
-## 3. Lab Installation & State Migration
+## 3. Lab Installation & Real Execution
 
-- Installed binaries to `/usr/local/bin`:
-  - `abusech_rate_limit.py` (755 root:root)
-  - `zonendpoint-malwarebazaar.py` (755 root:root, with `de51ffe` key sanitization)
-  - `zonendpoint-threatfox.py` (755 root:root)
-  - `zonendpoint-threatfox-rollback.sh` (755 root:root)
-- Created directories: `/opt/zonendpoint/abusech`, `/opt/zonendpoint/threatfox`, `/var/backups/clamav-threatfox` (755 root:root).
-- Migrated legacy state `/opt/zonendpoint/malwarebazaar/rate_limit.json` -> `/opt/zonendpoint/abusech/rate_limit.json`: verified all 6 original timestamps preserved with source tag `malwarebazaar`.
+1. **Binary Installed**:
+   - `/usr/local/bin/zonendpoint-threatfox.py` (755 root:root) updated with new parser, dump preservation, and `import-file` command.
 
-## 4. Real Lab Execution Results (2 Requests Consumed)
+2. **Real `fetch-full` (1 request used)**:
+   - Shared limiter state: 3/3 hourly sliding window, 9/400 daily total across abuse.ch feeds.
+   - Dump file preserved: `/opt/zonendpoint/threatfox/last-full.csv.zip` (4,843,512 bytes, mode 0600 root:root).
+   - Ingestion breakdown:
+     - Total data rows: **135,585**
+     - Imported valid rows: **135,585**
+     - Rejected rows: **0 (0.00%)**
+     - Breakdown by IOC type:
+       - `sha256`: 45,041
+       - `ip:port`: 29,323
+       - `domain`: 29,125
+       - `url`: 19,026
+       - `md5`: 7,058
+       - `sha1`: 6,012
+     - SHA-256 total in ThreatFox: 45,041
+     - Duplicates with MalwareBazaar excluded: 23,564
+     - Net unique deployable SHA-256 for clamd: **21,476**
+   - Offline replay (`import-file`): Verified on `/tmp/test_import.db` with 0 requests consumed.
 
-1. **`sudo /usr/local/bin/zonendpoint-threatfox.py check`**:
-   - Consumed 1 request (1/3 hourly, 7/400 daily).
-   - Upstream API result: `ThreatFox API check: ok`.
+3. **Live ClamAV Deployment (`deploy-hsb`)**:
+   - Host available RAM: 11.96 GB (threshold: 3.00 GB) -> PASS.
+   - Preflight check on temporary DB: 3,649,734 known viruses, 0 errors, 0 False Positives on benign targets -> PASS.
+   - Active file updated: `/var/lib/clamav/threatfox.hsb` (21,476 signatures, mode 0644 clamav:clamav).
+   - Zero-downtime clamd reload (`zRELOAD`): completed in 26.01s (limit: 120s).
+   - Live clamd signatures: **8,592,748 -> 8,614,224** (delta **+21,476**, exact match).
+   - Live clamd RSS: 2,303.66 MB -> 2,305.27 MB (+1.61 MB).
+   - Engine health verified: PING -> PONG on `127.0.0.1:3310`.
 
-2. **`sudo /usr/local/bin/zonendpoint-threatfox.py fetch-full`**:
-   - Consumed 1 request (2/3 hourly, 8/400 daily).
-   - Real CSV header discovered:
-     ```text
-     ['first_seen_utc', 'ioc_id', 'ioc_value', 'ioc_type', 'threat_type', 'fk_malware', 'malware_alias', 'malware_printable', 'last_seen_utc', 'confidence_level', 'is_compromised', 'reference', 'tags', 'anonymous', 'reporter']
-     ```
-   - Ingestion status: Safeguard tripped on comment preamble/parsing mismatch. Database `/opt/zonendpoint/threatfox/threatfox.db` kept strictly clean at 0 rows. No unverified signatures ingested into clamd.
-
-3. **ClamAV Engine Invariants**:
-   - Live daemon: PID 2245, RSS ~2.35 GB, signature count 8,592,748 (stable, unchanged).
-   - Zero clamd.conf / freshclam.conf modifications; clamd remains on `127.0.0.1:3310`.
-   - Benign scan verification via tunnel `127.0.0.1:13310`: `README.md`, `package.json`, `project-status.md` scanned clean (`stream: OK`).
-   - No cron or systemd timer installed.
-
-4. **Secret Leak Audit**:
-   - Ran `sudo sh -c 'grep -rlFf /etc/zonendpoint/abusech.key /opt/zonendpoint /var/lib/clamav /var/backups /var/log /tmp /home/admzon/.bash_history /root/.bash_history'`: returned 0 matches (100% clean).
+4. **Live Scanning & Leak Audit Verification**:
+   - Benign file scans via tunnel `127.0.0.1:13310`: `package.json`, `README.md`, `Cargo.toml` all return `stream: OK`.
+   - Secret leak audit: `sudo sh -c 'grep -rlFf /etc/zonendpoint/abusech.key /opt/zonendpoint /var/lib/clamav /var/backups /var/log /tmp /home/admzon/.bash_history /root/.bash_history'` returned 0 matches (100% clean).
+   - Invariants preserved: zero clamd.conf/freshclam.conf modifications, clamd remains on `127.0.0.1:3310`, no cron/timers installed.
