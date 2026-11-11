@@ -6,7 +6,7 @@
 - Branch: `jacky/adaptive-concurrency`
 - Base: `origin/main` at `0979f5fab4ea59912c5ad59a21f01c605f93eaab`
 - Local commit: `bab14a0` — `feat(scan): adapt folder concurrency to client capacity (J-01)`
-- Push status: **PENDING**. HTTPS Git has no session credentials (`SEC_E_NO_CREDENTIALS`); the connected GitHub write tool required approval, which the session policy does not provide. The local branch is retained.
+- Push status: **DONE** (Loki đã push lên `origin/jacky/adaptive-concurrency`).
 - No changes to main, clamd configuration, protocol, or lab server.
 
 ## Changes for review
@@ -37,6 +37,15 @@ Folder: `C:\Program Files` (12,886 files). Baseline is the exact base snapshot w
 Each row is one run per condition. First-scan time was 25.6% slower in the J-01 sample; cache scan was 55.3% faster (2.24x). The miss-run client CPU was about half a CPU core on average, with low memory use; the evidence points to clamd/tunnel wait rather than client CPU/RAM saturation on this 8 GiB host. The cache-hit path uses more client CPU under parallel hashing and completes sooner. Lab clamd CPU/RSS was **NOT RUN**: the SSH identity file was inaccessible to this session and host-key verification could not be completed. Therefore the server-side cause of the first-scan regression is unconfirmed; do not claim server saturation as measured fact.
 
 The folder scan was incomplete in both runs due to the same 3 ERROR and 8 SKIPPED results. It did not produce an All Good verdict. No EICAR or malware fixture was used. Benchmark raw process outputs and cache DBs are under `E:\Zonendpoint-tools\artifacts\j01\`.
+
+### QA Q-26 Independent Verification (PASS)
+
+- **QA Status**: PASS (Qeen verified 2026-11-11, report at `E:\Zonendpoint-tools\artifacts\j01-verify\qeen-verify.md`).
+- **Số đo xác minh Q-26** (3-run interleaved average on `C:\Program Files`, 12,886 files):
+  - **Quét đầu (first scan / cache miss)**: 415 s → 194 s (415.39 s → 193.76 s, nhanh hơn 2.14x / giảm 53.4% thời gian; khắc phục kết quả đo ban đầu bị nhiễu do clamd nạp chữ ký MalwareBazaar).
+  - **Quét qua cache (cache hit)**: 209 s → 109 s (208.53 s → 108.52 s, nhanh hơn 1.92x / giảm 48.0% thời gian).
+- Lab clamd CPU max 5.3%, RSS 2302.4 MiB (ổn định tuyệt đối, không nghẽn server).
+- Toàn bộ tiêu chí nghiệm thu Qeen đều PASS. Zon đã duyệt merge cả hai (2026-11-11).
 
 ## Qeen acceptance requested
 
