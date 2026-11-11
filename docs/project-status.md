@@ -120,9 +120,15 @@ See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Window
   - Pre-flight safeguards: available host RAM < 3.0 GB halts deployment; clamd reload timeout > 120s aborts, triggers rollback, and alerts Loki. Telemetry collects clamd RSS before/after and exact reload duration.
   - Wildcard hash signature support: `<sha256>:*:MalwareBazaar.<sig>.UNOFFICIAL:73` for export rows without file size.
   - Quality gate: Automated mock test suite expanded to 26/26 PASS on lab Ubuntu 26.04.
-  - Live clamd deployment (`deploy-hsb`): 1,171,240 signatures loaded into active file `/var/lib/clamav/malwarebazaar.hsb`. Live signatures increased from **7,421,608** to **8,592,748** (+1,171,140, exact match). clamd RAM RSS: 2,127.45 MB -> 2,249.32 MB (+121.87 MB). Reload duration: 28.01s (well within 120s limit). Available host RAM: 11.65 GB (> 3.0 GB threshold). clamd PONG verified on `127.0.0.1:3310`.
+  - Live clamd deployment (`deploy-hsb`): 1,171,240 signatures loaded into active file `/var/lib/clamav/malwarebazaar.hsb` (kích thước thực tế: 121.547.198 bytes / ~121 MB). Live signatures increased from **7,421,608** to **8,592,748** (+1,171,140, exact match). clamd RAM RSS: trước reload ~2,1 GB (2.127 MB), sau reload ~2,3 GB (2.249–2.302 MB, đỉnh reload VmHWM ~3,6 GB). Reload duration: ~26–28s (well within 120s limit). Available host RAM: 11.65 GB (> 3.0 GB threshold), sau reload ~12,0 GB. clamd PONG verified on `127.0.0.1:3310`.
   - Real requests consumed in Task V-36: **2 requests** (within $\le 3$ limit).
   - Preserved engine invariants: clamd loopback 3310, `clamd.conf` and `freshclam.conf` unchanged, no systemd timer/cron.
+- Task V-37 Documentation & Docstrings Polish (per Q-25 review, 2026-11-11):
+  - Fixed .hsb file size in docs/handoff to actual 121,547,198 bytes (~121 MB / ~116 MiB), correcting earlier ~88 MB estimate.
+  - Recorded clamd reload performance: reload duration ~26–28s, clamd RAM RSS ~2.3 GB (2,249–2,302 MB, peak VmHWM ~3.6 GB during reload).
+  - Fixed docstrings in `scripts/feeds/zonendpoint-malwarebazaar.py` (lines 16 and 89) from "3 requests/minute, 500/day" to "3 requests/hour (sliding 60m) and 400 requests/24h" to match code constants and RateLimiter.
+  - Added strict security warnings in ops runbook and status: NEVER enter or paste Auth Key into shell prompt (prevents saving to `~/.bash_history`), recommend `HISTCONTROL=ignorespace`. Emphasized that `~/.bashrc` on lab must NOT be edited by agents (per Zon's decision).
+  - Mock test suite verified (26/26 PASS).
 - Operations runbook: [malwarebazaar.md](ops/malwarebazaar.md); handoff: [malwarebazaar-vic-to-qeen.md](handoffs/malwarebazaar-vic-to-qeen.md).
 
 
