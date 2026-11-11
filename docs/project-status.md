@@ -114,6 +114,15 @@ See [v1.0.0-scope.md](v1.0.0-scope.md). Manually initiated Quick scan (13 Window
   - Live rollback verified: tested standalone `/usr/local/bin/zonendpoint-malwarebazaar-rollback.sh` restoring backup, reloaded clamd, verified PONG; redeployed active signatures successfully.
   - Real API requests used in Task V-35: **0** (used existing SQLite hashes).
   - Schedule: **NO AUTOMATED SCHEDULE** (updates remain strictly manual).
+- Task V-36 Full Dump Bootstrap & clamd Ingestion (Zon approved 2026-11-11):
+  - Rate limit policy updated to 3 requests/hour (sliding 60m window = 3600s) and 400 requests/24h on disk (`/opt/zonendpoint/malwarebazaar/rate_limit.json`). Fail-fast without waiting or retries.
+  - Implemented manual command `fetch-full`: streamed download from abuse.ch export endpoint (`/v2/files/exports/{auth_key}/full.csv.zip`), validated zip CRC (`testzip()`), uncompressed size check (4 GB limit), atomic SQLite transaction with `BEGIN IMMEDIATE ... COMMIT`, deduplication against existing rows (preserving original `source` and `updated_at`). Live dump: 1,171,240 rows parsed, 1,171,140 inserted, 100 existing preserved; total DB rows: 1,171,240.
+  - Pre-flight safeguards: available host RAM < 3.0 GB halts deployment; clamd reload timeout > 120s aborts, triggers rollback, and alerts Loki. Telemetry collects clamd RSS before/after and exact reload duration.
+  - Wildcard hash signature support: `<sha256>:*:MalwareBazaar.<sig>.UNOFFICIAL:73` for export rows without file size.
+  - Quality gate: Automated mock test suite expanded to 26/26 PASS on lab Ubuntu 26.04.
+  - Live clamd deployment (`deploy-hsb`): 1,171,240 signatures loaded into active file `/var/lib/clamav/malwarebazaar.hsb`. Live signatures increased from **7,421,608** to **8,592,748** (+1,171,140, exact match). clamd RAM RSS: 2,127.45 MB -> 2,249.32 MB (+121.87 MB). Reload duration: 28.01s (well within 120s limit). Available host RAM: 11.65 GB (> 3.0 GB threshold). clamd PONG verified on `127.0.0.1:3310`.
+  - Real requests consumed in Task V-36: **2 requests** (within $\le 3$ limit).
+  - Preserved engine invariants: clamd loopback 3310, `clamd.conf` and `freshclam.conf` unchanged, no systemd timer/cron.
 - Operations runbook: [malwarebazaar.md](ops/malwarebazaar.md); handoff: [malwarebazaar-vic-to-qeen.md](handoffs/malwarebazaar-vic-to-qeen.md).
 
 
