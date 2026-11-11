@@ -9,10 +9,35 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use tokio::sync::{mpsc, watch};
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinSet,
+};
 
 pub const MAX_RETAINED_RESULTS: usize = 1000;
 const QUEUE_CAPACITY: usize = 32;
+
+fn record_result(
+    summary: &mut ScanSummary,
+    progress: &ProgressFn,
+    cancel: &watch::Receiver<bool>,
+    result: ScanResult,
+) -> bool {
+    let result = if *cancel.borrow() && result.status == ScanStatus::Clean {
+        ScanResult::new(
+            result.path,
+            ScanStatus::Cancelled,
+            None,
+            Some("cancelled before completion".into()),
+            0,
+        )
+    } else {
+        result
+    };
+    summary.record(result.clone());
+    progress(summary, &result);
+    *cancel.borrow()
+}
 
 #[derive(Clone, Serialize)]
 pub struct ScanSummary {
@@ -199,9 +224,18 @@ pub async fn scan_roots_with_exclusions(
     });
     let mut summary = ScanSummary::default();
     let mut cancellation_observed = false;
+    let scan = Arc::new(scan);
+    let mut scans = JoinSet::new();
     while let Some(item) = rx.recv().await {
         let result = if cancellation_observed || cancelled.load(Ordering::Relaxed) {
             cancellation_observed = true;
+            while let Some(joined) = scans.join_next().await {
+                let result = match joined {
+                    Ok(result) => result,
+                    Err(_) => ScanResult::error(&root, "scan worker failed"),
+                };
+                cancellation_observed |= record_result(&mut summary, &progress, &cancel, result);
+            }
             match item {
                 WalkItem::File(path) | WalkItem::Skip(path) => ScanResult::new(
                     path,
@@ -216,7 +250,21 @@ pub async fn scan_roots_with_exclusions(
             }
         } else {
             match item {
-                WalkItem::File(path) => scan(path, scan_cancel.clone()).await,
+                WalkItem::File(path) => {
+                    let scan = scan.clone();
+                    let scan_cancel = scan_cancel.clone();
+                    scans.spawn(async move { scan(path, scan_cancel).await });
+                    if scans.len() >= QUEUE_CAPACITY {
+                        let result = match scans.join_next().await {
+                            Some(Ok(result)) => result,
+                            Some(Err(_)) => ScanResult::error(&root, "scan worker failed"),
+                            None => continue,
+                        };
+                        cancellation_observed |=
+                            record_result(&mut summary, &progress, &cancel, result);
+                    }
+                    continue;
+                }
                 WalkItem::Skip(path) => ScanResult::new(
                     path,
                     ScanStatus::Skipped,
@@ -227,25 +275,17 @@ pub async fn scan_roots_with_exclusions(
                 WalkItem::Error(path, reason) => ScanResult::error(path, reason),
             }
         };
-        // Cancellation may arrive while a scan finishes, before the monitor runs.
-        // Do not publish that racing CLEAN as a completed scan.
-        let result = if *cancel.borrow() && result.status == ScanStatus::Clean {
-            ScanResult::new(
-                result.path,
-                ScanStatus::Cancelled,
-                None,
-                Some("cancelled before completion".into()),
-                0,
-            )
-        } else {
-            result
-        };
-        summary.record(result.clone());
-        progress(&summary, &result);
-        if *cancel.borrow() {
+        cancellation_observed |= record_result(&mut summary, &progress, &cancel, result);
+        if cancellation_observed {
             cancelled.store(true, Ordering::Relaxed);
-            cancellation_observed = true;
         }
+    }
+    while let Some(joined) = scans.join_next().await {
+        let result = match joined {
+            Ok(result) => result,
+            Err(_) => ScanResult::error(&root, "scan worker failed"),
+        };
+        cancellation_observed |= record_result(&mut summary, &progress, &cancel, result);
     }
     if producer.await.is_err() {
         let result = ScanResult::error(&root, "folder traversal worker failed");

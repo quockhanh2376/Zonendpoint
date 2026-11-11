@@ -7,14 +7,17 @@ use sha2::{Digest, Sha256};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     fs::File,
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    sync::{Semaphore, watch},
+    sync::{OwnedSemaphorePermit, Semaphore, watch},
     time::timeout,
 };
 
@@ -28,6 +31,76 @@ pub const PREFLIGHT_ERROR_MSG: &str = "Cannot connect to ZonEndpoint server";
 const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(3);
 pub const TOTAL_SCAN_TIMEOUT: Duration = Duration::from_secs(120);
 pub const CLAMD_RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
+
+pub struct ScanLimiter {
+    semaphore: Arc<Semaphore>,
+    limit: AtomicUsize,
+}
+
+pub struct ScanPermit {
+    permit: Option<OwnedSemaphorePermit>,
+    limiter: Arc<ScanLimiter>,
+}
+
+impl ScanLimiter {
+    pub fn new(limit: usize) -> Self {
+        let limit = limit.clamp(1, 4);
+        Self {
+            semaphore: Arc::new(Semaphore::new(limit)),
+            limit: AtomicUsize::new(limit),
+        }
+    }
+
+    async fn acquire_owned(self: &Arc<Self>) -> Result<ScanPermit, tokio::sync::AcquireError> {
+        let permit = self.semaphore.clone().acquire_owned().await?;
+        Ok(ScanPermit {
+            permit: Some(permit),
+            limiter: self.clone(),
+        })
+    }
+
+    #[cfg(test)]
+    fn limit(&self) -> usize {
+        self.limit.load(Ordering::Relaxed)
+    }
+}
+
+impl ScanPermit {
+    fn back_off(&mut self) {
+        loop {
+            let limit = self.limiter.limit.load(Ordering::Relaxed);
+            if limit <= 1 {
+                return;
+            }
+            if self
+                .limiter
+                .limit
+                .compare_exchange_weak(limit, limit - 1, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                if let Some(permit) = self.permit.take() {
+                    permit.forget();
+                }
+                return;
+            }
+        }
+    }
+}
+
+fn is_server_pressure(result: &ScanResult) -> bool {
+    result.status == ScanStatus::Error
+        && result.reason.as_deref().is_some_and(|reason| {
+            let reason = reason.to_ascii_lowercase();
+            [
+                "timed out",
+                "timeout",
+                "too many connections",
+                "server busy",
+            ]
+            .iter()
+            .any(|signal| reason.contains(signal))
+        })
+}
 const RESPONSE_CHUNK_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn default_scan_timeout() -> Duration {
@@ -415,7 +488,7 @@ pub async fn scan_file(
     cache_path: PathBuf,
     addr: SocketAddr,
     cancel: watch::Receiver<bool>,
-    semaphore: Arc<Semaphore>,
+    semaphore: Arc<ScanLimiter>,
 ) -> ScanResult {
     scan_file_with_engine_override(path, cache_path, addr, None, cancel, semaphore).await
 }
@@ -426,7 +499,7 @@ pub async fn scan_file_with_engine_override(
     addr: SocketAddr,
     engine_override: Option<String>,
     cancel: watch::Receiver<bool>,
-    semaphore: Arc<Semaphore>,
+    semaphore: Arc<ScanLimiter>,
 ) -> ScanResult {
     scan_file_with_engine_timeout_checked(
         path,
@@ -445,7 +518,7 @@ pub async fn scan_file_with_timeout(
     cache_path: PathBuf,
     addr: SocketAddr,
     cancel: watch::Receiver<bool>,
-    semaphore: Arc<Semaphore>,
+    semaphore: Arc<ScanLimiter>,
     total_timeout: Duration,
 ) -> ScanResult {
     scan_file_with_engine_timeout_checked(
@@ -466,7 +539,7 @@ async fn scan_file_with_engine_timeout_checked(
     addr: SocketAddr,
     engine_override: Option<String>,
     cancel: watch::Receiver<bool>,
-    semaphore: Arc<Semaphore>,
+    semaphore: Arc<ScanLimiter>,
     total_timeout: Duration,
 ) -> ScanResult {
     if *cancel.borrow() {
@@ -527,7 +600,7 @@ pub async fn scan_file_with_engine_timeout(
     addr: SocketAddr,
     engine_override: Option<String>,
     cancel: watch::Receiver<bool>,
-    semaphore: Arc<Semaphore>,
+    semaphore: Arc<ScanLimiter>,
     total_timeout: Duration,
 ) -> ScanResult {
     let permit = tokio::select! {
@@ -670,7 +743,10 @@ pub async fn scan_file_with_engine_timeout(
             Err(_) => ScanResult::new(&path, ScanStatus::Error, None, Some("scan timed out".into()), 0),
         }
     };
-    drop(permit);
+    if is_server_pressure(&result) {
+        let mut permit = permit;
+        permit.back_off();
+    }
     result
 }
 
@@ -679,6 +755,31 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use tokio::{net::TcpListener, sync::watch};
+
+    #[tokio::test]
+    async fn scan_limiter_backs_off_to_one_on_server_pressure() {
+        let limiter = Arc::new(ScanLimiter::new(4));
+        for expected in [3, 2, 1, 1] {
+            let mut permit = limiter.acquire_owned().await.unwrap();
+            permit.back_off();
+            assert_eq!(limiter.limit(), expected);
+        }
+        let mut permit = limiter.acquire_owned().await.unwrap();
+        permit.back_off();
+        assert_eq!(limiter.limit(), 1);
+    }
+
+    #[test]
+    fn only_timeout_or_busy_errors_trigger_scan_backoff() {
+        for reason in ["scan timed out", "clamd response timeout", "server busy"] {
+            let result = ScanResult::error("sample", reason);
+            assert!(is_server_pressure(&result), "{reason}");
+        }
+        for reason in ["stream size limit exceeded", "file changed during scan"] {
+            let result = ScanResult::error("sample", reason);
+            assert!(!is_server_pressure(&result), "{reason}");
+        }
+    }
 
     #[test]
     fn malformed_response_containing_ok_is_not_clean() {
@@ -948,7 +1049,7 @@ mod tests {
             addr,
             Some("ClamAV 1.5.4/28175/Sat Nov 7 2026".into()),
             cancel,
-            Arc::new(Semaphore::new(1)),
+            Arc::new(ScanLimiter::new(1)),
             Duration::from_secs(60),
         )
         .await;
@@ -984,7 +1085,7 @@ mod tests {
             cache_path.clone(),
             addr,
             cancel,
-            Arc::new(Semaphore::new(1)),
+            Arc::new(ScanLimiter::new(1)),
         )
         .await;
         assert_eq!(result.status, ScanStatus::Error);
@@ -1154,7 +1255,7 @@ mod tests {
 
         let cache_path = temp_dir.join("cache.db");
         let addr = "127.0.0.1:13310".parse().unwrap();
-        let semaphore = Arc::new(Semaphore::new(1));
+        let semaphore = Arc::new(ScanLimiter::new(1));
         let (_tx, cancel) = watch::channel(false);
         let result = scan_file(file_path.clone(), cache_path, addr, cancel, semaphore).await;
         assert_eq!(result.status, ScanStatus::Skipped);

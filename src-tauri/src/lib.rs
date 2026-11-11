@@ -21,13 +21,13 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::watch;
 use watcher::Guard;
 
 pub struct ScanManager {
     active: Mutex<Option<ActiveScan>>,
     selected: Mutex<HashMap<String, (Instant, PathBuf)>>,
-    semaphore: Arc<Semaphore>,
+    semaphore: Arc<scanner::ScanLimiter>,
 }
 
 pub struct ActiveScan {
@@ -55,7 +55,7 @@ impl ScanManager {
         Self {
             active: Mutex::new(None),
             selected: Mutex::new(HashMap::new()),
-            semaphore: Arc::new(Semaphore::new(2)),
+            semaphore: Arc::new(scanner::ScanLimiter::new(config::scan_concurrency())),
         }
     }
 
@@ -492,7 +492,7 @@ pub async fn scan_cli(path: PathBuf) -> scanner::ScanResult {
                 cache_path,
                 addr,
                 receiver,
-                Arc::new(Semaphore::new(2)),
+                Arc::new(scanner::ScanLimiter::new(config::scan_concurrency())),
             )
             .await
         }
