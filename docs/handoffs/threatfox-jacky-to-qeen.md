@@ -3,7 +3,7 @@
 ## Code snapshot
 - Branch: `jacky/threatfox`
 - Base: `a9152229b4024da2b65a934dd4fa9fc81c612e55` (V-38 / origin main snapshot supplied by Loki)
-- Code Snapshot SHA: recorded after commit
+- Code Snapshot SHA: `de960f956fc2571ed90bc230d5cbf28789111c5b`
 
 ## Change summary
 - Shared abuse.ch limiter used by both MalwareBazaar and ThreatFox: total 3 per sliding hour, 400 per 24h, atomic state writes, lock around check/write, source-tagged history, migration from legacy MalwareBazaar timestamp list, fail closed on malformed history. When both feeds are waiting, operators pass `--threatfox-pending` / `--malwarebazaar-pending` to enforce the alternating turn.

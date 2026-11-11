@@ -177,6 +177,7 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
 
 ## Task J-02 — ThreatFox server feed + shared abuse.ch budget (2026-11-11)
 - Branch `jacky/threatfox`, base snapshot `a9152229b4024da2b65a934dd4fa9fc81c612e55` (V-38 merge). Implemented ThreatFox manual importer, SQLite metadata/hash storage, `.hsb` export/deploy through the MalwareBazaar guarded atomic deployment flow, standalone rollback, shared rate limiter and mock tests.
+- Code implementation commit / handoff snapshot: `de960f956fc2571ed90bc230d5cbf28789111c5b` (local only; not pushed).
 - Combined persisted limiter: 3 requests/rolling hour and 400/24h across both feeds. Migrates legacy MalwareBazaar timestamp history, labels each new source, alternates waiting requests, and uses a file lock around limit check/write.
 - ThreatFox terms/export research: personal non-commercial use aligns with the documented Community API fair-use scope; company/commercial use needs a fresh terms review. Public docs identify sha256/md5/ip:port/domain/url and six-month IOC expiry. Authenticated CSV field schema remains gated; header-based mock parser is implemented, but real-export verification is pending. Details: [ThreatFox ops](ops/threatfox.md).
 - Verification status: NOT RUN in this Windows execution environment (`python`, `python3`, and `py` are unavailable). No live API, SSH, lab, clamd or deployment operation. Qeen acceptance pending.
