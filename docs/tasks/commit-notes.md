@@ -84,4 +84,6 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-11 | vic/merge-v38 | f8aa4d8 | YES | Merge branch 'origin/vic/malwarebazaar' into vic/merge-v38 |
 | 2026-11-11 | vic/merge-v38 | de51ffe | YES | fix(feeds): sanitize Auth-Key in MalwareBazaar URL export errors and update J-01 handoff |
 | 2026-11-11 | main | de51ffe | YES | main fast-forwarded 0979f5f → de51ffe (Zon approved "Merge cả hai", pushed to origin) |
+| 2026-11-11 | vic/merge-v38 | 42f662a | YES | docs(v38): record V-38 merge of adaptive-concurrency and malwarebazaar into main |
+
 
