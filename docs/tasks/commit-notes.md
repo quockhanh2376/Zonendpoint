@@ -88,6 +88,7 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-11 | jacky/threatfox | b8490d7 | YES | fix(feeds): resolve Q-28 ThreatFox defects and verify lab live first run (Task V-39) |
 | 2026-11-11 | jacky/threatfox | da74fc0 | YES | docs(tasks): track final commit in commit-notes |
 | 2026-11-11 | jacky/threatfox | 8eb08e7 | YES | feat(feeds): complete ThreatFox live deployment and real export parser (Task V-40) |
+| 2026-11-11 | jacky/threatfox | 3e9afcb | YES | docs(tasks): track Task V-40 snapshot SHA and commit-notes |
 
 
 
