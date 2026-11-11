@@ -3,7 +3,7 @@
 ## Code snapshot
 - Branch: `jacky/threatfox`
 - Base: `origin/jacky/threatfox` tip `fefa9db` (Task V-39)
-- Code Snapshot SHA: Pending commit in this task
+- Code Snapshot SHA: `8eb08e74ca116fbc9cd88913f6d037fa147736b1` (`8eb08e7`)
 - Worktree: `E:\Zonendpoint-worktrees\v40-threatfox`
 - Task: V-40 (Complete real ThreatFox run, export CSV parser fixes, dump preservation, 0-request import-file, clamd deployment)
 
