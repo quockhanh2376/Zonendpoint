@@ -15,7 +15,7 @@
 ## v1.0.0 safety and product rules
 
 - Product-owned UI copy is English. v1.0.0 has persisted Light/Dark selection (first launch Light), no language selector, and no i18n/theme framework requirement.
-- v1.0.0 is manually initiated Quick scan (13 core Windows files+drivers) or selected file/folder Scan, Windows x64 application builds. Initial audience is internal company use. Guard defaults OFF. No auto-quarantine, public feed, or public file submission. Never disable Defender/Sophos or expose clamd to the Internet.
+- v1.0.0 is manually initiated Quick scan (13 core Windows files+drivers) or selected file/folder Scan, Windows x64 application builds. Initial audience is non-commercial use on 1–2 personal machines (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Guard defaults OFF. No auto-quarantine, public feed, or public file submission. Never disable Defender/Sophos or expose clamd to the Internet.
 - Preserve typed outcomes: CLEAN, INFECTED, UNKNOWN, ERROR, SKIPPED, CANCELLED. Offline, timeout, malformed/incomplete response, cancellation, and policy limits must never become CLEAN.
 - Cache metadata is only a hint. Verify current content and applicable engine/signature/policy identity before reuse; scanner and cache statistics must use the same database path.
 - Folder traversal must be bounded, cancellable, report per-file errors, and retain bounded results. Do not silently skip errors or follow unsafe links/reparse points.

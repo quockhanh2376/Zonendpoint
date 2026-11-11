@@ -67,4 +67,14 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-09 | vic/version-label | 18cafd5 | YES | test(native): read expected version from tauri.conf.json (V-27) |
 | 2026-11-10 | vic/release-0.2.1 | e5e190d | YES | feat(release): bump version to 0.2.1 and add CHANGELOG (V-29) |
 | 2026-11-10 | vic/release-0.2.1 | d93d183 | YES | docs(tasks): track final commit in commit-notes |
-| 2026-11-11 | jacky/adaptive-concurrency | bab14a0 | NO | feat(scan): adapt folder concurrency to client capacity (J-01; push pending: no HTTPS credentials) |
+| 2026-11-10 | vic/malwarebazaar | 24e2fa7 | YES | feat(feeds): integrate MalwareBazaar feed ingestion and hash normalization on server (Task V-33) |
+| 2026-11-10 | vic/malwarebazaar | fb00733 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-10 | vic/malwarebazaar | 717ed4a | YES | feat(feeds): verify live MalwareBazaar ingestion, resolve Q-22 review items, and update personal non-commercial scope (Task V-34) |
+| 2026-11-10 | vic/malwarebazaar | 865a1a4 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-10 | vic/malwarebazaar | 691c44b | YES | feat(feeds): deploy MalwareBazaar hashes to lab clamd and add rollback script (Task V-35) |
+| 2026-11-10 | vic/malwarebazaar | 2a6113b | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-11 | vic/malwarebazaar | 9b2f6b9 | YES | feat(feeds): ingest MalwareBazaar full dump and deploy to clamd (Task V-36) |
+| 2026-11-11 | vic/malwarebazaar | c1693e1 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-11 | jacky/adaptive-concurrency | bab14a0 | YES | feat(scan): adapt folder concurrency to client capacity (J-01; pushed by Loki) |
+| 2026-11-11 | vic/malwarebazaar | 0109d5a | YES | docs(feeds): polish MalwareBazaar docs and docstrings per QA Q-25 review (Task V-37) |
+| 2026-11-11 | vic/malwarebazaar | 86a6b7f | YES | docs(tasks): track final commit in commit-notes |
