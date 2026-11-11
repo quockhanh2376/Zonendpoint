@@ -3,6 +3,7 @@
 ## Code snapshot
 - Branch: `jacky/threatfox`
 - Base: `origin/jacky/threatfox` tip `cf0b7f8` (code commit `de960f9`, base `main` `a915222`)
+- Code Snapshot SHA: `b8490d718e593e8b4498449e15d129a825001365` (`b8490d7`)
 - Worktree: `E:\Zonendpoint-worktrees\v39-threatfox`
 - Task: V-39 (Resolve Q-28 review items, live first run on lab server `100.96.250.245`)
 
