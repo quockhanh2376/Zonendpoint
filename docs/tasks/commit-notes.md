@@ -89,6 +89,11 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-11 | jacky/threatfox | da74fc0 | YES | docs(tasks): track final commit in commit-notes |
 | 2026-11-11 | jacky/threatfox | 8eb08e7 | YES | feat(feeds): complete ThreatFox live deployment and real export parser (Task V-40) |
 | 2026-11-11 | jacky/threatfox | 3e9afcb | YES | docs(tasks): track Task V-40 snapshot SHA and commit-notes |
+| 2026-11-11 | jacky/threatfox | 4e25f22 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-11 | vic/merge-v41 | bae722d | YES | Merge branch 'origin/jacky/threatfox' into vic/merge-v41 |
+| 2026-11-11 | vic/merge-v41 | 3e62bf4 | YES | fix(feeds): count unique sha256 in ThreatFox import log to match hsb export (Q-29) |
+| 2026-11-11 | main | 3e62bf4 | YES | main fast-forwarded a915222 → 3e62bf4 (Zon approved "Merge vào main", pushed to origin) |
+| 2026-11-11 | main | 61b3136 | YES | docs(v41): record V-41 merge of ThreatFox into main and handoff |
 
 
 
