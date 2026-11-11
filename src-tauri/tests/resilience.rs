@@ -2,11 +2,11 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    sync::{Semaphore, watch},
+    sync::watch,
 };
 use zonendpoint_lib::{
     ScanManager, cache, directory,
-    scanner::{ScanStatus, clamd_version, scan_file, scan_file_with_timeout},
+    scanner::{ScanLimiter, ScanStatus, clamd_version, scan_file, scan_file_with_timeout},
 };
 
 const STANDARD_VERSION: &str = "ClamAV 1.5.4/28175/Sat Nov  7 08:34:12 2026\0";
@@ -170,7 +170,7 @@ async fn test_midstream_reset_yields_error_not_clean() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(5),
     )
     .await;
@@ -199,7 +199,7 @@ async fn test_stall_timeout_yields_error_not_clean() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_millis(500),
     )
     .await;
@@ -241,7 +241,7 @@ async fn test_malformed_truncated_responses_rejected() {
             cache_db.clone(),
             addr,
             cancel,
-            Arc::new(Semaphore::new(1)),
+            Arc::new(ScanLimiter::new(1)),
             Duration::from_secs(2),
         )
         .await;
@@ -279,7 +279,7 @@ async fn test_daemon_connection_refused_never_cached() {
         cache_db.clone(),
         closed_addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
     )
     .await;
 
@@ -306,7 +306,7 @@ async fn test_cancel_during_stall_returns_cancelled() {
         let _ = cancel_tx.send(true);
     });
 
-    let semaphore = Arc::new(Semaphore::new(1));
+    let semaphore = Arc::new(ScanLimiter::new(1));
     let scan_cache = cache_db.clone();
     let scan_semaphore = semaphore.clone();
     let scan_addr = addr;
@@ -362,7 +362,7 @@ async fn test_engine_signature_change_invalidates_cache_reuse() {
         cache_db.clone(),
         addr1,
         cancel1,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
     )
     .await;
     assert_eq!(result1.status, ScanStatus::Clean);
@@ -382,7 +382,7 @@ async fn test_engine_signature_change_invalidates_cache_reuse() {
         cache_db.clone(),
         addr2,
         cancel2,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(5),
     )
     .await;
@@ -404,7 +404,7 @@ async fn test_engine_signature_change_invalidates_cache_reuse() {
         cache_db,
         offline_addr,
         cancel3,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
     )
     .await;
     assert_eq!(
@@ -432,7 +432,7 @@ async fn test_pipelined_extra_response_rejected() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(2),
     )
     .await;
@@ -517,7 +517,7 @@ async fn test_incomplete_version_response_rejected() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
     )
     .await;
     assert_eq!(result.status, ScanStatus::Error);
@@ -548,7 +548,7 @@ async fn test_clamd_stream_limit_error_handled() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(2),
     )
     .await;
@@ -586,7 +586,7 @@ async fn test_infected_preserves_threat_name() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(2),
     )
     .await;
@@ -619,7 +619,7 @@ async fn test_delayed_second_frame_50ms_rejected() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(5),
     )
     .await;
@@ -662,7 +662,7 @@ async fn test_delayed_second_frame_500ms_rejected() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(5),
     )
     .await;
@@ -701,7 +701,7 @@ async fn test_response_without_eof_never_closed_rejected() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(5),
     )
     .await;
@@ -779,7 +779,7 @@ async fn test_infected_cache_hit_preserves_exact_threat_name() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(2),
     )
     .await;
@@ -798,7 +798,7 @@ async fn test_infected_cache_hit_preserves_exact_threat_name() {
         cache_db.clone(),
         addr,
         cancel2,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(2),
     )
     .await;
@@ -828,7 +828,7 @@ async fn test_clean_cache_hit_preserves_verified_content_cache_hit_message() {
         cache_db.clone(),
         addr,
         cancel,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(2),
     )
     .await;
@@ -842,7 +842,7 @@ async fn test_clean_cache_hit_preserves_verified_content_cache_hit_message() {
         cache_db.clone(),
         addr,
         cancel2,
-        Arc::new(Semaphore::new(1)),
+        Arc::new(ScanLimiter::new(1)),
         Duration::from_secs(2),
     )
     .await;

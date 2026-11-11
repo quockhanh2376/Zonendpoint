@@ -5,6 +5,85 @@ use std::path::PathBuf;
 pub struct AppConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_scan_concurrency: Option<usize>,
+}
+
+const DEFAULT_MAX_SCAN_CONCURRENCY: usize = 4;
+const MAX_SCAN_CONCURRENCY: usize = 4;
+
+pub fn scan_concurrency() -> usize {
+    let cpu_count = std::thread::available_parallelism().map_or(1, usize::from);
+    let memory_bytes = total_memory_bytes();
+    let automatic = concurrency_for(cpu_count, memory_bytes);
+    load_config()
+        .ok()
+        .and_then(|config| config.max_scan_concurrency)
+        .map_or(automatic, |cap| {
+            automatic.min(cap.clamp(1, MAX_SCAN_CONCURRENCY))
+        })
+}
+
+fn concurrency_for(cpu_count: usize, memory_bytes: u64) -> usize {
+    let memory_limit = if memory_bytes <= 8 * 1024 * 1024 * 1024 {
+        2
+    } else if memory_bytes <= 16 * 1024 * 1024 * 1024 {
+        3
+    } else {
+        DEFAULT_MAX_SCAN_CONCURRENCY
+    };
+    cpu_count.clamp(1, MAX_SCAN_CONCURRENCY).min(memory_limit)
+}
+
+#[cfg(windows)]
+fn total_memory_bytes() -> u64 {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        length: u32,
+        memory_load: u32,
+        total_phys: u64,
+        avail_phys: u64,
+        total_page_file: u64,
+        avail_page_file: u64,
+        total_virtual: u64,
+        avail_virtual: u64,
+        avail_extended_virtual: u64,
+    }
+    unsafe extern "system" {
+        fn GlobalMemoryStatusEx(status: *mut MemoryStatusEx) -> i32;
+    }
+    let mut status = MemoryStatusEx {
+        length: std::mem::size_of::<MemoryStatusEx>() as u32,
+        memory_load: 0,
+        total_phys: 0,
+        avail_phys: 0,
+        total_page_file: 0,
+        avail_page_file: 0,
+        total_virtual: 0,
+        avail_virtual: 0,
+        avail_extended_virtual: 0,
+    };
+    if unsafe { GlobalMemoryStatusEx(&mut status) } != 0 {
+        status.total_phys
+    } else {
+        8 * 1024 * 1024 * 1024
+    }
+}
+
+#[cfg(not(windows))]
+fn total_memory_bytes() -> u64 {
+    std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|info| {
+            info.lines().find_map(|line| {
+                line.strip_prefix("MemTotal:")?
+                    .split_whitespace()
+                    .next()?
+                    .parse::<u64>()
+                    .ok()
+            })
+        })
+        .map_or(8 * 1024 * 1024 * 1024, |kib| kib.saturating_mul(1024))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -128,5 +207,21 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&custom_file).unwrap()).unwrap();
         assert_eq!(loaded.server_address.as_deref(), Some("127.0.0.1:13310"));
         let _ = std::fs::remove_file(custom_file);
+    }
+
+    #[test]
+    fn adaptive_concurrency_respects_ram_cpu_and_server_cap() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        for (ram, expected) in [(8, 2), (16, 3), (32, 4), (64, 4)] {
+            for cpu in [4, 8, 16] {
+                assert_eq!(
+                    concurrency_for(cpu, ram * GIB),
+                    expected,
+                    "{ram} GiB / {cpu} CPUs"
+                );
+            }
+        }
+        assert_eq!(concurrency_for(1, 64 * GIB), 1);
+        assert_eq!(concurrency_for(4, 4 * GIB), 2);
     }
 }

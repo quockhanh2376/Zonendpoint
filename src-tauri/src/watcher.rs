@@ -7,7 +7,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::watch;
 
 #[derive(Default)]
 pub struct Guard {
@@ -24,7 +24,7 @@ impl Guard {
         &mut self,
         cache_path: PathBuf,
         addr: SocketAddr,
-        semaphore: Arc<Semaphore>,
+        semaphore: Arc<crate::scanner::ScanLimiter>,
     ) -> Result<()> {
         if self.watcher.is_some() {
             return Ok(());
