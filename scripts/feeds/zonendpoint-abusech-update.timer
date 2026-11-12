@@ -4,7 +4,7 @@ Documentation=https://bazaar.abuse.ch/ https://threatfox.abuse.ch/
 
 [Timer]
 OnBootSec=5min
-OnUnitActiveSec=61min
+OnUnitInactiveSec=61min
 AccuracySec=1min
 Persistent=false
 

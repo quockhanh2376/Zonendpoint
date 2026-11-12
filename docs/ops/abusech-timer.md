@@ -14,7 +14,7 @@ Hệ thống cập nhật hàng giờ được thiết kế theo mô hình **Ser
 
 ```mermaid
 flowchart TD
-    T["systemd timer: zonendpoint-abusech-update.timer"] -->|Khoảng cách >= 61 phút OnUnitActiveSec=61min| S["systemd service: zonendpoint-abusech-update.service"]
+    T["systemd timer: zonendpoint-abusech-update.timer"] -->|Khoảng cách >= 61 phút OnUnitInactiveSec=61min| S["systemd service: zonendpoint-abusech-update.service"]
     S --> U["zonendpoint-abusech-update.py"]
     U --> L{"Khóa file flock /opt/zonendpoint/abusech/update.lock"}
     L -->|Đang chạy| E1["Bỏ qua - không chạy chồng"]
@@ -112,16 +112,16 @@ Documentation=https://bazaar.abuse.ch/ https://threatfox.abuse.ch/
 
 [Timer]
 OnBootSec=5min
-OnUnitActiveSec=61min
+OnUnitInactiveSec=61min
 AccuracySec=1min
 Persistent=false
 
 [Install]
 WantedBy=timers.target
 ```
-*Ghi chú (Task V-43 fix theo Q-31)*:
-- Sử dụng timer đơn điệu (`OnUnitActiveSec=61min`) thay vì `OnCalendar=hourly + RandomizedDelaySec=5min` để đảm bảo khoảng cách giữa hai lần chạy tự động liên tiếp **luôn $\ge 61$ phút** ($> 60$ phút của sliding rate limit window). Điều này loại bỏ hoàn toàn hiện tượng 2 lượt chạy cách nhau $< 60$ phút khiến ThreatFox bị nghẽn (từ 63,2% lên 100%).
-- `AccuracySec=1min` giữ độ trôi kích hoạt trong biên độ an toàn 61–62 phút.
+*Ghi chú (Task V-43/V-44 fix theo Q-31 & Q-32)*:
+- Sử dụng timer đơn điệu đếm từ khi kết thúc (`OnUnitInactiveSec=61min`) thay vì `OnCalendar=hourly` hay `OnUnitActiveSec=61min`. Bộ đếm 61 phút bắt đầu tính **từ thời điểm lượt trước HOÀN TẤT (deactivation)**. Kể cả khi một lượt chạy lâu (request ThreatFox bị trễ tới gần ngưỡng timeout 600s), lượt tiếp theo vẫn được kích hoạt cách thời điểm kết thúc $\ge 61$ phút. Do đó, tất cả các request của lượt trước đều đã trôi khỏi cửa sổ trượt 60 phút (3600s) $\rightarrow$ luôn còn đủ 3 slot $\rightarrow$ MB và TF đều đạt 100% tỷ lệ chạy.
+- `AccuracySec=1min` giữ độ trôi kích hoạt trong biên độ an toàn 61–62 phút sau khi kết thúc.
 - `Persistent=false` đảm bảo không gọi bù dồn dập sau khi reboot.
 - **Guard bảo lưu 2 slot**: `zonendpoint-abusech-update.py` kiểm tra và bảo lưu nguyên tử 2 slot dưới khóa `rate_limit.json.lock` trước khi chạy. Nếu có request thủ công chen ngang khiến hạn mức còn $< 2$, hệ thống bỏ trọn lượt (cả MB và TF) để bảo đảm tính công bằng 100%.
 
@@ -135,6 +135,13 @@ Khi Zon phê duyệt bật lịch chạy chính thức trên Lab:
 sudo systemctl daemon-reload
 sudo systemctl enable --now zonendpoint-abusech-update.timer
 ```
+
+> [!IMPORTANT]
+> **Hành vi khi bật `enable --now` trên máy chủ đã boot > 5 phút**:
+> Vì máy chủ đã khởi động quá 5 phút (`uptime > 5min`), mốc `OnBootSec=5min` đã quá hạn nên theo ngữ nghĩa của systemd, lượt cập nhật đầu tiên sẽ **CHẠY NGAY LẬP TỨC** ngay khi lệnh kích hoạt được thực thi.
+> - Lượt đầu này sẽ tiêu thụ 2 request (1 MalwareBazaar, 1 ThreatFox).
+> - Nếu có hash mới, lượt đầu có thể kích hoạt reload clamd (mất khoảng 25 giây).
+> - Các lượt tiếp theo sẽ tự động được lên lịch cách nhau **$\ge 61$ phút tính từ lúc lượt trước KẾT THÚC** (`OnUnitInactiveSec=61min`).
 
 Xác nhận trạng thái timer:
 ```bash

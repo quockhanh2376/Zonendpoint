@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-Abuse.ch Hourly Timer Simulation & Guard Verification Suite (Task V-43)
+Abuse.ch Hourly Timer Simulation & Guard Verification Suite (Task V-43/V-44)
 
 Verifies:
 1. Reproduction of Q-31 defect under old timer (OnCalendar=hourly + RandomizedDelaySec=5min):
    Shows MB ~100% and TF ~63.2% across 100,000 simulated iterations due to intervals < 60m.
-2. New monotonic timer verification (OnUnitActiveSec=61min, AccuracySec=1min):
-   Guarantees all intervals >= 61m (> 60m sliding window).
-   Simulates 100,000 runs -> MB 100.0%, TF 100.0%, 0 dropped turns.
+2. New monotonic timer verification (OnUnitInactiveSec=61min, AccuracySec=1min):
+   Guarantees all intervals >= 61m from previous run DEACTIVATION (> 60m sliding window).
+   Even with long-running executions (TF delayed up to ~580s near TimeoutStartSec 600s),
+   all previous requests expire before next turn begins -> MB 100.0%, TF 100.0%.
 3. Guard behavior with intervening manual requests:
    When manual requests reduce remaining capacity below 2, the entire turn is skipped
    cleanly (MB=0, TF=0), eliminating unfair starving of TF.
 4. Timer unit file compliance:
-   Verifies OnBootSec=5min, OnUnitActiveSec=61min, AccuracySec=1min, no RandomizedDelaySec.
+   Verifies OnBootSec=5min, OnUnitInactiveSec=61min, AccuracySec=1min, no RandomizedDelaySec.
 5. Atomic reservation under shared limiter lock.
 """
 import collections
@@ -74,11 +75,12 @@ def simulate_old_timer(iterations=100_000, seed=42):
     }
 
 
-def simulate_new_timer(iterations=100_000, seed=42):
+def simulate_new_timer(iterations=100_000, max_tf_delay=580.0, seed=42):
     """
-    Simulates new monotonic timer: OnUnitActiveSec=61min + AccuracySec=1min.
-    Interval between runs is guaranteed >= 3660 seconds (61 minutes).
-    Jitter from AccuracySec is in [0, 60] seconds added to the 61-minute interval.
+    Simulates new monotonic timer: OnUnitInactiveSec=61min + AccuracySec=1min.
+    Timer counts 61 minutes from the moment the previous unit finishes (t_finish).
+    Even when runs take a long time (e.g. ThreatFox delayed up to 580s near TimeoutStartSec 600s),
+    all requests are guaranteed >= 61m old when the next turn begins.
     """
     rng = random.Random(seed)
     history = collections.deque()
@@ -94,15 +96,20 @@ def simulate_new_timer(iterations=100_000, seed=42):
         # Guard: check if >= 2 slots available
         hourly_remaining = MAX_PER_HOUR - len(history)
         if hourly_remaining >= 2:
-            # Both feeds run
-            history.append((current_time, "malwarebazaar"))
-            history.append((current_time + 0.1, "threatfox"))
+            mb_time = current_time + rng.uniform(1.0, 5.0)
+            tf_time = current_time + rng.uniform(30.0, max_tf_delay)
+            t_finish = tf_time + rng.uniform(1.0, 10.0)
+
+            history.append((mb_time, "malwarebazaar"))
+            history.append((tf_time, "threatfox"))
             mb_runs += 1
             tf_runs += 1
+        else:
+            t_finish = current_time + 1.0
 
-        # Advance timer: fixed 61 min + accuracy jitter [0, 60s]
+        # Advance timer: OnUnitInactiveSec=61min counts from t_finish + accuracy jitter [0, 60s]
         accuracy_delay = rng.uniform(0.0, 60.0)
-        current_time += (61 * 60.0) + accuracy_delay
+        current_time = t_finish + (61 * 60.0) + accuracy_delay
 
     return {
         "iterations": iterations,
@@ -144,14 +151,19 @@ def simulate_new_timer_with_manual_interference(iterations=50_000, manual_prob=0
         # Guard check
         remaining = MAX_PER_HOUR - len(history)
         if remaining >= 2:
-            history.append((current_time, "malwarebazaar"))
-            history.append((current_time + 0.1, "threatfox"))
+            mb_time = current_time + rng.uniform(1.0, 5.0)
+            tf_time = current_time + rng.uniform(10.0, 300.0)
+            t_finish = tf_time + rng.uniform(1.0, 5.0)
+
+            history.append((mb_time, "malwarebazaar"))
+            history.append((tf_time, "threatfox"))
             auto_mb_runs += 1
             auto_tf_runs += 1
         else:
+            t_finish = current_time + 1.0
             skipped_turns += 1
 
-        current_time += (61 * 60.0) + rng.uniform(0.0, 60.0)
+        current_time = t_finish + (61 * 60.0) + rng.uniform(0.0, 60.0)
 
     return {
         "iterations": iterations,
@@ -173,12 +185,42 @@ class TestAbusechTimerSimulation(unittest.TestCase):
         self.assertAlmostEqual(res["tf_pct"], 63.2, delta=2.0)
 
     def test_new_timer_guarantees_100_percent_both_feeds(self):
-        """Verifies that the new timer (>= 61 min interval) achieves 100.0% for both MB and TF."""
-        res = simulate_new_timer(iterations=100_000, seed=42)
+        """Verifies that the new timer (>= 61 min interval from inactive) achieves 100.0% for both MB and TF."""
+        res = simulate_new_timer(iterations=100_000, max_tf_delay=580.0, seed=42)
         self.assertEqual(res["mb_runs"], 100_000)
         self.assertEqual(res["tf_runs"], 100_000)
         self.assertEqual(res["mb_pct"], 100.0)
         self.assertEqual(res["tf_pct"], 100.0)
+
+    def test_long_run_delayed_tf_near_timeout_guarantees_full_slots_next_run(self):
+        """
+        Verifies that when a run takes nearly TimeoutStartSec (600s), OnUnitInactiveSec=61min
+        guarantees that next run starts >= 61m AFTER completion, so TF request is >= 61m old
+        and both slots are available.
+        """
+        history = collections.deque()
+        t_start = 10000.0
+        mb_time = t_start + 5.0
+        tf_time = t_start + 580.0  # TF delayed to 580s near 600s timeout!
+        t_finish = tf_time + 10.0  # Run finishes at 590s
+
+        history.append((mb_time, "malwarebazaar"))
+        history.append((tf_time, "threatfox"))
+
+        # Next run starts at t_finish + 61min
+        next_run_start = t_finish + (61 * 60.0)
+
+        # Difference between next_run_start and tf_time is:
+        delta_tf = next_run_start - tf_time
+        self.assertGreaterEqual(delta_tf, 61 * 60.0)
+        self.assertGreater(delta_tf, HOUR)
+
+        # At next_run_start, clean history
+        valid_requests = [r for r in history if next_run_start - r[0] < HOUR]
+        self.assertEqual(len(valid_requests), 0)
+        remaining = MAX_PER_HOUR - len(valid_requests)
+        self.assertEqual(remaining, 3)
+        self.assertGreaterEqual(remaining, 2)
 
     def test_manual_interference_drops_entire_turn_preserving_fairness(self):
         """Verifies that with manual requests, turns are skipped in full, keeping MB == TF exactly."""
@@ -189,15 +231,17 @@ class TestAbusechTimerSimulation(unittest.TestCase):
         self.assertEqual(res["auto_mb_runs"] + res["skipped_turns"], res["iterations"])
 
     def test_timer_unit_file_configuration(self):
-        """Verifies that zonendpoint-abusech-update.timer strictly enforces >= 61min interval."""
+        """Verifies that zonendpoint-abusech-update.timer strictly enforces OnUnitInactiveSec=61min."""
         timer_file = HERE / "zonendpoint-abusech-update.timer"
         self.assertTrue(timer_file.is_file())
         content = timer_file.read_text(encoding="utf-8")
 
         # Must have OnBootSec=5min
         self.assertIn("OnBootSec=5min", content)
-        # Must have OnUnitActiveSec=61min
-        self.assertIn("OnUnitActiveSec=61min", content)
+        # Must have OnUnitInactiveSec=61min
+        self.assertIn("OnUnitInactiveSec=61min", content)
+        # Must NOT have OnUnitActiveSec
+        self.assertNotIn("OnUnitActiveSec", content)
         # Must have AccuracySec=1min
         self.assertIn("AccuracySec=1min", content)
         # Must NOT have RandomizedDelaySec
