@@ -34,3 +34,49 @@ Required follow-up on the authorized desktop: use `C:\Program Files`; levels 2, 
 2. Verify RAM/CPU matrix and config override behavior, including legacy JSON.
 3. Verify backoff and 50-file recovery, including reset for non-pressure errors, and that recovery never exceeds chosen ceiling.
 4. Run the documented interleaved real-folder measurement and provide clamd CPU/RSS separately. Do not change clamd configuration.
+
+## J-04 benchmark runner
+
+Development-only example: `src-tauri/examples/folder_bench.rs`. It calls the same `directory::scan_roots` traversal, ClamAV preflight, engine-pinned `scanner::scan_file_with_engine_override`, `ScanLimiter`, and `cache::default_path` as the application. It is not packaged with the application release and adds no dependencies. The selected concurrency is passed as an argument (1–6); config/cache paths follow the process `LOCALAPPDATA`.
+
+Build and run in PowerShell:
+
+```powershell
+cargo build --manifest-path src-tauri/Cargo.toml --release --example folder_bench
+$slot = 'E:\Zonendpoint-tools\artifacts\j04\runs\2-a'
+New-Item -ItemType Directory -Force $slot | Out-Null
+$env:LOCALAPPDATA = $slot
+& .\src-tauri\target\release\examples\folder_bench.exe 'C:\Program Files' 2
+```
+
+Each cold run must use a new empty slot such as `runs\2-a`; its cache run reuses that slot. The runner emits JSON with elapsed wall seconds, process CPU seconds, peak working-set bytes, typed outcome counts, completeness, cache path/entry count, final concurrency, backoffs, and recoveries. Keep cache slots separate and never point `LOCALAPPDATA` at the user's normal directory for cold runs.
+
+## J-04 measurement and flaky test update (2026-11-12)
+
+- Checkout: `E:\Zonendpoint-Jacky\j04`, branch `jacky/concurrency-v2`.
+- Merged local `origin/main` at `2464aee167cfb1c9780afc98557d5854d85ab98e`; merge commit `0b0ed14`. The only conflict, `docs/daily.md`, retains both J-03 and V-30M entries.
+- Code snapshot SHA: `3efdefd2e701d26498759ca0c7a04634ac4c2728` (local; no push or merge to main).
+- Windows 8 GiB / 4 CPU, `C:\Program Files` (12,886 files), tunnel `127.0.0.1:13310`. Cold-run order was interleaved 2/4/6, 4/6/2, 6/2/4; 3 cold runs per level and 1 cache run per level.
+
+| Level | Cold runs (wall seconds) | Process CPU (seconds) | Peak RAM (MiB) | CLEAN / ERROR / SKIPPED | Backoff / recovery |
+|---:|---|---|---|---|---|
+| 2 | 529.5 (`2-a`), 427.9 (`2-b`), 115.5 (`2-c`) | 65.9 / 64.1 / 64.5 | 7.72 / 7.76 / 7.82 | 12,875/3/8; 12,875/3/8; 12,874/4/8 | 0/0 all |
+| 4 | 107.7 (`4-a`), 104.0 (`4-b`), 111.4 (`4-c`) | 50.0 / 51.8 / 50.4 | 8.47 / 8.42 / 8.40 | 12,875/3/8; 12,874/4/8; 12,874/4/8 | 0/0; 1/1; 0/0 |
+| 6 | 98.9 (`6-a`), 98.6 (`6-b`), 127.6 (`6-c`) | 48.3 / 46.3 / 52.4 | 8.76 / 8.68 / 8.69 | 12,875/3/8; 12,874/4/8; 12,874/4/8 | 0/0; 1/1; 1/1 |
+
+All folder scans had `scanned=12886`, no INFECTED/UNKNOWN/CANCELLED, and `complete=false` because ERROR/SKIPPED were present. Cache-hit 2/4/6: wall 17.3/10.8/8.9 s, CPU 30.2/24.0/22.4 s, peak RAM 7.53/8.28/8.79 MiB; each had 12,875 CLEAN, 3 ERROR, 8 SKIPPED, and no backoff.
+
+Outlier repeats in new cache slots: level 2 slow runs 529.5/427.9 s repeated at 117.4/112.6 s (`2-fast-repeat`, `2-slow-repeat`); the slow condition did not recur. Level 6 `6-c` at 127.6 s with one backoff repeated at 99.3 s, consistent with `6-a/b`. The ~28 s excess is close to the reported ~25 s reload duration, but lab reload timing/logs were not observed, so no cause is assigned.
+
+**4 vs 6 conclusion:** median level 4 = 107.7 s; representative level-6 runs after repeating the outlier = 98.9 s. Level 6 was about **8.2% faster**, below the >10% threshold. Recommend keeping the client concurrency ceiling at **4**.
+
+- Flaky test expectation now allows one or more already-started INFECTED results and asserts every counted INFECTED remains in `results` with positive evidence. Product cancellation behavior is unchanged. Targeted test loop: 50/50 PASS.
+- Gates: fmt PASS; `cargo test` 70/70 PASS (51 library + 1 binary + 18 resilience); clippy `--all-targets -- -D warnings` PASS; release example build PASS.
+- SHA-256 of files under `%LOCALAPPDATA%\ZonEndpoint` was identical before/after. No EICAR/malware. Benchmark campaign lasted under 61 minutes; lab timer/reload telemetry and clamd CPU/RSS are NOT RUN; Qeen acceptance is NOT RUN.
+- Report and raw evidence: `E:\Zonendpoint-tools\artifacts\j04\jacky-report.md`.
+
+### Qeen acceptance requested for J-04
+
+1. Independently inspect code snapshot `3efdefd2e701d26498759ca0c7a04634ac4c2728` and rerun fmt, full Rust tests, and clippy.
+2. Review the benchmark runner, cache-isolated run procedure and limiter telemetry; verify incomplete outcomes remain visible for ERROR/SKIPPED.
+3. Independently verify the 4-vs-6 recommendation and rerun treatment. Capture clamd CPU/RSS and timer/reload state separately; do not change clamd configuration.

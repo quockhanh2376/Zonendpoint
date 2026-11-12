@@ -159,3 +159,7 @@
      - Khắc phục phản ánh của QA Q-21: gom logic hủy scan và thoát thành hàm helper dùng chung (`cancel_and_exit` và `stop_guard`), xóa bỏ trùng lặp code trong `src-tauri/src/lib.rs`.
   3. Quality Gates: `cargo fmt -- --check` PASS, `cargo clippy --all-targets -- -D warnings` PASS, `cargo test` 68/68 PASS (49 lib + 1 bin + 18 resilience), `npm run build` PASS (Vite build sạch), `tests/native/run.mjs` 20/20 checks PASS (bao gồm test đóng cửa sổ sau quét và trong lúc đang quét của V-30).
   4. Handoff & Push: Đẩy nhánh `vic/close-fix-merge` lên origin (không push main). Bàn giao cho Qeen kiểm nhanh trước khi Loki fast-forward main. Code Snapshot SHA: `17bdccf`.
+
+## 2026-11-12 - J-04
+- Merged local `origin/main` (`2464aee`) into J-03 branch; resolved the sole `docs/daily.md` conflict retaining both entries. Added folder benchmark and relaxed only the flaky test assertion; code snapshot `3efdefd`.
+- Program Files: median 4=107.7 s vs 6=98.9 s (8.2% gain), recommend ceiling 4. 50/50 flaky-test loop and all Rust gates PASS. Clamd CPU/RSS and lab timer state NOT RUN (Qeen). See J-04 handoff and `E:\Zonendpoint-tools\artifacts\j04\jacky-report.md`.
