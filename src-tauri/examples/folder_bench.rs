@@ -1,5 +1,7 @@
-//! Development-only folder benchmark. Run from a PowerShell session with
-//! LOCALAPPDATA set to an isolated directory for each cache-cold run.
+//! Development-only folder benchmark. It accepts 1-6 worker slots directly
+//! for measurement; the application itself has a hard concurrency ceiling of 4.
+//! Run from PowerShell with LOCALAPPDATA set to an isolated directory for each
+//! cache-cold run.
 
 use std::{env, path::PathBuf, sync::Arc, time::Instant};
 use tokio::sync::watch;
