@@ -103,4 +103,5 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-12 | vic/abusech-timer | b3771d2 | YES | docs(tasks): track final commit in commit-notes |
 | 2026-11-12 | vic/abusech-timer | 8edf51e | YES | fix(feeds): switch timer to OnUnitInactiveSec for long run safety (Task V-44) |
 | 2026-11-12 | vic/abusech-timer | 7e064a1 | YES | docs(tasks): track Task V-44 snapshot SHA in handoff, daily, and commit-notes |
-| 2026-11-12 | vic/close-fix-merge | 17bdccf | NO | Merge branch 'origin/vic/close-fix' into vic/close-fix-merge (Task V-30M) |
+| 2026-11-12 | vic/close-fix-merge | 17bdccf | YES | Merge branch 'origin/vic/close-fix' into vic/close-fix-merge (Task V-30M) |
+| 2026-11-12 | vic/close-fix-merge | a493120 | YES | docs(v30m): record V-30M merge of close-fix into main and handoff |
