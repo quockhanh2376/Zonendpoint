@@ -146,3 +146,7 @@
   3. Docs `docs/ops/abusech-timer.md`: Cập nhật cấu hình timer, sơ đồ mermaid và ghi rõ ghi chú quan trọng: khi chạy `systemctl enable --now` trên máy đã boot > 5 phút thì lượt đầu tiên sẽ CHẠY NGAY LẬP TỨC (tiêu thụ 2 request, có thể reload clamd ~25s nếu có hash mới); các lượt tiếp theo cách $\ge 61$ phút tính từ lúc lượt trước xong.
   4. Lab deployment: Cài lại `zonendpoint-abusech-update.timer` vào `/etc/systemd/system/` trên lab host `100.96.250.245`, chạy `systemctl daemon-reload`. Xác nhận timer VẪN TẮT (`disabled`, `inactive (dead)`). Không start service, không reload clamd (clamd PID 2245, 8.614.555 signatures giữ nguyên). Dọn dẹp `/tmp/v44_test`.
   5. Documentation & handoff: Cập nhật Code Snapshot SHA `8edf51e` vào `docs/handoffs/abusech-timer-vic-to-qeen.md`, `docs/daily.md`, `docs/project-status.md`, `docs/tasks/commit-notes.md`. Sẵn sàng cho Qeen audit lại theo Q-32.
+
+## 2026-11-12 � J-03
+- Implemented adaptive concurrency ceiling 6, explicit config override 1�6, and gradual recovery after 50 consecutive clean/infected files. Local code commit `1e0ec28` on `jacky/concurrency-v2`; not pushed or merged.
+- fmt, cargo test (70), and clippy PASS. Program Files benchmark NOT RUN because UI control denied access; 4-vs-6 remains unmeasured. Handoff: `docs/handoffs/concurrency-v2-jacky-to-qeen.md`.
