@@ -1,6 +1,6 @@
-# Project status — 2026-11-11
+# Project status — 2026-11-12
 
-Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Implementation of hourly automated update scheduler for MalwareBazaar + ThreatFox (Task V-42) approved by Zon (2026-11-11 "Bật mỗi giờ") on branch `vic/abusech-timer`. Base: `origin/main 1399604` (Q-30 PASS).
+Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Implementation of hourly automated update scheduler for MalwareBazaar + ThreatFox (Task V-42) and Q-31 defect resolution (Task V-43) on branch `vic/abusech-timer`. Base: `origin/main 1399604` (Q-30 PASS).
 
 ## Active checkout/snapshot
 - Implementation: branch `vic/abusech-timer` (base `origin/main 1399604`).
@@ -8,7 +8,8 @@ Phase: current scan candidate stabilization for **non-commercial use on 1–2 pe
   - MalwareBazaar: 1,171,422 hashes in DB (`/opt/zonendpoint/malwarebazaar/malwarebazaar.db`), 1,171,422 loaded in clamd (`/var/lib/clamav/malwarebazaar.hsb`).
   - ThreatFox: 45,298 unique SHA-256 in DB (`/opt/zonendpoint/threatfox/threatfox.db`), 21,625 net unique signatures loaded in clamd (`/var/lib/clamav/threatfox.hsb`).
   - Total custom feed signatures: 1,193,047 signatures in clamd (clamd live total: 8,614,555 signatures).
-  - Mode: Hourly timer installed (`zonendpoint-abusech-update.timer`), but **LEFT DISABLED and INACTIVE** (`disabled`, `dead`) pending activation approval. Shared rate limit: 3 requests/hour (sliding 3600s), 400 requests/24h.
+  - Mode: Hourly timer installed (`zonendpoint-abusech-update.timer` with monotonic interval `OnUnitActiveSec=61min`, `OnBootSec=5min`, `AccuracySec=1min`), but **LEFT DISABLED and INACTIVE** (`disabled`, `dead`) pending activation approval. Shared rate limit: 3 requests/hour (sliding 3600s), 400 requests/24h.
+  - Guard: Requires $\ge 2$ slots before starting turn, atomically reserved under `rate_limit.json.lock`. If $< 2$ slots remain, entire turn is skipped cleanly without retries.
   - Recent endpoints: MalwareBazaar (`https://mb-api.abuse.ch/v2/files/exports/<AUTH-KEY>/recent.csv`), ThreatFox (`https://threatfox-api.abuse.ch/v2/files/exports/<AUTH-KEY>/recent.csv`).
   - Reload policy: Single clamd reload per hour; 0 new hashes across feeds = 0 reload; pre-flight temp DB check + RAM $\ge 3.0$ GB + timeout $\le 120$ s.
 - Handoff doc: [abusech-timer-vic-to-qeen.md](handoffs/abusech-timer-vic-to-qeen.md).
@@ -257,3 +258,27 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
 - **Main SHA**: Fast-forwarded `main` from `a915222` to `3e62bf4` and pushed to `origin main`.
 - **Feeds Status**: MalwareBazaar 1,171,240 hashes + ThreatFox 21,476 unique SHA-256 signatures in clamd (total 1,192,716 feed signatures; clamd total 8,614,224 signatures); 134,686 unique IOCs in DB; strictly manual execution; 0 timers.
 - Handoff doc: [merge-v41-vic-to-qeen.md](handoffs/merge-v41-vic-to-qeen.md).
+
+## Task V-43 — ThreatFox Starvation Fix & Monotonic Timer (2026-11-12)
+- Branch `vic/abusech-timer`, worktree `E:\Zonendpoint-worktrees\v43-timer`, continuation of `af972e7` (code `1b6834c`).
+- **Defect Resolved (Q-31)**: Fixed ThreatFox starvation under hourly timer. With `OnCalendar=hourly + RandomizedDelaySec=5min`, consecutive intervals could be $< 60$ min, leaving only 1 slot in the sliding window; MalwareBazaar took the slot and ThreatFox was blocked (63.2% success vs MB 100%).
+- **Fix 1 (Turn Guard & Atomic Reservation)**:
+  - In `scripts/feeds/abusech_rate_limit.py`: added `RateLimiter.reserve_slots(count=2, sources=("malwarebazaar", "threatfox"))`.
+  - Atomically verifies `hourly_remaining >= 2` and `daily_remaining >= 2` under `rate_limit.json.lock`.
+  - In `scripts/feeds/zonendpoint-abusech-update.py`: calls `reserve_slots(2)` before turn start. If $< 2$ slots remain (e.g. from intervening manual requests), the entire turn is skipped cleanly without retries, recording `last-run.json`.
+- **Fix 2 (Monotonic Timer >= 61 min)**:
+  - In `scripts/feeds/zonendpoint-abusech-update.timer`: changed to `OnBootSec=5min`, `OnUnitActiveSec=61min`, `AccuracySec=1min` (removed `RandomizedDelaySec` and `OnCalendar=hourly`).
+  - Guaranteed interval $\ge 61$ min ensures all prior requests are outside the 60m sliding window, achieving 100.0% completion for both MB and TF.
+- **Fix 3 (MalwareBazaar Log Label)**:
+  - In `scripts/feeds/zonendpoint-malwarebazaar.py`: `import_dump_csv` logs "Recent export imported successfully" when importing `recent.csv` instead of "Full dump imported successfully".
+- **Quality Gates & Simulations**:
+  - Python test suites on lab temporary directory (`/tmp/v43_test`, Python 3.14.4): **5/5 suites PASS (66/66 tests, 0 real requests to abuse.ch)**:
+    - `test_abusech_rate_limit.py`: 8/8 PASS
+    - `test_abusech_timer_simulation.py`: 5/5 PASS (100k-iteration simulation: old timer MB 100%, TF 63.2%; new timer MB 100%, TF 100%; manual interference full-turn skip)
+    - `test_zonendpoint_abusech_update.py`: 10/10 PASS
+    - `test_zonendpoint_threatfox.py`: 15/15 PASS
+    - `test_zonendpoint_malwarebazaar.py`: 28/28 PASS
+- **Lab Deployment**:
+  - Reinstalled all updated scripts (`/usr/local/bin`) and unit files (`/etc/systemd/system/`); ran `systemctl daemon-reload`.
+  - Timer verified: `disabled`, `inactive (dead)`. ClamAV daemon PID 2245, configs, and 8,614,555 signatures untouched.
+- Handoff doc: [abusech-timer-vic-to-qeen.md](handoffs/abusech-timer-vic-to-qeen.md).

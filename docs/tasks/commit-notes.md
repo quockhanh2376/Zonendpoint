@@ -96,6 +96,9 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-11 | main | 61b3136 | YES | docs(v41): record V-41 merge of ThreatFox into main and handoff |
 | 2026-11-11 | vic/abusech-timer | 1b6834c | YES | feat(feeds): implement hourly automatic scheduler for MalwareBazaar + ThreatFox (Task V-42) |
 | 2026-11-11 | vic/abusech-timer | 12f98d7 | YES | docs(tasks): track Task V-42 snapshot SHA in commit-notes and handoff |
+| 2026-11-11 | vic/abusech-timer | af972e7 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-12 | vic/abusech-timer | 3669741 | YES | fix(feeds): resolve ThreatFox starvation with turn guard and monotonic timer (Task V-43) |
+
 
 
 

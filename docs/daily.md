@@ -125,3 +125,17 @@
   - Live immediate run 3: Pre-check detected 3/3 hourly limit, skipped turn in 0.0s, 0 requests, 0 reload.
   - Secret leak audit: Journal and last-run.json verified 100% clean (0 matches for Auth-Key).
   - Docs: `docs/ops/abusech-timer.md`, `docs/handoffs/abusech-timer-vic-to-qeen.md`. Branch `vic/abusech-timer`. No merge to main.
+
+## 2026-11-12
+- Task V-43 (Fix ThreatFox starved turns in hourly schedule, Q-31 resolution): Fixed bug reported in Q-31 where `OnCalendar=hourly` + `RandomizedDelaySec=5min` caused consecutive intervals < 60m, starving ThreatFox (MB 100%, TF 63.2%).
+  1. Guard in `zonendpoint-abusech-update.py`: requires remaining >= 2 slots before starting turn. Atomically checks and reserves 2 slots under shared limiter lock (`rate_limit.json.lock`) via `limiter.reserve_slots(count=2)`. If slots < 2 (e.g. from intervening manual requests), skips entire turn cleanly without retries, records skip in `last-run.json`.
+  2. Fixed timer in `zonendpoint-abusech-update.timer`: switched to monotonic timer `OnBootSec=5min` + `OnUnitActiveSec=61min` with `AccuracySec=1min` (removed `RandomizedDelaySec` and `OnCalendar=hourly`), guaranteeing consecutive intervals >= 61 min (> 60m sliding window). Automated runs now achieve 100% completion for both MB and TF.
+  3. MalwareBazaar logging fix: `import_dump_csv` logs "Recent export imported successfully" when importing `recent.csv` or with `source="malwarebazaar_recent"` instead of "Full dump imported successfully".
+  4. Test & Simulation suites: 5/5 suites PASS on lab temporary directory (Python 3.14.4, 66/66 tests, 0 real requests to abuse.ch):
+     - `test_abusech_rate_limit.py`: 8/8 PASS (+4 new tests for atomic reservation, manual blocking, cancel unconsumed).
+     - `test_abusech_timer_simulation.py`: 5/5 PASS (new suite: 100k-iteration old vs new timer simulation reproducing Q-31 63.2% vs new 100.0%, manual interference full-turn skip, unit file syntax, lock reservation).
+     - `test_zonendpoint_abusech_update.py`: 10/10 PASS (+2 new tests for manual intervention leaving 1 slot skipping entire turn and guard reservation under lock).
+     - `test_zonendpoint_threatfox.py`: 15/15 PASS.
+     - `test_zonendpoint_malwarebazaar.py`: 28/28 PASS.
+  5. Lab deployment: Reinstalled `abusech_rate_limit.py`, `zonendpoint-abusech-update.py`, `zonendpoint-malwarebazaar.py`, `zonendpoint-threatfox.py`, and unit files to `/usr/local/bin` and `/etc/systemd/system/`; executed `systemctl daemon-reload`. Verified timer remains DISABLED and INACTIVE (`disabled`, `dead`). ClamAV configs, daemon, and signatures (8,614,555) untouched.
+  6. Documentation updated: `docs/ops/abusech-timer.md`, `docs/project-status.md`, `docs/daily.md`, `docs/handoffs/abusech-timer-vic-to-qeen.md`. Branch `vic/abusech-timer`. No merge to main.
