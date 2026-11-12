@@ -84,6 +84,36 @@ async function scan(expected) {
   }
 }
 
+function sendCloseMainWindow(pid) {
+  const ps = `
+    Add-Type @"
+    using System;
+    using System.Runtime.InteropServices;
+    public class NativeWinClose {
+      [DllImport("user32.dll", CharSet = CharSet.Auto)]
+      public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+    }
+"@
+    $p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+    if ($p -and $p.MainWindowHandle -ne 0) {
+      [NativeWinClose]::PostMessage($p.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+    }
+  `;
+  spawnSync('powershell.exe', ['-NoProfile', '-Command', ps]);
+}
+
+function isProcessAlive(pid) {
+  const ps = `if (Get-Process -Id ${pid} -ErrorAction SilentlyContinue) { "alive" } else { "dead" }`;
+  const res = spawnSync('powershell.exe', ['-NoProfile', '-Command', ps], { encoding: 'utf8' });
+  return res.stdout.includes('alive');
+}
+
+function getOrphanChildren(pid) {
+  const ps = `(Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq ${pid} }).ProcessId`;
+  const res = spawnSync('powershell.exe', ['-NoProfile', '-Command', ps], { encoding: 'utf8' });
+  return res.stdout.trim().split(/\\s+/).map(Number).filter(Boolean);
+}
+
 function startMockServer(port = 0) {
   server = createServer(s => {
     sockets.add(s);
@@ -571,6 +601,60 @@ try {
       await saveBtn.click();
       await browser.waitUntil(async () => await browser.$('.server-msg-ok').isExisting(), { timeout: 5000 });
       assert.match(await browser.$('.server-msg-ok').getText(), /Connected to/);
+    });
+
+    await check('window close after scan and during scan terminates cleanly without orphan processes (V-30)', async () => {
+      const worktreeName = path.basename(root);
+      const findPidPs = `(Get-Process -Name 'zonendpoint' -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*${worktreeName}*' }).Id`;
+      const findRes = spawnSync('powershell.exe', ['-NoProfile', '-Command', findPidPs], { encoding: 'utf8' });
+      const appPid = parseInt(findRes.stdout.trim().split(/\s+/)[0], 10);
+      assert.ok(appPid, 'Test application PID must be found');
+
+      // 1. Test close after scan:
+      sendCloseMainWindow(appPid);
+      let exitedAfterScan = false;
+      for (let i = 0; i < 25; i++) {
+        await new Promise(r => setTimeout(r, 200));
+        if (!isProcessAlive(appPid)) {
+          exitedAfterScan = true;
+          break;
+        }
+      }
+      assert.ok(exitedAfterScan, `Application process ${appPid} must exit cleanly after window close`);
+      const orphans = getOrphanChildren(appPid);
+      assert.equal(orphans.length, 0, `No orphan child processes should remain after close (found: ${orphans.join(', ')})`);
+      await browser.deleteSession().catch(() => {});
+
+      // 2. Test close during active scan:
+      mode = 'delay';
+      await session();
+      const findPid2Ps = `(Get-Process -Name 'zonendpoint' -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*${worktreeName}*' }).Id`;
+      const findRes2 = spawnSync('powershell.exe', ['-NoProfile', '-Command', findPid2Ps], { encoding: 'utf8' });
+      const appPid2 = parseInt(findRes2.stdout.trim().split(/\s+/)[0], 10);
+      assert.ok(appPid2, 'Second test application PID must be found');
+
+      await (await button('Start scan')).click();
+      await browser.waitUntil(async () => {
+        const h2 = await browser.$('h2');
+        return (await h2.isExisting()) && (await h2.getText()) === 'Scanning';
+      }, { timeout: 10000 });
+
+      sendCloseMainWindow(appPid2);
+      let exitedDuringScan = false;
+      for (let i = 0; i < 25; i++) {
+        await new Promise(r => setTimeout(r, 200));
+        if (!isProcessAlive(appPid2)) {
+          exitedDuringScan = true;
+          break;
+        }
+      }
+      assert.ok(exitedDuringScan, `Application process ${appPid2} must cancel scan and exit cleanly on window close`);
+      const orphans2 = getOrphanChildren(appPid2);
+      assert.equal(orphans2.length, 0, `No orphan child processes should remain after close during scan`);
+
+      mode = 'clean';
+      await browser.deleteSession().catch(() => {});
+      await session();
     });
 
   }

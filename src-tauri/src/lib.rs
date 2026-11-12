@@ -500,9 +500,39 @@ pub async fn scan_cli(path: PathBuf) -> scanner::ScanResult {
     }
 }
 
+fn stop_guard(app: &tauri::AppHandle) {
+    if let Some(guard) = app.try_state::<Arc<Mutex<Guard>>>() {
+        let _ = guard.lock().map(|mut g| g.stop());
+    }
+}
+
+fn cancel_and_exit(app: tauri::AppHandle, exit_code: i32) {
+    let manager = app.state::<ScanManager>();
+    if let Some(active_id) = manager.active_scan_id() {
+        manager.request_cancel(&active_id);
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let start = std::time::Instant::now();
+            while app_clone.state::<ScanManager>().active_scan_id().is_some() {
+                if start.elapsed() > std::time::Duration::from_secs(5) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            stop_guard(&app_clone);
+            app_clone.cleanup_before_exit();
+            std::process::exit(exit_code);
+        });
+    } else {
+        stop_guard(&app);
+        app.cleanup_before_exit();
+        std::process::exit(exit_code);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(ScanManager::new())
@@ -519,8 +549,33 @@ pub fn run() {
             get_server_config,
             save_server_config
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle().clone();
+                let manager = app.state::<ScanManager>();
+                if manager.active_scan_id().is_some() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    cancel_and_exit(app, 0);
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
+            let manager = app_handle.state::<ScanManager>();
+            if manager.active_scan_id().is_some() {
+                api.prevent_exit();
+            }
+            cancel_and_exit(app_handle.clone(), code.unwrap_or(0));
+        }
+        tauri::RunEvent::Exit => {
+            std::process::exit(0);
+        }
+        _ => {}
+    });
 }
 
 #[cfg(test)]

@@ -67,6 +67,7 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-09 | vic/version-label | 18cafd5 | YES | test(native): read expected version from tauri.conf.json (V-27) |
 | 2026-11-10 | vic/release-0.2.1 | e5e190d | YES | feat(release): bump version to 0.2.1 and add CHANGELOG (V-29) |
 | 2026-11-10 | vic/release-0.2.1 | d93d183 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-10 | vic/close-fix | e8b249d | YES | fix(app): ensure graceful window close and scan cancellation on exit (V-30) |
 | 2026-11-10 | vic/malwarebazaar | 24e2fa7 | YES | feat(feeds): integrate MalwareBazaar feed ingestion and hash normalization on server (Task V-33) |
 | 2026-11-10 | vic/malwarebazaar | fb00733 | YES | docs(tasks): track final commit in commit-notes |
 | 2026-11-10 | vic/malwarebazaar | 717ed4a | YES | feat(feeds): verify live MalwareBazaar ingestion, resolve Q-22 review items, and update personal non-commercial scope (Task V-34) |
@@ -102,8 +103,5 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-12 | vic/abusech-timer | b3771d2 | YES | docs(tasks): track final commit in commit-notes |
 | 2026-11-12 | vic/abusech-timer | 8edf51e | YES | fix(feeds): switch timer to OnUnitInactiveSec for long run safety (Task V-44) |
 | 2026-11-12 | vic/abusech-timer | 7e064a1 | YES | docs(tasks): track Task V-44 snapshot SHA in handoff, daily, and commit-notes |
-
-
-
-
-
+| 2026-11-12 | vic/close-fix-merge | 17bdccf | YES | Merge branch 'origin/vic/close-fix' into vic/close-fix-merge (Task V-30M) |
+| 2026-11-12 | vic/close-fix-merge | a493120 | YES | docs(v30m): record V-30M merge of close-fix into main and handoff |

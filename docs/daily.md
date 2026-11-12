@@ -150,3 +150,12 @@
 ## 2026-11-12 - J-03
 - Implemented adaptive concurrency ceiling 6, explicit config override 1-6, and gradual recovery after 50 consecutive clean/infected files. Local code commit `1e0ec28` on `jacky/concurrency-v2`; not pushed or merged.
 - fmt, cargo test (70), and clippy PASS. Program Files benchmark NOT RUN because UI control denied access; 4-vs-6 remains unmeasured. Handoff: `docs/handoffs/concurrency-v2-jacky-to-qeen.md`.
+- Task V-30M (Tích hợp nhánh vic/close-fix vào main): Theo phê duyệt của Zon ngày 2026-11-12 ("app close ok", duyệt merge V-30; QA ref `artifacts/v30-verify/qeen-verify.md`), tích hợp nhánh `origin/vic/close-fix` (0b48da0, code e8b249d) vào `main` tại worktree `E:\Zonendpoint-worktrees\v30m-close` trên nhánh mới `vic/close-fix-merge` (base `origin/main 22eb28f`, merge commit `17bdccf`).
+  1. Giải xung đột: Xung đột duy nhất tại `docs/tasks/commit-notes.md` được giải quyết bằng cách giữ đầy đủ toàn bộ mục commit của cả 2 nhánh theo đúng thứ tự thời gian.
+  2. Rà soát & tương thích logic đóng app/hủy quét:
+     - Logic hủy quét khi đóng cửa sổ (`CloseRequested`) và thoát (`ExitRequested`) tương thích hoàn toàn với kiến trúc `ScanManager`, bounded folder workers + adaptive concurrency (J-01), và Guard (`watcher::Guard`).
+     - Hủy quét ẩn cửa sổ lập tức, gửi tín hiệu hủy qua kênh watch channel, chờ worker kết thúc gọn gàng trong tối đa 5 giây trước khi giải phóng tài nguyên và thoát tiến trình.
+     - Bảo đảm tuyệt đối không làm mất kết quả INFECTED đã phát hiện (`record_result` và `mark_user_cancelled` giữ nguyên threat name).
+     - Khắc phục phản ánh của QA Q-21: gom logic hủy scan và thoát thành hàm helper dùng chung (`cancel_and_exit` và `stop_guard`), xóa bỏ trùng lặp code trong `src-tauri/src/lib.rs`.
+  3. Quality Gates: `cargo fmt -- --check` PASS, `cargo clippy --all-targets -- -D warnings` PASS, `cargo test` 68/68 PASS (49 lib + 1 bin + 18 resilience), `npm run build` PASS (Vite build sạch), `tests/native/run.mjs` 20/20 checks PASS (bao gồm test đóng cửa sổ sau quét và trong lúc đang quét của V-30).
+  4. Handoff & Push: Đẩy nhánh `vic/close-fix-merge` lên origin (không push main). Bàn giao cho Qeen kiểm nhanh trước khi Loki fast-forward main. Code Snapshot SHA: `17bdccf`.
