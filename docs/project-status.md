@@ -282,3 +282,17 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - Reinstalled all updated scripts (`/usr/local/bin`) and unit files (`/etc/systemd/system/`); ran `systemctl daemon-reload`.
   - Timer verified: `disabled`, `inactive (dead)`. ClamAV daemon PID 2245, configs, and 8,614,555 signatures untouched.
 - Handoff doc: [abusech-timer-vic-to-qeen.md](handoffs/abusech-timer-vic-to-qeen.md).
+
+## Task V-47a — Guard Design Specification v3 (Post Q-36 & Zon Decisions) (2026-11-12)
+- Branch `vic/guard-design`, worktree `E:\Zonendpoint-worktrees\v47a-guard`.
+- Document: [guard.md](design/guard.md).
+- Status: Design specification only (0 code lines modified, 0 Cargo.toml changes, clamd lab untouched).
+- Resolves all Qeen Q-36 findings and incorporates Zon's 6 new architectural decisions:
+  1. Files > 25 MB: Designated `NOT_SCANNED_TOO_LARGE` status, counted in `NotScanned`, never `CLEAN`. ClamAV `StreamMaxLength 25M` preserved.
+  2. Anti-evasion: All reparse points (junctions, symlinks) skipped (aligned with manual scan); hard links scanned normally; ADS documented out of scope for v1.
+  3. Offline resilience: Bounded queue 10,000 kept offline (removed 60s/100-event flush). When full $\rightarrow$ Drop Newest + Parent Directory Tracker (max 100 dirs) + UI button "Scan Dropped Folders". Tracker preserved across offline periods. Queue in-memory lost on app exit (documented).
+  4. App lifecycle: Guard toggle remembered in config (default OFF). No catch-up scan on restart for time closed.
+  5. Toast & Log privacy: Windows toast shows basename + threat name only (no full path). Log in `%LOCALAPPDATA%\ZonEndpoint\logs\guard.log`, rotated at 30 days or 5 MB.
+  6. Fairness & Alternation: Guard max 1 permit. When concurrency ceiling = 1 (backoff), Guard and manual scan alternate turns fairly to prevent manual scan starvation.
+  7. Exact counter definitions: `Observed`, `Queued`, `Scanned`, `Excluded`, `Dropped`, `Deferred`, `NotScanned`, `Error`.
+  8. Phased implementation renumbered: V-47 (Pipeline, settling, exclusion, rename, deferred retry) $\rightarrow$ V-48 (10k queue, 2-tier alternating ScanLimiter, tracker) $\rightarrow$ V-49 (verdicts, toast, log rotation) $\rightarrow$ V-50 (UI, metrics, settings).

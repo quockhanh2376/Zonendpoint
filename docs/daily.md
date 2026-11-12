@@ -167,3 +167,22 @@
   4. Chờ ổn định & Retry DEFERRED: Giữ timeout 30s. File bị khóa độc quyền quá 30s chuyển trạng thái `DEFERRED`, hiển thị số đếm `Deferred: N` trong app và tự động thử lại 1 lần sau ~5 phút. Nếu lần 2 vẫn khóa $\rightarrow$ gán `ERROR` có lý do rõ ràng, tuyệt đối không bao giờ thành `CLEAN`.
   5. Windows Toast: Toast khi INFECTED; bổ sung 1 Toast khi Guard ngừng bảo vệ được (mất kết nối server/tunnel liên tục > 2 phút), và 1 Toast khi khôi phục kết nối. Áp dụng cooldown 60s chống spam toast khi mạng chập chờn.
   6. Kế hoạch triển khai & QA: Đánh số lại các task triển khai thành V-47 đến V-50 (V-46 là task sửa thiết kế này). Bổ sung các kịch bản kiểm thử mới cho Qeen (Q-GUARD-08 đến Q-GUARD-10). Xóa mục câu hỏi cũ, ghi nhận 0 câu hỏi tồn đọng.
+
+- Task V-47a (Revise Guard Design per Qeen Q-36 Critique & Zon 6 Decisions): Cập nhật toàn diện `docs/design/guard.md` trên nhánh `vic/guard-design` (worktree `E:\Zonendpoint-worktrees\v47a-guard`) theo báo cáo phản biện Q-36 của Qeen và 6 quyết định kiến trúc mới của Zon (2026-11-12).
+  1. File > 25 MB: Trạng thái riêng `NOT_SCANNED_TOO_LARGE` ("Chưa quét (quá 25 MB)"), có bộ đếm riêng `NotScanned`, tuyệt đối không bao giờ tính là `CLEAN`. Không nâng `StreamMaxLength` trên server clamd lab.
+  2. Anti-evasion & Reparse points: Bỏ qua mọi reparse point (junctions, symlinks) không đi theo; hard link quét bình thường; ADS (Alternate Data Streams) ngoài phạm vi v1 (ghi rõ giới hạn, không tuyên bố bảo vệ ADS).
+  3. Mất server & Bounded Queue: Giữ hàng đợi 10.000 khi offline, bỏ hoàn toàn cơ chế xả sau 60s / 100 sự kiện. Tràn hàng đợi áp dụng Drop Newest + Parent Directory Tracker ($\le 100$ thư mục cha), tracker không bị xóa khi offline. File còn trong queue khi đóng app chấp nhận hủy (không persist trên đĩa).
+  4. Khởi động lại app: Lưu cấu hình `guard_enabled: bool` (mặc định OFF), nhớ lựa chọn bật/tắt của người dùng. Không quét bù (catch-up) khoảng thời gian app đóng.
+  5. Toast & Quyền riêng tư: Toast cảnh báo chỉ hiển thị tên file (basename) + tên mã độc, không hiển thị full path. Log trong `%LOCALAPPDATA%\ZonEndpoint\logs\guard.log`, xoay vòng tối đa 30 ngày hoặc 5 MB.
+  6. Luân phiên công bằng trên ScanLimiter: Guard tối đa 1 permit (quét tay luôn còn luồng khi trần $\ge 2$). Khi trần bị backoff về 1: Guard và Quét tay luân phiên từng lượt (Guard $\leftrightarrow$ Manual), không để Quét tay chờ vô hạn.
+  7. Xử lý các điểm phản biện Q-36:
+     - Thứ tự thực tế: Xin permit trước khi hash/tra cache khớp `scanner.rs`. Cache hit giải phóng permit sớm.
+     - Rename: Bắt cặp `RenameFrom`/`RenameTo`, áp dụng exclusion trên đường dẫn đích sau chuẩn hóa; quét file đổi tên từ `.git`/`node_modules` ra ngoài; gắn watch cho thư mục con mới.
+     - File tạo rồi xóa nhanh: Gán `NOT_COMPLETED_DELETED` (nhóm Error), không coi là `CLEAN`.
+     - Lifecycle: Dừng worker/threads sạch sẽ, không task mồ côi, không gán `CLEAN` khi hủy.
+     - Mất server giữa lúc stream: Gán `ERROR`, trả permit lập tức, không bao giờ `CLEAN`.
+     - Chống race condition: Streaming hash SHA-256 đối chiếu metadata trước/sau stream, không dựa riêng `size+mtime`.
+     - Bộ đếm chuẩn hóa 8 tiêu chí: `Observed`, `Queued`, `Scanned`, `Excluded`, `Dropped`, `Deferred`, `NotScanned`, `Error`.
+     - Giới hạn bộ nhớ: Debounce map 10k, Retry queue 1k, Parent tracker 100.
+     - QA matrix: Môi trường Windows Disposable VM Standard User (không dùng thư mục của Zon), dung sai đo lường, lab chỉ dùng chữ ký test vô hại có sẵn (không EICAR/malware).
+  8. Phân kỳ triển khai cập nhật: V-47 (Pipeline sự kiện + settling + exclusion + rename) $\rightarrow$ V-48 (10k queue, 2-tier alternating ScanLimiter, tracker) $\rightarrow$ V-49 (verdicts, toast, log rotation) $\rightarrow$ V-50 (UI, metrics, settings).
