@@ -23,6 +23,7 @@ use tokio::{
 
 const STREAM_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_RESPONSE_BYTES: usize = 1024;
+const RECOVERY_SUCCESS_THRESHOLD: usize = 50;
 pub const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
 pub const CACHE_TTL_SECONDS: i64 = 12 * 60 * 60;
 pub const POLICY_VERSION: &str = "zonendpoint-mvp-1";
@@ -35,6 +36,8 @@ pub const CLAMD_RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
 pub struct ScanLimiter {
     semaphore: Arc<Semaphore>,
     limit: AtomicUsize,
+    ceiling: usize,
+    successes: AtomicUsize,
 }
 
 pub struct ScanPermit {
@@ -44,10 +47,12 @@ pub struct ScanPermit {
 
 impl ScanLimiter {
     pub fn new(limit: usize) -> Self {
-        let limit = limit.clamp(1, 4);
+        let limit = limit.clamp(1, 6);
         Self {
             semaphore: Arc::new(Semaphore::new(limit)),
             limit: AtomicUsize::new(limit),
+            ceiling: limit,
+            successes: AtomicUsize::new(0),
         }
     }
 
@@ -63,10 +68,39 @@ impl ScanLimiter {
     fn limit(&self) -> usize {
         self.limit.load(Ordering::Relaxed)
     }
+
+    fn record_success(&self) {
+        if self.limit.load(Ordering::Relaxed) >= self.ceiling {
+            self.successes.store(0, Ordering::Relaxed);
+            return;
+        }
+        if self.successes.fetch_add(1, Ordering::Relaxed) + 1 >= RECOVERY_SUCCESS_THRESHOLD {
+            self.successes.store(0, Ordering::Relaxed);
+            loop {
+                let limit = self.limit.load(Ordering::Relaxed);
+                if limit >= self.ceiling {
+                    return;
+                }
+                if self
+                    .limit
+                    .compare_exchange_weak(limit, limit + 1, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    self.semaphore.add_permits(1);
+                    return;
+                }
+            }
+        }
+    }
+
+    fn reset_success_streak(&self) {
+        self.successes.store(0, Ordering::Relaxed);
+    }
 }
 
 impl ScanPermit {
     fn back_off(&mut self) {
+        self.limiter.successes.store(0, Ordering::Relaxed);
         loop {
             let limit = self.limiter.limit.load(Ordering::Relaxed);
             if limit <= 1 {
@@ -746,6 +780,10 @@ pub async fn scan_file_with_engine_timeout(
     if is_server_pressure(&result) {
         let mut permit = permit;
         permit.back_off();
+    } else if matches!(result.status, ScanStatus::Clean | ScanStatus::Infected) {
+        permit.limiter.record_success();
+    } else {
+        permit.limiter.reset_success_streak();
     }
     result
 }
@@ -758,8 +796,8 @@ mod tests {
 
     #[tokio::test]
     async fn scan_limiter_backs_off_to_one_on_server_pressure() {
-        let limiter = Arc::new(ScanLimiter::new(4));
-        for expected in [3, 2, 1, 1] {
+        let limiter = Arc::new(ScanLimiter::new(6));
+        for expected in [5, 4, 3, 2, 1, 1] {
             let mut permit = limiter.acquire_owned().await.unwrap();
             permit.back_off();
             assert_eq!(limiter.limit(), expected);
@@ -767,6 +805,38 @@ mod tests {
         let mut permit = limiter.acquire_owned().await.unwrap();
         permit.back_off();
         assert_eq!(limiter.limit(), 1);
+    }
+
+    #[tokio::test]
+    async fn scan_limiter_recovers_after_50_pressure_free_files_to_ceiling() {
+        let limiter = Arc::new(ScanLimiter::new(2));
+        let mut permit = limiter.acquire_owned().await.unwrap();
+        permit.back_off();
+        assert_eq!(limiter.limit(), 1);
+        for _ in 0..49 {
+            limiter.record_success();
+        }
+        assert_eq!(limiter.limit(), 1);
+        limiter.record_success();
+        assert_eq!(limiter.limit(), 2);
+        for _ in 0..100 {
+            limiter.record_success();
+        }
+        assert_eq!(limiter.limit(), 2);
+
+        let limiter = Arc::new(ScanLimiter::new(4));
+        let mut permit = limiter.acquire_owned().await.unwrap();
+        permit.back_off();
+        let other_error = ScanResult::error("sample", "file changed during scan");
+        assert!(!is_server_pressure(&other_error));
+        for _ in 0..49 {
+            limiter.record_success();
+        }
+        limiter.reset_success_streak();
+        for _ in 0..49 {
+            limiter.record_success();
+        }
+        assert_eq!(limiter.limit(), 3);
     }
 
     #[test]

@@ -9,8 +9,8 @@ pub struct AppConfig {
     pub max_scan_concurrency: Option<usize>,
 }
 
-const DEFAULT_MAX_SCAN_CONCURRENCY: usize = 4;
-const MAX_SCAN_CONCURRENCY: usize = 4;
+const DEFAULT_MAX_SCAN_CONCURRENCY: usize = 6;
+const MAX_SCAN_CONCURRENCY: usize = 6;
 
 pub fn scan_concurrency() -> usize {
     let cpu_count = std::thread::available_parallelism().map_or(1, usize::from);
@@ -19,9 +19,7 @@ pub fn scan_concurrency() -> usize {
     load_config()
         .ok()
         .and_then(|config| config.max_scan_concurrency)
-        .map_or(automatic, |cap| {
-            automatic.min(cap.clamp(1, MAX_SCAN_CONCURRENCY))
-        })
+        .map_or(automatic, |cap| cap.clamp(1, MAX_SCAN_CONCURRENCY))
 }
 
 fn concurrency_for(cpu_count: usize, memory_bytes: u64) -> usize {
@@ -29,10 +27,12 @@ fn concurrency_for(cpu_count: usize, memory_bytes: u64) -> usize {
         2
     } else if memory_bytes <= 16 * 1024 * 1024 * 1024 {
         3
-    } else {
+    } else if cpu_count >= 8 {
         DEFAULT_MAX_SCAN_CONCURRENCY
+    } else {
+        4
     };
-    cpu_count.clamp(1, MAX_SCAN_CONCURRENCY).min(memory_limit)
+    cpu_count.min(memory_limit).clamp(1, MAX_SCAN_CONCURRENCY)
 }
 
 #[cfg(windows)]
@@ -212,8 +212,13 @@ mod tests {
     #[test]
     fn adaptive_concurrency_respects_ram_cpu_and_server_cap() {
         const GIB: u64 = 1024 * 1024 * 1024;
-        for (ram, expected) in [(8, 2), (16, 3), (32, 4), (64, 4)] {
+        for (ram, expected) in [(8, 2), (16, 3), (32, 6), (64, 6)] {
             for cpu in [4, 8, 16] {
+                let expected = if ram >= 32 && cpu < 8 {
+                    4
+                } else {
+                    expected.min(cpu)
+                };
                 assert_eq!(
                     concurrency_for(cpu, ram * GIB),
                     expected,
@@ -223,5 +228,19 @@ mod tests {
         }
         assert_eq!(concurrency_for(1, 64 * GIB), 1);
         assert_eq!(concurrency_for(4, 4 * GIB), 2);
+    }
+
+    #[test]
+    fn config_concurrency_is_a_clamped_override_and_legacy_json_loads() {
+        for (value, expected) in [(0, 1), (1, 1), (4, 4), (6, 6), (7, 6), (usize::MAX, 6)] {
+            assert_eq!(value.clamp(1, MAX_SCAN_CONCURRENCY), expected);
+        }
+        assert_eq!(
+            serde_json::from_str::<AppConfig>(r#"{"server_address":"127.0.0.1:13310"}"#).unwrap(),
+            AppConfig {
+                server_address: Some("127.0.0.1:13310".into()),
+                max_scan_concurrency: None
+            }
+        );
     }
 }
