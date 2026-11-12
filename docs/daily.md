@@ -163,3 +163,6 @@
 ## 2026-11-12 - J-04
 - Merged local `origin/main` (`2464aee`) into J-03 branch; resolved the sole `docs/daily.md` conflict retaining both entries. Added folder benchmark and relaxed only the flaky test assertion; code snapshot `3efdefd`.
 - Program Files: median 4=107.7 s vs 6=98.9 s (8.2% gain), recommend ceiling 4. 50/50 flaky-test loop and all Rust gates PASS. Clamd CPU/RSS and lab timer state NOT RUN (Qeen). See J-04 handoff and `E:\Zonendpoint-tools\artifacts\j04\jacky-report.md`.
+
+## 2026-11-12 - J-05
+- Restored app concurrency hard cap to 4 per Zon approval: J-04 found 6 only 8.2% faster than 4 (<10% threshold). Config now only lowers automatic selection; retained 50-result recovery, pressure backoff/telemetry and direct 1–6 dev benchmark control. `cargo test` 70/70, fmt, clippy and release example build PASS. No remeasurement. Code: `bf4f79e`; Qeen acceptance pending.

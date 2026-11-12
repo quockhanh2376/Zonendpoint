@@ -1,20 +1,28 @@
-# J-03 handoff: adaptive concurrency v2
+# J-05 handoff: restore application concurrency ceiling to 4
 
 ## Snapshot
 
-- Code snapshot SHA: `1e0ec28ba6bc5c0732b7d544836a51dddfdb5b51`
+- Code snapshot SHA: `bf4f79ef0cb307d43b6a1c46f9930adb3f6ef17c`
 - Branch: `jacky/concurrency-v2` (base `22eb28f` = `origin/main`)
-- Local commit: `1e0ec28` — `feat(scan): raise concurrency ceiling and recover after backoff (J-03)`
+- Local code commit: `bf4f79e` - `fix(scan): cap app concurrency at four (J-05)`
 - Push: not performed; Loki owns push. No merge to main.
+## J-05 decision and changes (2026-11-12)
 
-## Changes
+- Zon approved restoring the application ceiling to 4 after J-04 measured 4 vs 6: median 107.7 s vs 98.9 s, only 8.2% faster at 6, below the 10% threshold.
+- Automatic selection is 8 GiB -> 2, 16 GiB -> 3, otherwise -> 4, limited by available CPU and hard-capped at 4.
+- max_scan_concurrency is a cap only: effective concurrency is automatic.min(cap.clamp(1, 4)). Legacy JSON values 5, 6 or larger remain deserializable and resolve to at most 4; values 0/1 resolve to 1.
+- Retained one-step backoff to floor 1, telemetry, and one-slot recovery after 50 consecutive successful CLEAN/INFECTED results, bounded by the selected concurrency. The J-04 cancellation test fix is retained.
+- folder_bench remains a dev-only example and still accepts 1-6 worker slots directly for measurement; that argument bypasses application config. It is not the application's limit.
+- Gates on code snapshot bf4f79e: cargo fmt --check PASS; cargo test 70/70 PASS (51 library + 1 binary + 18 resilience); cargo clippy --all-targets -- -D warnings PASS; release example build PASS. No benchmark rerun.
+
+## J-03 changes (historical)
 
 - Automatic concurrency: 8 GiB -> 2, 16 GiB -> 3; 32+ GiB and 8+ logical CPUs -> 6; 32+ GiB with fewer than 8 CPUs -> 4. CPU availability remains a ceiling. Hard cap: 6.
 - `max_scan_concurrency` is now a clamped explicit override in range 1–6, so it can raise the automatic selection. Missing field remains compatible with old `config.json`.
 - Timeout/busy backoff still drops the current limit by one, floor 1. Each 50 consecutive CLEAN/INFECTED file results recovers one permit up to the configured/selected ceiling. Other errors, SKIPPED and CANCELLED reset the streak and do not count as recovery successes.
 - No changes to protocol, clamd, lab, Guard, or cache schema.
 
-## Verification
+## J-03 verification (historical)
 
 - `cargo fmt --check`: PASS
 - `cargo test`: PASS, 51 library + 1 binary + 18 resilience tests
@@ -28,7 +36,7 @@ Not run. The computer-use control refused access to the running Zonendpoint UI, 
 
 Required follow-up on the authorized desktop: use `C:\Program Files`; levels 2, 4, 6; 3 cache-isolated first scans per level in interleaved order plus 1 cache scan; record wall, process CPU, peak working set, CLEAN/ERROR/SKIPPED and timeout/busy/backoff. No EICAR/malware. Qeen captures clamd metrics. Until measured, no evidence supports raising or lowering the default 6 based on performance; if 6 fails to beat 4 by >10%, recommend restoring default hardware cap 4.
 
-## Qeen acceptance requested
+## J-03 Qeen acceptance (historical)
 
 1. Independently inspect snapshot `1e0ec28ba6bc5c0732b7d544836a51dddfdb5b51`; rerun fmt, tests and clippy.
 2. Verify RAM/CPU matrix and config override behavior, including legacy JSON.
@@ -75,8 +83,14 @@ Outlier repeats in new cache slots: level 2 slow runs 529.5/427.9 s repeated at 
 - SHA-256 of files under `%LOCALAPPDATA%\ZonEndpoint` was identical before/after. No EICAR/malware. Benchmark campaign lasted under 61 minutes; lab timer/reload telemetry and clamd CPU/RSS are NOT RUN; Qeen acceptance is NOT RUN.
 - Report and raw evidence: `E:\Zonendpoint-tools\artifacts\j04\jacky-report.md`.
 
-### Qeen acceptance requested for J-04
+### J-04 Qeen acceptance (historical)
 
 1. Independently inspect code snapshot `3efdefd2e701d26498759ca0c7a04634ac4c2728` and rerun fmt, full Rust tests, and clippy.
 2. Review the benchmark runner, cache-isolated run procedure and limiter telemetry; verify incomplete outcomes remain visible for ERROR/SKIPPED.
 3. Independently verify the 4-vs-6 recommendation and rerun treatment. Capture clamd CPU/RSS and timer/reload state separately; do not change clamd configuration.
+
+### J-05 Qeen acceptance requested
+
+1. Independently inspect the exact code snapshot bf4f79ef0cb307d43b6a1c46f9930adb3f6ef17c and run fmt, cargo test and clippy.
+2. Verify automatic RAM/CPU selection, legacy config caps, backoff/recovery, and the direct 1-6 dev-only benchmark argument.
+3. No performance remeasurement is requested for J-05.
