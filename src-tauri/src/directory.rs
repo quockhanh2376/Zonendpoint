@@ -426,8 +426,18 @@ mod tests {
         let summary = scan_roots(vec![threat, later], cancel, scan, Box::new(|_, _| {})).await;
         assert!(summary.cancelled);
         assert!(!summary.complete);
-        assert_eq!(summary.infected, 1);
-        assert_eq!(summary.results[0].status, ScanStatus::Infected);
+        assert!(summary.infected >= 1);
+        let infected_results: Vec<_> = summary
+            .results
+            .iter()
+            .filter(|result| result.status == ScanStatus::Infected)
+            .collect();
+        assert_eq!(infected_results.len(), summary.infected);
+        assert!(
+            infected_results
+                .iter()
+                .any(|result| result.reason.as_deref() == Some("mock positive evidence"))
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

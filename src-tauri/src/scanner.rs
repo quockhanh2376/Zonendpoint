@@ -38,6 +38,8 @@ pub struct ScanLimiter {
     limit: AtomicUsize,
     ceiling: usize,
     successes: AtomicUsize,
+    backoffs: AtomicUsize,
+    recoveries: AtomicUsize,
 }
 
 pub struct ScanPermit {
@@ -53,6 +55,8 @@ impl ScanLimiter {
             limit: AtomicUsize::new(limit),
             ceiling: limit,
             successes: AtomicUsize::new(0),
+            backoffs: AtomicUsize::new(0),
+            recoveries: AtomicUsize::new(0),
         }
     }
 
@@ -87,6 +91,7 @@ impl ScanLimiter {
                     .is_ok()
                 {
                     self.semaphore.add_permits(1);
+                    self.recoveries.fetch_add(1, Ordering::Relaxed);
                     return;
                 }
             }
@@ -96,11 +101,20 @@ impl ScanLimiter {
     fn reset_success_streak(&self) {
         self.successes.store(0, Ordering::Relaxed);
     }
+
+    pub fn telemetry(&self) -> (usize, usize, usize) {
+        (
+            self.limit.load(Ordering::Relaxed),
+            self.backoffs.load(Ordering::Relaxed),
+            self.recoveries.load(Ordering::Relaxed),
+        )
+    }
 }
 
 impl ScanPermit {
     fn back_off(&mut self) {
         self.limiter.successes.store(0, Ordering::Relaxed);
+        self.limiter.backoffs.fetch_add(1, Ordering::Relaxed);
         loop {
             let limit = self.limiter.limit.load(Ordering::Relaxed);
             if limit <= 1 {
