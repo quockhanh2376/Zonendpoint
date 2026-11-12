@@ -302,6 +302,61 @@ class TestAbusechUpdate(unittest.TestCase):
         self.assertFalse(last_run["reloaded"])
         self.assertIsNotNone(last_run["error"])
 
+    def test_09_manual_intervention_leaving_one_slot_skips_entire_turn(self):
+        """Test that if intervening manual request leaves only 1 slot (< 2), guard skips ENTIRE turn (not just TF)."""
+        now = time.time()
+        # Intervening manual requests consumed 2 slots in sliding 60m (leaving 1 slot)
+        self.rate_limit_file.write_text(json.dumps({
+            "requests": [
+                {"timestamp": now - 900, "source": "malwarebazaar"},
+                {"timestamp": now - 300, "source": "threatfox"},
+            ],
+            "updated_at": "2026-11-11T08:00:00Z"
+        }), encoding="utf-8")
+
+        ret = update_mod.run_hourly_update(self.args)
+        self.assertEqual(ret, 0)
+
+        # 0 requests made - entire turn skipped! (Not MB taking 1 slot and starving TF)
+        self.assertEqual(len(MockHttpHandler.request_log), 0)
+
+        last_run = json.loads(self.last_run_file.read_text(encoding="utf-8"))
+        self.assertEqual(last_run["requests"]["malwarebazaar"], 0)
+        self.assertEqual(last_run["requests"]["threatfox"], 0)
+        self.assertEqual(last_run["requests"]["total"], 0)
+        self.assertFalse(last_run["reloaded"])
+        self.assertIn("Shared hourly rate limit reached", last_run["error"])
+        self.assertIn("only 1/3 remaining", last_run["error"])
+
+    def test_10_guard_reserves_two_slots_under_lock_enables_both_feeds(self):
+        """Test that when 2 slots are available, guard reserves both under lock and both feeds succeed."""
+        now = time.time()
+        # 1 request in the window (2 slots remaining)
+        self.rate_limit_file.write_text(json.dumps({
+            "requests": [
+                {"timestamp": now - 1800, "source": "malwarebazaar"},
+            ],
+            "updated_at": "2026-11-11T08:00:00Z"
+        }), encoding="utf-8")
+
+        fake_deploy = MagicMock(return_value={
+            "reloaded": True,
+            "sig_before": 1000,
+            "sig_after": 1002,
+            "reload_duration": 0.5,
+        })
+        with patch.object(update_mod, "deploy_combined_hsbs", fake_deploy):
+            ret = update_mod.run_hourly_update(self.args)
+            self.assertEqual(ret, 0)
+            self.assertEqual(len(MockHttpHandler.request_log), 2)
+
+            last_run = json.loads(self.last_run_file.read_text(encoding="utf-8"))
+            self.assertEqual(last_run["requests"]["malwarebazaar"], 1)
+            self.assertEqual(last_run["requests"]["threatfox"], 1)
+            self.assertEqual(last_run["requests"]["total"], 2)
+            self.assertTrue(last_run["reloaded"])
+            self.assertIsNone(last_run["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

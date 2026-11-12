@@ -424,6 +424,7 @@ def run_hourly_update(args) -> int:
         logger.warning("Could not establish lock on '%s': %s", lock_p, e)
 
     auth_key = None
+    limiter = None
     try:
         # Load Auth-Key safely
         try:
@@ -433,27 +434,32 @@ def run_hourly_update(args) -> int:
             msg = f"Failed to load Auth-Key from {args.key_file}: {mask_key(e)}"
             logger.error(msg)
             status_record["error"] = msg
-            write_last_run(last_run_p, status_record, auth_key)
             return 1
 
         limiter = RateLimiter(args.rate_limit_file)
 
-        # Check rate limit before running
+        # Guard: verify and reserve 2 slots under shared limiter lock before starting turn
         try:
             stat = limiter.get_status()
             logger.info(
-                "Shared abuse.ch rate limit status: %d/%d hourly (sliding 60m), %d/%d daily (24h)",
+                "Shared abuse.ch rate limit status before guard: %d/%d hourly (sliding 60m), %d/%d daily (24h)",
                 stat["hourly_used"], stat["hourly_max"], stat["daily_used"], stat["daily_max"]
             )
-            if stat["hourly_remaining"] <= 0:
-                msg = f"Shared hourly rate limit reached ({stat['hourly_used']}/{stat['hourly_max']} in sliding 60m). Skipping turn without retry."
-                logger.warning(msg)
-                status_record["error"] = msg
-                status_record["duration_seconds"] = round(time.time() - start_time, 2)
-                write_last_run(last_run_p, status_record, auth_key)
-                return 0
+            res_token = limiter.reserve_slots(count=2, sources=("malwarebazaar", "threatfox"))
+            logger.info(
+                "Guard passed: reserved 2 slots for MalwareBazaar + ThreatFox (token: %s) under shared limiter lock.",
+                res_token
+            )
+        except RateLimitError as e:
+            msg = f"{e}"
+            logger.warning("Guard skipped turn: %s", msg)
+            status_record["error"] = msg
+            return 0
         except Exception as e:
-            logger.warning("Could not inspect limiter status: %s", mask_key(e, auth_key))
+            msg = f"Guard rate limit inspection failed: {mask_key(e, auth_key)}"
+            logger.error(msg)
+            status_record["error"] = msg
+            return 0
 
         # 2. Step 1: MalwareBazaar recent update
         mb_db = mb.MalwareDatabase(args.mb_db)
@@ -631,6 +637,11 @@ def run_hourly_update(args) -> int:
         status_record["error"] = msg
         return 1
     finally:
+        if limiter is not None:
+            try:
+                limiter.cancel_unconsumed_reservations()
+            except Exception as e:
+                logger.warning("Could not cancel unconsumed reservations: %s", e)
         status_record["duration_seconds"] = round(time.time() - start_time, 2)
         write_last_run(last_run_p, status_record, auth_key)
         if lock_fd:

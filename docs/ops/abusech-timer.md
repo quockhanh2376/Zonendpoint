@@ -14,25 +14,25 @@ Hệ thống cập nhật hàng giờ được thiết kế theo mô hình **Ser
 
 ```mermaid
 flowchart TD
-    T[systemd timer: zonendpoint-abusech-update.timer] -->|Mỗi giờ OnCalendar=hourly| S[systemd service: zonendpoint-abusech-update.service]
-    S --> U[zonendpoint-abusech-update.py]
-    U --> L{Khóa file flock /opt/zonendpoint/abusech/update.lock}
-    L -->|Đang chạy| E1[Bỏ qua - không chạy chồng]
-    L -->|Lấy khóa| R{Kiểm tra rate limit /opt/zonendpoint/abusech/rate_limit.json}
-    R -->|Hết hạn mức < 1| E2[Bỏ lượt - chờ giờ sau - 0 retry]
-    R -->|Còn hạn mức| MB[Step 1: MalwareBazaar recent export]
-    MB -->|1 request: ~48h additions| MBD[Nhập DB malwarebazaar.db transaction]
-    MBD --> TF[Step 2: ThreatFox recent export]
-    TF -->|1 request: recent CSV| TFD[Nhập DB threatfox.db transaction]
-    TFD --> SIG{Có hash MỚI qua cả 2 feed?}
-    SIG -->|0 hash mới| NR[Bỏ qua reload clamd - clamd giữ nguyên]
-    SIG -->|Có hash mới| DEP[Tạo file .hsb tạm thời & kiểm tra RAM >= 3GB]
-    DEP --> TEST[Pre-flight check trên DB ClamAV tạm thời + 3 benign files]
-    TEST -->|Lỗi / FP| RB[Rollback file backup - Giữ DB cũ - Cảnh báo]
-    TEST -->|PASS 0 FP| SWAP[Backup & Thay thế nguyên tử .hsb vào /var/lib/clamav/]
-    SWAP --> RELOAD[Gửi zRELOAD socket tới clamd 127.0.0.1:3310]
-    RELOAD --> WAIT[Chờ reload <= 120s & kiểm tra PING -> PONG & delta chữ ký]
-    WAIT --> LOG[Ghi kết quả vào /opt/zonendpoint/abusech/last-run.json]
+    T["systemd timer: zonendpoint-abusech-update.timer"] -->|Khoảng cách >= 61 phút OnUnitActiveSec=61min| S["systemd service: zonendpoint-abusech-update.service"]
+    S --> U["zonendpoint-abusech-update.py"]
+    U --> L{"Khóa file flock /opt/zonendpoint/abusech/update.lock"}
+    L -->|Đang chạy| E1["Bỏ qua - không chạy chồng"]
+    L -->|Lấy khóa| R{"Guard: kiểm tra & bảo lưu ĐỦ 2 slot dưới khóa RateLimiter"}
+    R -->|Thiếu < 2 slot| E2["Bỏ trọn lượt - ghi last-run.json - 0 retry"]
+    R -->|Bảo lưu đủ 2 slot| MB["Step 1: MalwareBazaar recent export"]
+    MB -->|1 request: ~48h additions| MBD["Nhập DB malwarebazaar.db transaction"]
+    MBD --> TF["Step 2: ThreatFox recent export"]
+    TF -->|1 request: recent CSV| TFD["Nhập DB threatfox.db transaction"]
+    TFD --> SIG{"Có hash MỚI qua cả 2 feed?"}
+    SIG -->|0 hash mới| NR["Bỏ qua reload clamd - clamd giữ nguyên"]
+    SIG -->|Có hash mới| DEP["Tạo file .hsb tạm thời & kiểm tra RAM >= 3GB"]
+    DEP --> TEST["Pre-flight check trên DB ClamAV tạm thời + 3 benign files"]
+    TEST -->|Lỗi / FP| RB["Rollback file backup - Giữ DB cũ - Cảnh báo"]
+    TEST -->|PASS 0 FP| SWAP["Backup & Thay thế nguyên tử .hsb vào /var/lib/clamav/"]
+    SWAP --> RELOAD["Gửi zRELOAD socket tới clamd 127.0.0.1:3310"]
+    RELOAD --> WAIT["Chờ reload <= 120s & kiểm tra PING -> PONG & delta chữ ký"]
+    WAIT --> LOG["Ghi kết quả vào /opt/zonendpoint/abusech/last-run.json"]
     NR --> LOG
 ```
 
@@ -111,14 +111,19 @@ Description=Zonendpoint Hourly abuse.ch (MalwareBazaar + ThreatFox) Feed Update 
 Documentation=https://bazaar.abuse.ch/ https://threatfox.abuse.ch/
 
 [Timer]
-OnCalendar=hourly
-RandomizedDelaySec=5min
+OnBootSec=5min
+OnUnitActiveSec=61min
+AccuracySec=1min
 Persistent=false
 
 [Install]
 WantedBy=timers.target
 ```
-*Ghi chú*: `RandomizedDelaySec=5min` giúp giãn cách thời điểm gọi API ngẫu nhiên trong khoảng 5 phút để tránh gọi dồn dập vào đúng phút 00; `Persistent=false` đảm bảo không tự động gọi bù dồn dập nếu server tắt máy rồi bật lại.
+*Ghi chú (Task V-43 fix theo Q-31)*:
+- Sử dụng timer đơn điệu (`OnUnitActiveSec=61min`) thay vì `OnCalendar=hourly + RandomizedDelaySec=5min` để đảm bảo khoảng cách giữa hai lần chạy tự động liên tiếp **luôn $\ge 61$ phút** ($> 60$ phút của sliding rate limit window). Điều này loại bỏ hoàn toàn hiện tượng 2 lượt chạy cách nhau $< 60$ phút khiến ThreatFox bị nghẽn (từ 63,2% lên 100%).
+- `AccuracySec=1min` giữ độ trôi kích hoạt trong biên độ an toàn 61–62 phút.
+- `Persistent=false` đảm bảo không gọi bù dồn dập sau khi reboot.
+- **Guard bảo lưu 2 slot**: `zonendpoint-abusech-update.py` kiểm tra và bảo lưu nguyên tử 2 slot dưới khóa `rate_limit.json.lock` trước khi chạy. Nếu có request thủ công chen ngang khiến hạn mức còn $< 2$, hệ thống bỏ trọn lượt (cả MB và TF) để bảo đảm tính công bằng 100%.
 
 ---
 
