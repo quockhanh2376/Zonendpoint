@@ -283,7 +283,7 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - Timer verified: `disabled`, `inactive (dead)`. ClamAV daemon PID 2245, configs, and 8,614,555 signatures untouched.
 - Handoff doc: [abusech-timer-vic-to-qeen.md](handoffs/abusech-timer-vic-to-qeen.md).
 
-## J-03 Adaptive Concurrency v2 — 2026-11-12
+## J-03 Adaptive Concurrency v2 - 2026-11-12
 - Checkout `E:\Zonendpoint-Jacky\j03`, branch `jacky/concurrency-v2`; code snapshot `1e0ec28ba6bc5c0732b7d544836a51dddfdb5b51` (local commit, not pushed/merged).
-- Expanded automatic ceiling to 6 only for >=32 GiB and >=8 logical CPUs; retained 8 GiB -> 2, 16 GiB -> 3, and 4 for other higher-memory/low-core systems. Config `max_scan_concurrency` is a clamped 1–6 override and old JSON remains valid. Pressure backoff recovers one permit after 50 consecutive CLEAN/INFECTED results; non-clean outcomes reset the streak.
+- Expanded automatic ceiling to 6 only for >=32 GiB and >=8 logical CPUs; retained 8 GiB -> 2, 16 GiB -> 3, and 4 for other higher-memory/low-core systems. Config `max_scan_concurrency` is a clamped 1-6 override and old JSON remains valid. Pressure backoff recovers one permit after 50 consecutive CLEAN/INFECTED results; non-clean outcomes reset the streak.
 - Gates PASS: fmt; 70 Rust tests (51 lib, 1 binary, 18 resilience); clippy `--all-targets -- -D warnings`. Real-folder measurement on `C:\Program Files`: NOT RUN because UI automation refused access; tunnel 127.0.0.1:13310 was reachable. No 4-vs-6 performance conclusion. Lab metrics NOT RUN; Qeen to measure. See [J-03 handoff](handoffs/concurrency-v2-jacky-to-qeen.md).
