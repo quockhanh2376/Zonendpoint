@@ -99,6 +99,8 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-11 | vic/abusech-timer | af972e7 | YES | docs(tasks): track final commit in commit-notes |
 | 2026-11-12 | vic/abusech-timer | 3669741 | YES | fix(feeds): resolve ThreatFox starvation with turn guard and monotonic timer (Task V-43) |
 | 2026-11-12 | vic/abusech-timer | 7c43779 | YES | docs(tasks): track Task V-43 snapshot SHA in handoff, project-status, and commit-notes |
+| 2026-11-12 | vic/abusech-timer | b3771d2 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-12 | vic/abusech-timer | 8edf51e | YES | fix(feeds): switch timer to OnUnitInactiveSec for long run safety (Task V-44) |
 
 
 

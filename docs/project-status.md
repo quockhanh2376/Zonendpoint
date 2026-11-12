@@ -1,6 +1,6 @@
 # Project status — 2026-11-12
 
-Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Implementation of hourly automated update scheduler for MalwareBazaar + ThreatFox (Task V-42) and Q-31 defect resolution (Task V-43) on branch `vic/abusech-timer`. Base: `origin/main 1399604` (Q-30 PASS).
+Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Implementation of hourly automated update scheduler for MalwareBazaar + ThreatFox (Task V-42) and Q-31/Q-32 defect resolution (Tasks V-43/V-44) on branch `vic/abusech-timer`. Base: `origin/main 1399604` (Q-30 PASS).
 
 ## Active checkout/snapshot
 - Implementation: branch `vic/abusech-timer` (base `origin/main 1399604`).
@@ -8,7 +8,7 @@ Phase: current scan candidate stabilization for **non-commercial use on 1–2 pe
   - MalwareBazaar: 1,171,422 hashes in DB (`/opt/zonendpoint/malwarebazaar/malwarebazaar.db`), 1,171,422 loaded in clamd (`/var/lib/clamav/malwarebazaar.hsb`).
   - ThreatFox: 45,298 unique SHA-256 in DB (`/opt/zonendpoint/threatfox/threatfox.db`), 21,625 net unique signatures loaded in clamd (`/var/lib/clamav/threatfox.hsb`).
   - Total custom feed signatures: 1,193,047 signatures in clamd (clamd live total: 8,614,555 signatures).
-  - Mode: Hourly timer installed (`zonendpoint-abusech-update.timer` with monotonic interval `OnUnitActiveSec=61min`, `OnBootSec=5min`, `AccuracySec=1min`), but **LEFT DISABLED and INACTIVE** (`disabled`, `dead`) pending activation approval. Shared rate limit: 3 requests/hour (sliding 3600s), 400 requests/24h.
+  - Mode: Hourly timer installed (`zonendpoint-abusech-update.timer` with monotonic interval `OnUnitInactiveSec=61min`, `OnBootSec=5min`, `AccuracySec=1min`), but **LEFT DISABLED and INACTIVE** (`disabled`, `dead`) pending activation approval. Shared rate limit: 3 requests/hour (sliding 3600s), 400 requests/24h.
   - Guard: Requires $\ge 2$ slots before starting turn, atomically reserved under `rate_limit.json.lock`. If $< 2$ slots remain, entire turn is skipped cleanly without retries.
   - Recent endpoints: MalwareBazaar (`https://mb-api.abuse.ch/v2/files/exports/<AUTH-KEY>/recent.csv`), ThreatFox (`https://threatfox-api.abuse.ch/v2/files/exports/<AUTH-KEY>/recent.csv`).
   - Reload policy: Single clamd reload per hour; 0 new hashes across feeds = 0 reload; pre-flight temp DB check + RAM $\ge 3.0$ GB + timeout $\le 120$ s.
