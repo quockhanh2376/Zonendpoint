@@ -105,5 +105,5 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-12 | vic/abusech-timer | 7e064a1 | YES | docs(tasks): track Task V-44 snapshot SHA in handoff, daily, and commit-notes |
 | 2026-11-12 | vic/close-fix-merge | 17bdccf | YES | Merge branch 'origin/vic/close-fix' into vic/close-fix-merge (Task V-30M) |
 | 2026-11-12 | vic/close-fix-merge | a493120 | YES | docs(v30m): record V-30M merge of close-fix into main and handoff |
-| 2026-11-13 | vic/release-candidate | f663e73 | YES | docs(v51): hand off NSIS release candidate to Qeen (P0) |
+| 2026-11-13 | vic/release-candidate | b79f21e | YES | docs(v51): hand off NSIS release candidate to Qeen (P0) |
 
