@@ -166,3 +166,29 @@
 
 ## 2026-11-12 - J-05
 - Restored app concurrency hard cap to 4 per Zon approval: J-04 found 6 only 8.2% faster than 4 (<10% threshold). Config now only lowers automatic selection; retained 50-result recovery, pressure backoff/telemetry and direct 1–6 dev benchmark control. `cargo test` 70/70, fmt, clippy and release example build PASS. No remeasurement. Code: `bf4f79e`; Qeen acceptance pending.
+
+## 2026-11-13 - V-51 (P0 Release Candidate NSIS Build)
+- Thực hiện theo phê duyệt của anh Zon ngày 2026-11-13: ưu tiên P0 (bản cài chính thức để Qeen test) từ `origin/main` (`f3e959d`, đã tích hợp close-fix V-30M và parallel scan J-03..J-05 với trần 4); Guard chuyển sang v1.1.
+- Triển khai các bước 1, 2, 6 của mục `Current execution handoff — V/Q-RELEASE-CURRENT` trong `docs/implementation-plan.md` tại worktree `E:\Zonendpoint-worktrees\v51-release`, nhánh `vic/release-candidate`.
+- Toolchain & lockfile verification:
+  - rustc 1.99.1, cargo 1.99.1, node v26.13.0, npm.cmd 11.20.0, makensis v3.13 (`C:\Users\admzon\AppData\Local\tauri\NSIS\makensis.exe`).
+  - `package-lock.json` SHA256: `7B824EAC22B8C36C50E341F0FDD4B940852EF85ABA29FFE719DE6A8AE7E43B6A`
+  - `src-tauri/Cargo.lock` SHA256: `58B585D3884CE4DA3D5B6C08DD14EB0512941CAF1E6D790A2BAAE1A2BE14F69E`
+- Quality Gates pre-build:
+  - `cargo fmt -- --check`: PASS (0 diffs).
+  - `cargo test`: **70/70 PASS** (51 lib, 1 bin, 18 resilience).
+  - `cargo clippy --all-targets -- -D warnings`: PASS (0 warnings).
+  - `npm.cmd run build`: PASS (Vite v8.3.5, 23 modules, 0 lỗi).
+  - `node tests/native/run.mjs`: **20/20 PASS** (bao gồm kiểm tra đóng cửa sổ lúc idle và lúc đang quét V-30; 0 tiến trình con rò rỉ hay mồ côi).
+- Release Packaging:
+  - Chạy `npm.cmd ci` và `npm.cmd run build:windows` (`tauri build --target x86_64-pc-windows-msvc --bundles nsis`).
+  - Không bật feature `native-ui-tests`, không override test root/fixture/target.
+  - File cài đặt tạo ra: `Zonendpoint_0.2.1_x64-setup.exe` (3.709.433 bytes, PE x64, NSIS v3.13, version 0.2.1 giữ nguyên chờ quyết định Zon).
+  - Installer SHA256: `342CA889A878E9AAFD20A8CBB42BDCFC491FE88D60A62AAC4EB95FCAAA1DA7C6`.
+  - App executable SHA256: `A3E8BEE20F366D18E8B358E5B0E8D9B42511EE48F1E7D9B3F4AABA9E802A9401`.
+- Phân phối & Handoff:
+  - Tuyệt đối không cài hay ghi đè bản app đang dùng trên máy anh Zon.
+  - Copy installer và file SHA256 sang `E:\Zonendpoint-tools\artifacts\v51-release\`.
+  - Soạn tài liệu bàn giao `docs/handoffs/release-candidate-vic-to-qeen.md`.
+  - Đẩy nhánh `vic/release-candidate` lên origin. Không merge/push main.
+

@@ -302,3 +302,18 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
 - `folder_bench` remains dev-only, accepts 1–6 directly for measurements, independent of app config. No benchmark rerun; J-04 measured 6 just 8.2% faster than 4, below Zon’s 10% threshold.
 - Gates: fmt PASS; cargo test **70/70 PASS** (51 lib, 1 binary, 18 resilience); clippy `--all-targets -- -D warnings` PASS; release example build PASS. Qeen acceptance NOT RUN. See [J-05 handoff](handoffs/concurrency-v2-jacky-to-qeen.md) and `E:\Zonendpoint-tools\artifacts\j05\jacky-report.md`.
 - Next acceptance: Qeen independently audits the exact code/docs handoff snapshot; no performance remeasurement requested.
+
+## V-51 / P0 — Release Candidate NSIS Build (2026-11-13)
+- Checkout `E:\Zonendpoint-worktrees\v51-release`, branch `vic/release-candidate` from `origin/main` (`f3e959d`). Clean tree verified before build.
+- Toolchain: rustc 1.99.1, cargo 1.99.1, node v26.13.0, npm 11.20.0, NSIS v3.13.
+- Hashes: `package-lock.json` `7B824EAC22B8C36C50E341F0FDD4B940852EF85ABA29FFE719DE6A8AE7E43B6A`, `src-tauri/Cargo.lock` `58B585D3884CE4DA3D5B6C08DD14EB0512941CAF1E6D790A2BAAE1A2BE14F69E`.
+- Pre-build gates: `cargo fmt -- --check` PASS (0 diffs), `cargo test` **70/70 PASS** (51 lib, 1 bin, 18 resilience), `cargo clippy --all-targets -- -D warnings` PASS, `npm.cmd run build` PASS, `node tests/native/run.mjs` **20/20 PASS** (including V-30 window close tests; 0 orphan processes).
+- Release build: `npm.cmd ci` then `npm.cmd run build:windows` (`tauri build --target x86_64-pc-windows-msvc --bundles nsis`). No `native-ui-tests` feature, no test overrides.
+- Artifacts:
+  - Installer: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.2.1_x64-setup.exe` (3,709,433 bytes)
+  - Installer SHA256: `342CA889A878E9AAFD20A8CBB42BDCFC491FE88D60A62AAC4EB95FCAAA1DA7C6`
+  - App executable: `zonendpoint.exe` (PE x64, SHA256: `A3E8BEE20F366D18E8B358E5B0E8D9B42511EE48F1E7D9B3F4AABA9E802A9401`)
+  - NSIS version: `v3.13`, Version: `0.2.1` retained (Zon ownership for 1.0.0 bump). Unsigned.
+- No install/overwrite on user system. Ready for Qeen testing (steps 3–5 of `V/Q-RELEASE-CURRENT`).
+- Handoff doc: [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Branch `vic/release-candidate` pushed; no merge to main.
+
