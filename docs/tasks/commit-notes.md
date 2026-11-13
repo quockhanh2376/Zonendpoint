@@ -108,6 +108,8 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-12 | vic/guard-design | e312daf | YES | docs(tasks): track final commit in commit-notes |
 | 2026-11-12 | vic/guard-design | 089a108 | YES | docs(design): revise guard design per Q-36 and Zon 6 decisions (Task V-47a) |
 | 2026-11-12 | vic/guard-design | c3f6b33 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-12 | vic/guard-design | 50d97f2 | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-13 | vic/guard-design | PENDING | YES | docs(design): revise guard specification for v1.1 per Q-37B and Zon decisions (Task V-51) |
 
 
 

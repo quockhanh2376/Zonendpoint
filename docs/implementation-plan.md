@@ -42,8 +42,8 @@ Updated2026-11-07. The original first-scan sequence below is retained as histori
 
 ## Scope deferred
 
-Realtime Guard, production gateway, feeds/hash sync, signed updates,
-quarantine/restore, signing/distribution and performance certification remain later phases. Unsigned NSIS packaging was observed on01e7449; a new Quick-scan package is not yet verified. See current status rather than treating all packaging as NOT RUN.
+Realtime Guard (scheduled for v1.1 after P0 / v1.0 release is locked; implementation tasks V-47..V-50 proceed on dedicated feature branches without merging to main), production gateway, feeds/hash sync, signed updates,
+quarantine/restore, signing/distribution and performance certification remain later phases. Unsigned NSIS packaging was observed on 01e7449; a new Quick-scan package is not yet verified. See current status rather than treating all packaging as NOT RUN.
 
 ## Later-phase backlog — Secure Gateway and licensing
 
@@ -88,7 +88,7 @@ Ordering/status live in [roadmap](roadmap.md); source/corrections live in [Noteb
 | PERF | Reproducible fixture list and cold/warm metrics collection including all owned WebView processes | Hardware/network/engine/signature identity and raw measurements; repeatability, cancel latency and bounded details; no borrowed Notebook percentage claims |
 | FEED-LAB | One source entitlement/provenance record, staged ClamAV-compatible artifact and known-good rollback | Actual deployed-engine load, benign false positives, controlled positive fixture, reload failure/rollback; generic yarac alone insufficient |
 | IOC-SYNC | Typed IOC schema, identity/canonicalization/expiry and per-source evidence; signed manifest+monotonic version/key rotation, decompression bounds, snapshot/delta gap recovery and transactional staging | Tampered/replayed/expired/incomplete delta, rollback, revocation/tombstone, wrong-hash-length, duplicates/conflicts and offline behavior. No partial activation or allow-policy→CLEAN conversion |
-| GUARD/NETWORK/RESPONSE | Separate opt-in threat model and least-privilege/reversible design; lifecycle, path/network attribution, false-positive policy and recovery | Disposable Windows lab; event storm/overflow/rename/locked files, IPv4/IPv6/UDP as scoped, management/VPN reachability, rule ownership/expiry and rollback; no unowned firewall or quarantine changes |
+| GUARD/NETWORK/RESPONSE | Guard scheduled for v1.1 post-v1.0; code V-47..V-50 on dedicated branches, no merge to main before v1.0 is locked. Separate opt-in threat model and least-privilege/reversible design; lifecycle, path/network attribution, false-positive policy and recovery | Disposable Windows lab; event storm/overflow/rename/locked files, IPv4/IPv6/UDP as scoped, management/VPN reachability, rule ownership/expiry and rollback; no unowned firewall or quarantine changes |
 | HARDENING/DATA | Inventory current mitigations/data sensitivity; proposal for DLL search/process ACL and optional SQLCipher+DPAPI identity/migration/backup, with dependencies justified | Artifact mitigation evidence, normal stop/update/uninstall/recovery, migration interruption/wrong identity/corruption/rollback; no claim of immunity against admin/kernel compromise |
 | AI | Optional provider/BYOK contract, Rust-side secret boundary, selected/redacted data preview, consent/retention/cost bounds | Key absent from frontend/logs, no unapproved transmission, injected script/prompt cannot execute tools or alter verdict/firewall/quarantine, rate/cost/provider failure handled |
 

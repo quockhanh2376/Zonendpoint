@@ -34,7 +34,9 @@ Exit: approved source and transport policies plus reproducible lab evidence; fea
 
 ## P4 — Guard and response controls
 
-Independent proposals after scan/pilot evidence: **V/Q-GUARD** for bounded Create/Modify/Rename handling, partial-file backoff, event-storm recovery, opt-in/default OFF and coexistence; **V/Q-NETWORK** for IP/domain attribution, observe-only first, reversible firewall policy and scoped audited overrides; **V/Q-RESPONSE** for quarantine/restore with recovery guarantees. Battle Mode is a bounded scheduling proposal dependent on Guard+trusted IOC context, not evidence of prevention. Existing extension filtering is not a trust signal.
+Guard is scheduled for **v1.1** (after P0 / v1.0 release is approved and locked). Implementation tasks V-47..V-50 proceed on dedicated feature branches and must not merge into `main` before v1.0 is finalized.
+
+Independent proposals after scan/pilot evidence: **V/Q-GUARD** (v1.1) for bounded Create/Modify/Rename handling, partial-file backoff, event-storm recovery, opt-in/default OFF and coexistence; **V/Q-NETWORK** for IP/domain attribution, observe-only first, reversible firewall policy and scoped audited overrides; **V/Q-RESPONSE** for quarantine/restore with recovery guarantees. Battle Mode is a bounded scheduling proposal dependent on Guard+trusted IOC context, not evidence of prevention. Existing extension filtering is not a trust signal.
 
 No arbitrary blocking on this development host, global firewall changes, persistent allow rules, socket termination, automatic quarantine or AV-policy changes. IPv4/IPv6, UDP, VPN/management connectivity, false positives, expiry and rollback need a lab design before enforcement.
 
