@@ -2,6 +2,19 @@
 
 All notable changes to Zonendpoint are documented in this file.
 
+## [0.3.0] - 2026-11-13
+
+### Added
+- **Quét thư mục song song thích ứng (Adaptive Concurrency)**: Tự động điều chỉnh số luồng quét theo dung lượng RAM và số CPU (8 GiB $\rightarrow$ 2, 16 GiB $\rightarrow$ 3, tối đa trần 4 luồng); tự giảm luồng về 1 khi clamd quá tải và hồi phục dần sau 50 file ổn định (J-01..J-05).
+- **Tích hợp nguồn cấp mã độc abuse.ch (MalwareBazaar & ThreatFox)**: Đồng bộ danh sách hash độc hại từ MalwareBazaar và ThreatFox lên ClamAV lab, tuân thủ nghiêm ngặt hạn ngạch 3 request/giờ (V-33..V-41).
+- **Bộ lập lịch cập nhật tự động (Hourly Timer Scheduler)**: Tự động tải bản cập nhật hash mỗi 61 phút sau khi lượt trước kết thúc (`OnUnitInactiveSec`), luân phiên slot giữa MalwareBazaar và ThreatFox chống starvation (V-42..V-44).
+- **Cache nội dung SQLite**: Tra cứu kết quả quét dựa trên hash nội dung SHA-256, metadata và engine identity, giải phóng sớm tài nguyên khi cache hit.
+- **Công cụ đo kiểm hiệu năng (Folder Benchmark)**: Bổ sung benchmark nội bộ (`folder_bench`) phục vụ đo đạc tốc độ quét thư mục cục bộ (J-04).
+
+### Fixed
+- **Đóng ứng dụng khi đang quét (Graceful Window Close)**: Hủy quét an toàn và ẩn cửa sổ ngay lập tức khi người dùng đóng app, đợi tối đa 5 giây cho worker hoàn tất, bảo toàn 100% bằng chứng phát hiện mối đe dọa (INFECTED) và không để lại tiến trình mồ côi (V-30, V-30M).
+- **Loại trừ lỗi quyền DriverData**: Loại trừ `%SystemRoot%\System32\drivers\DriverData` trong Quick Scan trên Windows tiêu chuẩn, tránh lỗi `Access is denied` không mong muốn.
+
 ## [0.2.1] - 2026-11-10
 
 ### Added
