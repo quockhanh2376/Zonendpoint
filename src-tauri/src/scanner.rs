@@ -11,7 +11,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     fs::File,
@@ -216,6 +216,17 @@ pub fn configured_clamd_addr() -> Result<SocketAddr, String> {
     validate_clamd_addr(DEFAULT_CLAMD_ADDR)
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct StageTimings {
+    pub wait_limiter_us: u64,
+    pub open_and_hash_us: u64,
+    pub cache_lookup_us: u64,
+    pub tcp_connect_us: u64,
+    pub send_instream_us: u64,
+    pub clamd_wait_us: u64,
+    pub cache_write_us: u64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ScanResult {
     pub path: String,
@@ -224,6 +235,8 @@ pub struct ScanResult {
     pub reason: Option<String>,
     pub engine_version: Option<String>,
     pub bytes_scanned: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stages: Option<StageTimings>,
 }
 
 impl ScanResult {
@@ -241,6 +254,7 @@ impl ScanResult {
             reason,
             engine_version: None,
             bytes_scanned,
+            stages: None,
         }
     }
 
@@ -255,6 +269,9 @@ struct StreamOutcome {
     sha256: Option<String>,
     reason: Option<String>,
     bytes_scanned: u64,
+    tcp_connect_us: u64,
+    send_instream_us: u64,
+    clamd_wait_us: u64,
 }
 
 fn parse_response(response: &[u8]) -> Result<(ScanStatus, Option<String>), String> {
@@ -406,10 +423,14 @@ async fn stream_scan<R: AsyncRead + Unpin>(
     total_timeout: Duration,
 ) -> StreamOutcome {
     let work = async {
+        let t_connect = Instant::now();
         let mut socket = timeout(CONNECT_TIMEOUT, TcpStream::connect(addr))
             .await
             .map_err(|_| "server connection timed out".to_owned())?
             .map_err(|error| format!("connect to server: {error}"))?;
+        let tcp_connect_us = t_connect.elapsed().as_micros() as u64;
+
+        let t_send = Instant::now();
         socket
             .write_all(b"zINSTREAM\0")
             .await
@@ -426,11 +447,15 @@ async fn stream_scan<R: AsyncRead + Unpin>(
                 break;
             }
             if total.saturating_add(count as u64) > max_bytes {
+                let send_instream_us = t_send.elapsed().as_micros() as u64;
                 return Ok(StreamOutcome {
                     status: ScanStatus::Skipped,
                     sha256: None,
                     reason: Some("file exceeds scan size limit".into()),
                     bytes_scanned: total,
+                    tcp_connect_us,
+                    send_instream_us,
+                    clamd_wait_us: 0,
                 });
             }
             total += count as u64;
@@ -448,23 +473,55 @@ async fn stream_scan<R: AsyncRead + Unpin>(
             .write_all(&0u32.to_be_bytes())
             .await
             .map_err(|error| format!("finish stream: {error}"))?;
+        let send_instream_us = t_send.elapsed().as_micros() as u64;
+
+        let t_clamd = Instant::now();
         let response =
             read_nul_frame(&mut socket, MAX_RESPONSE_BYTES, CLAMD_RESPONSE_TIMEOUT).await?;
         read_until_eof(&mut socket, EOF_DRAIN_TIMEOUT).await?;
         let (status, reason) = parse_response(&response)?;
+        let clamd_wait_us = t_clamd.elapsed().as_micros() as u64;
+
         Ok(StreamOutcome {
             status,
             sha256: Some(hex::encode(hasher.finalize())),
             reason,
             bytes_scanned: total,
+            tcp_connect_us,
+            send_instream_us,
+            clamd_wait_us,
         })
     };
     tokio::select! {
-        _ = wait_cancelled(cancel) => StreamOutcome { status: ScanStatus::Cancelled, sha256: None, reason: Some("cancelled".into()), bytes_scanned: 0 },
+        _ = wait_cancelled(cancel) => StreamOutcome {
+            status: ScanStatus::Cancelled,
+            sha256: None,
+            reason: Some("cancelled".into()),
+            bytes_scanned: 0,
+            tcp_connect_us: 0,
+            send_instream_us: 0,
+            clamd_wait_us: 0,
+        },
         result = timeout(total_timeout, work) => match result {
             Ok(Ok(outcome)) => outcome,
-            Ok(Err(reason)) => StreamOutcome { status: ScanStatus::Error, sha256: None, reason: Some(reason), bytes_scanned: 0 },
-            Err(_) => StreamOutcome { status: ScanStatus::Error, sha256: None, reason: Some("scan timed out".into()), bytes_scanned: 0 },
+            Ok(Err(reason)) => StreamOutcome {
+                status: ScanStatus::Error,
+                sha256: None,
+                reason: Some(reason),
+                bytes_scanned: 0,
+                tcp_connect_us: 0,
+                send_instream_us: 0,
+                clamd_wait_us: 0,
+            },
+            Err(_) => StreamOutcome {
+                status: ScanStatus::Error,
+                sha256: None,
+                reason: Some("scan timed out".into()),
+                bytes_scanned: 0,
+                tcp_connect_us: 0,
+                send_instream_us: 0,
+                clamd_wait_us: 0,
+            },
         }
     }
 }
@@ -651,6 +708,7 @@ pub async fn scan_file_with_engine_timeout(
     semaphore: Arc<ScanLimiter>,
     total_timeout: Duration,
 ) -> ScanResult {
+    let t_limiter_start = Instant::now();
     let permit = tokio::select! {
         _ = wait_cancelled(cancel.clone()) => return ScanResult::new(path, ScanStatus::Cancelled, None, Some("cancelled".into()), 0),
         permit = semaphore.acquire_owned() => match permit {
@@ -658,12 +716,17 @@ pub async fn scan_file_with_engine_timeout(
             Err(_) => return ScanResult::error(path, "scan worker limit is unavailable"),
         }
     };
+    let wait_limiter_us = t_limiter_start.elapsed().as_micros() as u64;
     let operation = async {
         let engine_version = match &engine_override {
             Some(version) => version.clone(),
             None => clamd_version(addr, cancel.clone()).await?,
         };
+        let t_hash_start = Instant::now();
         let (hash, size, file_snapshot) = hash_file(&path).await?;
+        let open_and_hash_us = t_hash_start.elapsed().as_micros() as u64;
+
+        let t_lookup_start = Instant::now();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|error| error.to_string())?
@@ -691,7 +754,8 @@ pub async fn scan_file_with_engine_timeout(
             let current_meta = match tokio::fs::metadata(&path).await {
                 Ok(m) => m,
                 Err(error) => {
-                    return Ok::<ScanResult, String>(ScanResult::new(
+                    let cache_lookup_us = t_lookup_start.elapsed().as_micros() as u64;
+                    let mut res = ScanResult::new(
                         &path,
                         ScanStatus::Unknown,
                         Some(hex::encode(hash)),
@@ -699,30 +763,54 @@ pub async fn scan_file_with_engine_timeout(
                             "read file metadata while validating cached verdict: {error}"
                         )),
                         size,
-                    ));
+                    );
+                    res.stages = Some(StageTimings {
+                        wait_limiter_us,
+                        open_and_hash_us,
+                        cache_lookup_us,
+                        ..Default::default()
+                    });
+                    return Ok::<ScanResult, String>(res);
                 }
             };
             let current_snapshot = match snapshot(&current_meta) {
                 Ok(s) => s,
                 Err(error) => {
-                    return Ok::<ScanResult, String>(ScanResult::new(
+                    let cache_lookup_us = t_lookup_start.elapsed().as_micros() as u64;
+                    let mut res = ScanResult::new(
                         &path,
                         ScanStatus::Unknown,
                         Some(hex::encode(hash)),
                         Some(format!("validate cached metadata: {error}")),
                         size,
-                    ));
+                    );
+                    res.stages = Some(StageTimings {
+                        wait_limiter_us,
+                        open_and_hash_us,
+                        cache_lookup_us,
+                        ..Default::default()
+                    });
+                    return Ok::<ScanResult, String>(res);
                 }
             };
             if current_snapshot.size != size || current_snapshot != file_snapshot {
-                return Ok::<ScanResult, String>(ScanResult::new(
+                let cache_lookup_us = t_lookup_start.elapsed().as_micros() as u64;
+                let mut res = ScanResult::new(
                     &path,
                     ScanStatus::Unknown,
                     Some(hex::encode(hash)),
                     Some("file changed while validating cached verdict".into()),
                     size,
-                ));
+                );
+                res.stages = Some(StageTimings {
+                    wait_limiter_us,
+                    open_and_hash_us,
+                    cache_lookup_us,
+                    ..Default::default()
+                });
+                return Ok::<ScanResult, String>(res);
             }
+            let cache_lookup_us = t_lookup_start.elapsed().as_micros() as u64;
             let reason = match cached.status {
                 ScanStatus::Infected => cached.threat_name,
                 _ => Some("verified content cache hit".into()),
@@ -730,8 +818,15 @@ pub async fn scan_file_with_engine_timeout(
             let mut result =
                 ScanResult::new(&path, cached.status, Some(hex::encode(hash)), reason, size);
             result.engine_version = Some(engine_version.clone());
+            result.stages = Some(StageTimings {
+                wait_limiter_us,
+                open_and_hash_us,
+                cache_lookup_us,
+                ..Default::default()
+            });
             return Ok(result);
         }
+        let cache_lookup_us = t_lookup_start.elapsed().as_micros() as u64;
         let mut file = File::open(&path)
             .await
             .map_err(|error| format!("open scan target for streaming: {error}"))?;
@@ -772,13 +867,23 @@ pub async fn scan_file_with_engine_timeout(
                 || outcome.bytes_scanned != size
                 || stream_hash != Some(hash)
             {
-                return Ok(ScanResult::new(
+                let mut res = ScanResult::new(
                     &path,
                     ScanStatus::Unknown,
                     Some(hex::encode(hash)),
                     Some("file changed during scan; verdict not accepted".into()),
                     outcome.bytes_scanned,
-                ));
+                );
+                res.stages = Some(StageTimings {
+                    wait_limiter_us,
+                    open_and_hash_us,
+                    cache_lookup_us,
+                    tcp_connect_us: outcome.tcp_connect_us,
+                    send_instream_us: outcome.send_instream_us,
+                    clamd_wait_us: outcome.clamd_wait_us,
+                    cache_write_us: 0,
+                });
+                return Ok(res);
             }
             let mut result = ScanResult::new(
                 &path,
@@ -794,6 +899,7 @@ pub async fn scan_file_with_engine_timeout(
                 });
             }
             result.engine_version = Some(engine_version.clone());
+            let t_write_start = Instant::now();
             if let Some(sig_gen) = &sig_generation {
                 let put_result = crate::cache::put(
                     &cache_path,
@@ -815,6 +921,16 @@ pub async fn scan_file_with_engine_timeout(
                     ));
                 }
             }
+            let cache_write_us = t_write_start.elapsed().as_micros() as u64;
+            result.stages = Some(StageTimings {
+                wait_limiter_us,
+                open_and_hash_us,
+                cache_lookup_us,
+                tcp_connect_us: outcome.tcp_connect_us,
+                send_instream_us: outcome.send_instream_us,
+                clamd_wait_us: outcome.clamd_wait_us,
+                cache_write_us,
+            });
             return Ok(result);
         }
         let mut result = ScanResult::new(
@@ -825,10 +941,19 @@ pub async fn scan_file_with_engine_timeout(
             outcome.bytes_scanned,
         );
         result.engine_version = Some(engine_version.clone());
+        result.stages = Some(StageTimings {
+            wait_limiter_us,
+            open_and_hash_us,
+            cache_lookup_us,
+            tcp_connect_us: outcome.tcp_connect_us,
+            send_instream_us: outcome.send_instream_us,
+            clamd_wait_us: outcome.clamd_wait_us,
+            cache_write_us: 0,
+        });
         Ok(result)
     };
     let result_cancel = cancel.clone();
-    let result = tokio::select! {
+    let mut result = tokio::select! {
         _ = wait_cancelled(result_cancel) => ScanResult::new(&path, ScanStatus::Cancelled, None, Some("cancelled".into()), 0),
         result = timeout(total_timeout, operation) => match result {
             Ok(Ok(result)) => result,
@@ -836,6 +961,12 @@ pub async fn scan_file_with_engine_timeout(
             Err(_) => ScanResult::new(&path, ScanStatus::Error, None, Some("scan timed out".into()), 0),
         }
     };
+    if result.stages.is_none() {
+        result.stages = Some(StageTimings {
+            wait_limiter_us,
+            ..Default::default()
+        });
+    }
     if is_server_pressure(&result) {
         let mut permit = permit;
         permit.back_off();

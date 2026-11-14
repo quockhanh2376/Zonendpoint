@@ -17,6 +17,25 @@ struct FileMetric {
     elapsed_ms: u64,
 }
 
+#[derive(serde::Serialize, Clone, Debug, Default)]
+struct StageSummary {
+    p50_ms: f64,
+    p95_ms: f64,
+    max_ms: f64,
+    total_ms: f64,
+}
+
+#[derive(serde::Serialize, Clone, Debug, Default)]
+struct StagesReport {
+    wait_limiter: StageSummary,
+    open_and_hash: StageSummary,
+    cache_lookup: StageSummary,
+    tcp_connect: StageSummary,
+    send_instream: StageSummary,
+    clamd_wait: StageSummary,
+    cache_write: StageSummary,
+}
+
 #[derive(serde::Serialize)]
 struct Report {
     started_utc_unix_ms: u128,
@@ -42,6 +61,7 @@ struct Report {
     file_time_p99_ms: u64,
     file_time_max_ms: u64,
     slowest_files: Vec<FileMetric>,
+    stages: StagesReport,
 }
 
 #[repr(C)]
@@ -116,6 +136,28 @@ fn process_metrics() -> (f64, usize) {
     (cpu, peak)
 }
 
+fn summarize_stage(
+    records: &[scanner::StageTimings],
+    getter: impl Fn(&scanner::StageTimings) -> u64,
+) -> StageSummary {
+    if records.is_empty() {
+        return StageSummary::default();
+    }
+    let mut values_us: Vec<u64> = records.iter().map(getter).collect();
+    let total_us: u64 = values_us.iter().sum();
+    values_us.sort_unstable();
+    let n = values_us.len();
+    let p50_us = values_us[(n * 50).div_ceil(100).saturating_sub(1)];
+    let p95_us = values_us[(n * 95).div_ceil(100).saturating_sub(1)];
+    let max_us = *values_us.last().unwrap_or(&0);
+    StageSummary {
+        p50_ms: (p50_us as f64) / 1000.0,
+        p95_ms: (p95_us as f64) / 1000.0,
+        max_ms: (max_us as f64) / 1000.0,
+        total_ms: (total_us as f64) / 1000.0,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args_os().skip(1);
@@ -159,16 +201,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = scanner::clamd_preflight(addr, cancel.clone()).await?;
     let limiter = Arc::new(scanner::ScanLimiter::new(concurrency));
     let file_metrics = Arc::new(Mutex::new(Vec::new()));
+    let stage_metrics = Arc::new(Mutex::new(Vec::new()));
     let scan_cache = cache_path.clone();
     let scan_limiter = limiter.clone();
     let scan_engine = engine;
     let scan_addr = addr;
     let scan_times = file_metrics.clone();
+    let scan_stages = stage_metrics.clone();
     let scan: directory::ScanFn = Box::new(move |path, cancel| {
         let cache = scan_cache.clone();
         let limiter = scan_limiter.clone();
         let engine = scan_engine.clone();
         let times = scan_times.clone();
+        let stages = scan_stages.clone();
         Box::pin(async move {
             let started = Instant::now();
             let result = scanner::scan_file_with_engine_override(
@@ -180,6 +225,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 limiter,
             )
             .await;
+            if let Some(st) = result.stages {
+                stages.lock().unwrap().push(st);
+            }
             times.lock().unwrap().push(FileMetric {
                 path: result.path.clone(),
                 bytes: result.bytes_scanned,
@@ -246,6 +294,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file_time_max_ms = file_metrics.last().map_or(0, |item| item.elapsed_ms);
     file_metrics.sort_by_key(|item| std::cmp::Reverse(item.elapsed_ms));
     file_metrics.truncate(10);
+    let stage_records = stage_metrics.lock().unwrap().drain(..).collect::<Vec<_>>();
+    let stages = StagesReport {
+        wait_limiter: summarize_stage(&stage_records, |s| s.wait_limiter_us),
+        open_and_hash: summarize_stage(&stage_records, |s| s.open_and_hash_us),
+        cache_lookup: summarize_stage(&stage_records, |s| s.cache_lookup_us),
+        tcp_connect: summarize_stage(&stage_records, |s| s.tcp_connect_us),
+        send_instream: summarize_stage(&stage_records, |s| s.send_instream_us),
+        clamd_wait: summarize_stage(&stage_records, |s| s.clamd_wait_us),
+        cache_write: summarize_stage(&stage_records, |s| s.cache_write_us),
+    };
+    eprintln!("--- STAGE TIMINGS BREAKDOWN (ms) ---");
+    eprintln!(
+        "{:<16} | {:>10} | {:>10} | {:>10} | {:>10}",
+        "Stage", "Total (ms)", "p50 (ms)", "p95 (ms)", "Max (ms)"
+    );
+    eprintln!(
+        "{:<16} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2}",
+        "wait_limiter",
+        stages.wait_limiter.total_ms,
+        stages.wait_limiter.p50_ms,
+        stages.wait_limiter.p95_ms,
+        stages.wait_limiter.max_ms
+    );
+    eprintln!(
+        "{:<16} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2}",
+        "open_and_hash",
+        stages.open_and_hash.total_ms,
+        stages.open_and_hash.p50_ms,
+        stages.open_and_hash.p95_ms,
+        stages.open_and_hash.max_ms
+    );
+    eprintln!(
+        "{:<16} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2}",
+        "cache_lookup",
+        stages.cache_lookup.total_ms,
+        stages.cache_lookup.p50_ms,
+        stages.cache_lookup.p95_ms,
+        stages.cache_lookup.max_ms
+    );
+    eprintln!(
+        "{:<16} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2}",
+        "tcp_connect",
+        stages.tcp_connect.total_ms,
+        stages.tcp_connect.p50_ms,
+        stages.tcp_connect.p95_ms,
+        stages.tcp_connect.max_ms
+    );
+    eprintln!(
+        "{:<16} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2}",
+        "send_instream",
+        stages.send_instream.total_ms,
+        stages.send_instream.p50_ms,
+        stages.send_instream.p95_ms,
+        stages.send_instream.max_ms
+    );
+    eprintln!(
+        "{:<16} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2}",
+        "clamd_wait",
+        stages.clamd_wait.total_ms,
+        stages.clamd_wait.p50_ms,
+        stages.clamd_wait.p95_ms,
+        stages.clamd_wait.max_ms
+    );
+    eprintln!(
+        "{:<16} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2}",
+        "cache_write",
+        stages.cache_write.total_ms,
+        stages.cache_write.p50_ms,
+        stages.cache_write.p95_ms,
+        stages.cache_write.max_ms
+    );
     println!(
         "{}",
         serde_json::to_string(&Report {
@@ -272,6 +391,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             file_time_p99_ms,
             file_time_max_ms,
             slowest_files: file_metrics,
+            stages,
         })?
     );
     Ok(())
