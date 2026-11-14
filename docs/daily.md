@@ -300,3 +300,31 @@
   - `cargo test`: **10 / 10 lượt liên tiếp PASS 100% (810/810 test runs PASS)**.
   - `npm.cmd run build`: PASS (Vite + TS 0 lỗi).
 - Bàn giao: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+## 2026-11-14 - V-60 (CI, kiểm lỗ hổng thư viện, Dependabot, cập nhật README và AGENTS.md)
+- Thực hiện theo chỉ đạo của anh Zon ngày 2026-11-14 (optimisse.md các mục S-11, X-9, X-11, S-13).
+- Nhánh `vic/ci` từ `origin/main 908535e`, worktree `E:\Zonendpoint-worktrees\v60-ci`.
+- Phạm vi thay đổi: CHỈ đụng `.github/`, `README.md`, `AGENTS.md`, `docs/`; không đụng code app (`src/`, `src-tauri/`), `scripts/`, hoặc version.
+- Nội dung triển khai:
+  1. `.github/workflows/ci.yml`:
+     - Chạy trên `push` mọi nhánh và `pull_request`.
+     - Quyền tối thiểu: `permissions: contents: read`.
+     - Toàn bộ GitHub Actions được pin theo commit SHA: `actions/checkout@11bd719`, `dtolnay/rust-toolchain@683b588`, `Swatinem/rust-cache@400e740`, `actions/setup-node@1d0ff46`, `actions/setup-python@4237552`, `actions/cache@d4323d4`.
+     - Job 1 (`windows-ci` trên `windows-latest`): Rust stable + cache, Node 22 + cache npm, chạy `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `npm ci`, `npm run build`.
+     - Job 2 (`feeds-test` trên `ubuntu-latest`): chạy `python -m unittest discover -s scripts/feeds -p "test_*.py"` không gọi mạng.
+     - Job 3 (`audit` trên `ubuntu-latest`): chạy `npm audit --audit-level=high` và `cargo audit` (cài `cargo-audit --locked` với cache binary).
+  2. `.github/dependabot.yml`:
+     - Cấu hình cập nhật hằng tuần cho `cargo` (`/src-tauri`), `npm` (`/`), và `github-actions` (`/`), giới hạn tối đa 5 PR mở cùng lúc.
+  3. `README.md`:
+     - Ghi rõ giới hạn quét 25 MiB/file (file vượt quá bị đánh dấu `SKIPPED`, lần quét không được coi là sạch/CLEAN).
+     - Ghi rõ ứng dụng cần ClamAV server riêng biệt (qua loopback hoặc SSH tunnel / private VPN bảo vệ).
+     - Ghi rõ phạm vi sử dụng cá nhân trên 1–2 máy.
+     - Tuyệt đối không chứa IP hoặc user lab.
+  4. `AGENTS.md`:
+     - Sửa lỗi mã hóa ký tự (`1–2`), lưu UTF-8 không BOM.
+     - Cập nhật mô tả checkout: repo chính `E:\Zonendpoint`, worktree theo task `E:\Zonendpoint-worktrees\<task>`.
+- Kết quả chạy GitHub Actions CI (Run ID `43602489284`):
+  - `Feeds Python Unit Tests`: PASS 100% (toàn bộ test feed chạy độc lập với mock fixture).
+  - `Windows CI (Rust + Node)`: `cargo fmt` PASS, `cargo clippy` PASS (0 warnings), `npm ci` PASS, `npm run build` PASS. `cargo test` FAIL ở 1 test `tdd_folder_scan_of_drivers_reports_denied_subdir` do runner GitHub Actions chạy quyền `runneradmin` (Administrator) nên không bị chặn quyền truy cập `DriverData` (trả về complete thay vì incomplete). Ghi nhận vào handoff, không sửa code app ở task này.
+  - `Dependency Security Audit`: `npm audit` PASS (0 lỗ hổng). `cargo audit` phát hiện 1 lỗ hổng trong dependency `libsqlite3-sys` v0.30.1 (`RUSTSEC-2026-0459`, CVE-2026-119375, medium) và 6 cảnh báo thư viện unmaintained/unsound/yanked. Ghi nhận vào handoff, không tự nâng thư viện ở task này.
+- Bàn giao: Handoff `docs/handoffs/ci-vic-to-qeen.md`, commit và push nhánh `vic/ci`. Không merge main.

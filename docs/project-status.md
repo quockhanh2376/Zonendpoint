@@ -1,18 +1,16 @@
-# Project status — 2026-11-12
+# Project status — 2026-11-14
 
-Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Implementation of hourly automated update scheduler for MalwareBazaar + ThreatFox (Task V-42) and Q-31/Q-32 defect resolution (Tasks V-43/V-44) on branch `vic/abusech-timer`. Base: `origin/main 1399604` (Q-30 PASS).
+Phase: 0.3.0 released / 0.3.1 client implementation (V-57) & CI + security audit + docs (V-60). Task V-60 implementation on branch `vic/ci`. Base: `origin/main 908535e`.
 
-## Active checkout/snapshot
-- Implementation: branch `vic/abusech-timer` (base `origin/main 1399604`).
-- Feeds status:
-  - MalwareBazaar: 1,171,422 hashes in DB (`/opt/zonendpoint/malwarebazaar/malwarebazaar.db`), 1,171,422 loaded in clamd (`/var/lib/clamav/malwarebazaar.hsb`).
-  - ThreatFox: 45,298 unique SHA-256 in DB (`/opt/zonendpoint/threatfox/threatfox.db`), 21,625 net unique signatures loaded in clamd (`/var/lib/clamav/threatfox.hsb`).
-  - Total custom feed signatures: 1,193,047 signatures in clamd (clamd live total: 8,614,555 signatures).
-  - Mode: Hourly timer installed (`zonendpoint-abusech-update.timer` with monotonic interval `OnUnitInactiveSec=61min`, `OnBootSec=5min`, `AccuracySec=1min`), but **LEFT DISABLED and INACTIVE** (`disabled`, `dead`) pending activation approval. Shared rate limit: 3 requests/hour (sliding 3600s), 400 requests/24h.
-  - Guard: Requires $\ge 2$ slots before starting turn, atomically reserved under `rate_limit.json.lock`. If $< 2$ slots remain, entire turn is skipped cleanly without retries.
-  - Recent endpoints: MalwareBazaar (`https://mb-api.abuse.ch/v2/files/exports/<AUTH-KEY>/recent.csv`), ThreatFox (`https://threatfox-api.abuse.ch/v2/files/exports/<AUTH-KEY>/recent.csv`).
-  - Reload policy: Single clamd reload per hour; 0 new hashes across feeds = 0 reload; pre-flight temp DB check + RAM $\ge 3.0$ GB + timeout $\le 120$ s.
-- Handoff doc: [abusech-timer-vic-to-qeen.md](handoffs/abusech-timer-vic-to-qeen.md).
+## Active checkout/snapshot (Task V-60)
+- Implementation: branch `vic/ci` (base `origin/main 908535e`), worktree `E:\Zonendpoint-worktrees\v60-ci`.
+- CI Workflow: `.github/workflows/ci.yml` (push all branches & PR, permissions: contents: read, actions pinned to commit SHA).
+  - Job 1 (`windows-ci`): Windows x64 runner, Rust stable + cache, Node 22 + cache, cargo fmt, clippy, test, npm ci, build.
+  - Job 2 (`feeds-test`): Ubuntu runner, Python 3.12, unittest discover `scripts/feeds` (mock fixtures, 0 network, PASS).
+  - Job 3 (`audit`): Ubuntu runner, `npm audit --audit-level=high` (0 vulnerabilities, PASS), `cargo audit` in `src-tauri` (1 vulnerability: `libsqlite3-sys` CVE-2026-119375 / RUSTSEC-2026-0459).
+- Dependabot: `.github/dependabot.yml` weekly updates for `cargo`, `npm`, `github-actions` (limit 5 PRs).
+- Documentation alignment: `README.md` (25 MiB/file limit, dedicated ClamAV server, 1–2 machine personal scope, no lab IP), `AGENTS.md` (encoding `1–2`, UTF-8 without BOM, worktree checkout paths).
+- Handoff doc: [ci-vic-to-qeen.md](handoffs/ci-vic-to-qeen.md).
 - Merged branches:
   - `origin/vic/close-fix` (tip `0b48da0`, code `e8b249d`, merged in Task V-30M, branch `vic/close-fix-merge`, code snapshot `17bdccf`): graceful window close & scan cancellation on exit (V-30), compatibility with ScanManager, bounded folder workers + adaptive limiter (J-01), and Guard (`stop_guard`), refactored shared event handling (`cancel_and_exit`), quality gates 68/68 cargo tests PASS, 20/20 native tests PASS.
   - `origin/jacky/threatfox` (tip `4e25f22`, code `8eb08e7`, Q-28/Q-29 PASS 51/51 tests): ThreatFox CSV export ingestion, SQLite metadata/hash storage, duplicate resolution (899 rows merged via ON CONFLICT DO UPDATE per Zon approval), shared abuse.ch rate limiter with MalwareBazaar, 21,476 unique SHA-256 deployed to clamd, rollback script.

@@ -45,9 +45,11 @@ jobs:
         run: cargo test
 
       - name: Install npm dependencies
+        if: always()
         run: npm ci
 
       - name: Build frontend
+        if: always()
         run: npm run build
 
   feeds-test:
