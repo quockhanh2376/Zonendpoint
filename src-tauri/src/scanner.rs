@@ -35,6 +35,57 @@ const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(3);
 pub const TOTAL_SCAN_TIMEOUT: Duration = Duration::from_secs(120);
 pub const CLAMD_RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
 
+#[derive(Clone, Debug)]
+pub struct EngineTracker {
+    version: Arc<std::sync::RwLock<String>>,
+    file_count: Arc<AtomicUsize>,
+    last_check: Arc<std::sync::RwLock<Instant>>,
+}
+
+impl EngineTracker {
+    pub fn new(initial_version: impl Into<String>) -> Self {
+        Self {
+            version: Arc::new(std::sync::RwLock::new(initial_version.into())),
+            file_count: Arc::new(AtomicUsize::new(0)),
+            last_check: Arc::new(std::sync::RwLock::new(Instant::now())),
+        }
+    }
+
+    pub fn current_version(&self) -> String {
+        self.version.read().unwrap().clone()
+    }
+
+    pub fn set_version(&self, new_version: String) {
+        let mut w = self.version.write().unwrap();
+        *w = new_version;
+    }
+
+    pub async fn check_periodic(&self, addr: SocketAddr, cancel: watch::Receiver<bool>) {
+        let count = self.file_count.fetch_add(1, Ordering::Relaxed);
+        let time_due = {
+            let last = self.last_check.read().unwrap();
+            last.elapsed() >= Duration::from_secs(30)
+        };
+        if (count > 0 && count.is_multiple_of(100)) || time_due {
+            self.refresh(addr, cancel).await;
+        }
+    }
+
+    pub async fn refresh_on_error(&self, addr: SocketAddr, cancel: watch::Receiver<bool>) {
+        self.refresh(addr, cancel).await;
+    }
+
+    pub async fn refresh(&self, addr: SocketAddr, cancel: watch::Receiver<bool>) {
+        if let Ok(new_v) = clamd_version(addr, cancel).await {
+            let mut last = self.last_check.write().unwrap();
+            *last = Instant::now();
+            if !new_v.is_empty() {
+                self.set_version(new_v);
+            }
+        }
+    }
+}
+
 pub struct ScanLimiter {
     semaphore: Arc<Semaphore>,
     limit: AtomicUsize,
@@ -610,6 +661,26 @@ pub async fn scan_file(
     scan_file_with_engine_override(path, cache_path, addr, None, cancel, semaphore).await
 }
 
+pub async fn scan_file_with_tracker(
+    path: PathBuf,
+    session: Option<Arc<crate::cache::CacheSession>>,
+    addr: SocketAddr,
+    tracker: Arc<EngineTracker>,
+    cancel: watch::Receiver<bool>,
+    semaphore: Arc<ScanLimiter>,
+) -> ScanResult {
+    scan_file_with_tracker_timeout_checked(
+        path,
+        session,
+        addr,
+        tracker,
+        cancel,
+        semaphore,
+        default_scan_timeout(),
+    )
+    .await
+}
+
 pub async fn scan_file_with_session(
     path: PathBuf,
     session: Option<Arc<crate::cache::CacheSession>>,
@@ -618,16 +689,8 @@ pub async fn scan_file_with_session(
     cancel: watch::Receiver<bool>,
     semaphore: Arc<ScanLimiter>,
 ) -> ScanResult {
-    scan_file_with_session_timeout_checked(
-        path,
-        session,
-        addr,
-        engine_override,
-        cancel,
-        semaphore,
-        default_scan_timeout(),
-    )
-    .await
+    let tracker = Arc::new(EngineTracker::new(engine_override.unwrap_or_default()));
+    scan_file_with_tracker(path, session, addr, tracker, cancel, semaphore).await
 }
 
 pub async fn scan_file_with_engine_override(
@@ -679,6 +742,38 @@ async fn scan_file_with_session_timeout_checked(
     semaphore: Arc<ScanLimiter>,
     total_timeout: Duration,
 ) -> ScanResult {
+    let tracker = Arc::new(EngineTracker::new(engine_override.unwrap_or_default()));
+    scan_file_with_tracker_timeout_checked(
+        path,
+        session,
+        addr,
+        tracker,
+        cancel,
+        semaphore,
+        total_timeout,
+    )
+    .await
+}
+
+pub async fn scan_file_with_tracker_timeout_checked(
+    path: PathBuf,
+    session: Option<Arc<crate::cache::CacheSession>>,
+    addr: SocketAddr,
+    tracker: Arc<EngineTracker>,
+    cancel: watch::Receiver<bool>,
+    semaphore: Arc<ScanLimiter>,
+    total_timeout: Duration,
+) -> ScanResult {
+    let raw_path = path.to_string_lossy();
+    if raw_path.contains("::$DATA") {
+        return ScanResult::new(
+            path,
+            ScanStatus::Skipped,
+            None,
+            Some("alternate data stream rejected".into()),
+            0,
+        );
+    }
     if *cancel.borrow() {
         return ScanResult::new(
             path,
@@ -719,11 +814,11 @@ async fn scan_file_with_session_timeout_checked(
         Ok(_) => {}
         Err(error) => return ScanResult::error(path, format!("read file metadata: {error}")),
     }
-    scan_file_with_session_timeout(
+    scan_file_with_tracker_timeout(
         path,
         session,
         addr,
-        engine_override,
+        tracker,
         cancel,
         semaphore,
         total_timeout,
@@ -804,6 +899,28 @@ pub async fn scan_file_with_session_timeout(
     semaphore: Arc<ScanLimiter>,
     total_timeout: Duration,
 ) -> ScanResult {
+    let tracker = Arc::new(EngineTracker::new(engine_override.unwrap_or_default()));
+    scan_file_with_tracker_timeout(
+        path,
+        session,
+        addr,
+        tracker,
+        cancel,
+        semaphore,
+        total_timeout,
+    )
+    .await
+}
+
+pub async fn scan_file_with_tracker_timeout(
+    path: PathBuf,
+    session: Option<Arc<crate::cache::CacheSession>>,
+    addr: SocketAddr,
+    tracker: Arc<EngineTracker>,
+    cancel: watch::Receiver<bool>,
+    semaphore: Arc<ScanLimiter>,
+    total_timeout: Duration,
+) -> ScanResult {
     let t_limiter_start = Instant::now();
     let permit = tokio::select! {
         _ = wait_cancelled(cancel.clone()) => return ScanResult::new(path, ScanStatus::Cancelled, None, Some("cancelled".into()), 0),
@@ -814,10 +931,15 @@ pub async fn scan_file_with_session_timeout(
     };
     let wait_limiter_us = t_limiter_start.elapsed().as_micros() as u64;
     let operation = async {
-        let engine_version = match &engine_override {
-            Some(version) => version.clone(),
-            None => clamd_version(addr, cancel.clone()).await?,
-        };
+        tracker.check_periodic(addr, cancel.clone()).await;
+        let mut engine_version = tracker.current_version();
+        if engine_version.is_empty() {
+            tracker.refresh(addr, cancel.clone()).await;
+            engine_version = tracker.current_version();
+            if engine_version.is_empty() {
+                return Err("Cannot connect to ZonEndpoint server".into());
+            }
+        }
         let t_hash_start = Instant::now();
         let (hash, size, file_snapshot) = hash_file(&path).await?;
         let open_and_hash_us = t_hash_start.elapsed().as_micros() as u64;
@@ -922,7 +1044,7 @@ pub async fn scan_file_with_session_timeout(
             };
             let mut result =
                 ScanResult::new(&path, cached.status, Some(hex::encode(hash)), reason, size);
-            result.engine_version = Some(engine_version.clone());
+            result.engine_version = Some(tracker.current_version());
             result.stages = Some(StageTimings {
                 wait_limiter_us,
                 open_and_hash_us,
@@ -949,6 +1071,9 @@ pub async fn scan_file_with_session_timeout(
             total_timeout,
         )
         .await;
+        if outcome.status == ScanStatus::Error {
+            tracker.refresh_on_error(addr, cancel.clone()).await;
+        }
         if outcome.status == ScanStatus::Clean || outcome.status == ScanStatus::Infected {
             let after_handle = snapshot(
                 &file
@@ -1003,13 +1128,14 @@ pub async fn scan_file_with_session_timeout(
                     None => cache_err,
                 });
             }
-            result.engine_version = Some(engine_version.clone());
+            let active_version = tracker.current_version();
+            result.engine_version = Some(active_version.clone());
             let t_write_start = Instant::now();
             if let (Some(sig_gen), Some(s)) = (&sig_generation, session.as_ref()) {
                 let put_result = s
                     .put(
                         hash,
-                        engine_version.clone(),
+                        active_version,
                         sig_gen.clone(),
                         POLICY_VERSION.to_string(),
                         outcome.status,
@@ -1046,7 +1172,7 @@ pub async fn scan_file_with_session_timeout(
             outcome.reason,
             outcome.bytes_scanned,
         );
-        result.engine_version = Some(engine_version.clone());
+        result.engine_version = Some(tracker.current_version());
         result.stages = Some(StageTimings {
             wait_limiter_us,
             open_and_hash_us,
@@ -1964,5 +2090,95 @@ mod tests {
             err.contains("server response exceeded limit"),
             "got error: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_s10_clamd_version_change_mid_scan_invalidates_cache_key() {
+        let temp_dir = std::env::temp_dir().join(format!("zon-s10-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let cache_path = temp_dir.join("cache.db");
+        let status_path = temp_dir.join("server-status.json");
+        std::fs::write(
+            &status_path,
+            r#"{"signatures":8616901,"loaded_at":"2026-11-14T20:59:49+07:00","fetched_at":"2026-11-14T20:59:49+07:00"}"#,
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_path);
+        }
+
+        let file1 = temp_dir.join("file1.bin");
+        std::fs::write(&file1, b"clean-file-1").unwrap();
+        let file2 = temp_dir.join("file2.bin");
+        std::fs::write(&file2, b"clean-file-2").unwrap();
+
+        let session = Arc::new(crate::cache::CacheSession::open(&cache_path).unwrap());
+        let tracker = Arc::new(EngineTracker::new("ClamAV 1.5.4/28183"));
+        let limiter = Arc::new(ScanLimiter::new(1));
+        let (_tx, cancel) = watch::channel(false);
+
+        // 1. Scan file1 under version 28183
+        let (addr1, daemon1) = mock_clamd(vec![b"stream: OK\0".to_vec()], false).await;
+        let res1 = scan_file_with_tracker(
+            file1.clone(),
+            Some(session.clone()),
+            addr1,
+            tracker.clone(),
+            cancel.clone(),
+            limiter.clone(),
+        )
+        .await;
+        session.flush().await.unwrap();
+        let _ = daemon1.await.unwrap();
+        assert_eq!(res1.status, ScanStatus::Clean);
+        assert_eq!(res1.engine_version.as_deref(), Some("ClamAV 1.5.4/28183"));
+
+        // 2. Clamd changes version to 28184 mid-scan
+        tracker.set_version("ClamAV 1.5.4/28184".to_string());
+
+        // 3. Scan file2 under the new version
+        let (addr2, daemon2) = mock_clamd(vec![b"stream: OK\0".to_vec()], false).await;
+        let res2 = scan_file_with_tracker(
+            file2.clone(),
+            Some(session.clone()),
+            addr2,
+            tracker.clone(),
+            cancel.clone(),
+            limiter.clone(),
+        )
+        .await;
+        session.flush().await.unwrap();
+        let _ = daemon2.await.unwrap();
+        assert_eq!(res2.status, ScanStatus::Clean);
+        assert_eq!(res2.engine_version.as_deref(), Some("ClamAV 1.5.4/28184"));
+
+        // 4. Verify SQLite cache: file2 must NOT be cached under old version
+        let conn = rusqlite::Connection::open(&cache_path).unwrap();
+        let count_old: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM scan_cache WHERE engine_version = 'ClamAV 1.5.4/28183'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count_old, 1,
+            "only file1 should be cached under old version"
+        );
+
+        let count_new: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM scan_cache WHERE engine_version = 'ClamAV 1.5.4/28184'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_new, 1, "file2 must be cached under new version");
+
+        unsafe {
+            std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
+        }
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

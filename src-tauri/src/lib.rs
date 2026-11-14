@@ -361,18 +361,18 @@ async fn run_scan(
         let scan_addr = addr;
         let scan_session = cache_session.clone();
         let scan_semaphore = semaphore.clone();
-        let scan_version = engine_version.clone();
+        let scan_tracker = Arc::new(scanner::EngineTracker::new(engine_version.clone()));
         let scan: ScanFn = Box::new(move |file, cancel| {
             let session = scan_session.clone();
             let semaphore = scan_semaphore.clone();
             let addr = scan_addr;
-            let version = scan_version.clone();
+            let tracker = scan_tracker.clone();
             Box::pin(async move {
-                scanner::scan_file_with_session(
+                scanner::scan_file_with_tracker(
                     file,
                     Some(session),
                     addr,
-                    Some(version),
+                    tracker,
                     cancel,
                     semaphore,
                 )
@@ -423,11 +423,12 @@ async fn run_scan(
                 Ok(summary)
             }
             _ => {
-                let result = scanner::scan_file_with_session(
+                let tracker = Arc::new(scanner::EngineTracker::new(engine_version));
+                let result = scanner::scan_file_with_tracker(
                     target,
                     Some(cache_session.clone()),
                     addr,
-                    Some(engine_version),
+                    tracker,
                     cancel_rx.clone(),
                     semaphore,
                 )

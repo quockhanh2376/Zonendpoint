@@ -209,19 +209,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scan_addr = addr;
     let scan_times = file_metrics.clone();
     let scan_stages = stage_metrics.clone();
+    let scan_tracker = Arc::new(scanner::EngineTracker::new(scan_engine.clone()));
     let scan: directory::ScanFn = Box::new(move |path, cancel| {
         let session = scan_session.clone();
         let limiter = scan_limiter.clone();
-        let engine = scan_engine.clone();
+        let tracker = scan_tracker.clone();
         let times = scan_times.clone();
         let stages = scan_stages.clone();
         Box::pin(async move {
             let started = Instant::now();
-            let result = scanner::scan_file_with_session(
+            let result = scanner::scan_file_with_tracker(
                 path,
                 Some(session),
                 scan_addr,
-                Some(engine),
+                tracker,
                 cancel,
                 limiter,
             )
