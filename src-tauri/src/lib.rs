@@ -463,12 +463,6 @@ fn cancel_scan(
 }
 
 #[tauri::command]
-fn cache_stats() -> Result<cache::CacheStats, String> {
-    let path = cache::default_path().map_err(|error| error.to_string())?;
-    cache::stats(&path).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 fn set_window_theme_icon(app: tauri::AppHandle, theme: String) -> Result<(), String> {
     let bytes: &[u8] = match theme.as_str() {
         "light" => include_bytes!("../icons/icon.png"),
@@ -480,26 +474,6 @@ fn set_window_theme_icon(app: tauri::AppHandle, theme: String) -> Result<(), Str
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
     window.set_icon(icon).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn set_guard(
-    app: tauri::AppHandle,
-    manager: tauri::State<'_, ScanManager>,
-    enabled: bool,
-) -> Result<bool, String> {
-    let state = app.state::<Arc<Mutex<Guard>>>();
-    let mut guard = state.lock().map_err(|e| e.to_string())?;
-    if enabled {
-        let cache_path = cache::default_path().map_err(|error| error.to_string())?;
-        let addr = scanner::configured_clamd_addr()?;
-        guard
-            .start(cache_path, addr, manager.semaphore.clone())
-            .map_err(|e| e.to_string())?;
-    } else {
-        guard.stop();
-    }
-    Ok(guard.is_running())
 }
 
 pub async fn scan_cli(path: PathBuf) -> scanner::ScanResult {
@@ -556,7 +530,6 @@ fn cancel_and_exit(app: tauri::AppHandle, exit_code: i32) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(ScanManager::new())
         .manage(Arc::new(Mutex::new(Guard::default())))
@@ -575,8 +548,6 @@ pub fn run() {
             scan_path,
             quick_scan,
             cancel_scan,
-            cache_stats,
-            set_guard,
             set_window_theme_icon,
             check_server_status,
             get_server_status,
