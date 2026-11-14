@@ -139,6 +139,7 @@ class TestAbusechUpdate(unittest.TestCase):
         self.args.last_run_file = str(self.last_run_file)
         self.args.reload_state_file = str(self.reload_state_file)
         self.args.hold_file = str(self.hold_file)
+        self.args.mb_base_url = update_mod.mb.DEFAULT_BASE_URL
         self.args.min_reload_interval = 6.0
         self.args.mb_url = f"http://127.0.0.1:{self.server_port}/mb/{{auth_key}}/recent.csv"
         self.args.tf_url = f"http://127.0.0.1:{self.server_port}/tf/{{auth_key}}/recent.csv"
@@ -149,7 +150,7 @@ class TestAbusechUpdate(unittest.TestCase):
         self.args.tf_backup_dir = str(self.tf_backup_dir)
         self.args.clamav_db_dir = str(self.clamav_db_dir)
         self.args.clamd_host = "127.0.0.1"
-        self.args.clamd_port = 3310
+        self.args.clamd_port = 9999
         self.args.log_file = str(self.clamd_log_file)
         self.args.clamscan_bin = "clamscan"
         self.args.timeout = 10.0
@@ -292,7 +293,7 @@ class TestAbusechUpdate(unittest.TestCase):
                     },
                     clamav_db_dir=str(self.clamav_db_dir),
                     clamd_host="127.0.0.1",
-                    clamd_port=3310,
+                    clamd_port=9999,
                     log_file=str(self.clamd_log_file),
                     reload_timeout=0.1,
                 )

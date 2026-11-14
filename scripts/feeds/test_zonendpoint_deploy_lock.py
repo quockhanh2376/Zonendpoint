@@ -62,6 +62,8 @@ class TestSharedDeployLock(unittest.TestCase):
             env["DEPLOY_LOCK_FILE"] = str(self.lock_file)
             env["BACKUP_FILE"] = str(self.base_path / "dummy.bak")
             env["ACTIVE_FILE"] = str(self.base_path / "active.hsb")
+            env["CLAMD_PORT"] = "9999"
+            env["CLAMDSCAN_BIN"] = "echo"
 
             proc = subprocess.run(["bash", str(MB_ROLLBACK_SCRIPT)], env=env, capture_output=True, text=True)
             self.assertNotEqual(proc.returncode, 0)
@@ -76,6 +78,8 @@ class TestSharedDeployLock(unittest.TestCase):
             env["DEPLOY_LOCK_FILE"] = str(self.lock_file)
             env["BACKUP_FILE"] = str(self.base_path / "dummy.bak")
             env["ACTIVE_FILE"] = str(self.base_path / "active.hsb")
+            env["CLAMD_PORT"] = "9999"
+            env["CLAMDSCAN_BIN"] = "echo"
 
             proc = subprocess.run(["bash", str(TF_ROLLBACK_SCRIPT)], env=env, capture_output=True, text=True)
             self.assertNotEqual(proc.returncode, 0)
@@ -90,9 +94,51 @@ class TestSharedDeployLock(unittest.TestCase):
             env["DEPLOY_LOCK_FILE"] = str(self.lock_file)
             env["BACKUP_FILE"] = str(self.base_path / "dummy.bak")
             env["ACTIVE_FILE"] = str(self.base_path / "active.yar")
+            env["CLAMD_PORT"] = "9999"
+            env["CLAMDSCAN_BIN"] = "echo"
 
             proc = subprocess.run(["bash", str(YARA_ROLLBACK_SCRIPT)], env=env, capture_output=True, text=True)
             self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("Another clamd deploy/update process is currently running", proc.stdout + proc.stderr)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+
+    def test_mb_deploy_hsb_aborts_code_3_when_lock_held(self):
+        """L-6: Test that zonendpoint-malwarebazaar.py deploy-hsb exits with code 3 if shared deploy lock is held."""
+        with open(str(self.lock_file), "w") as fd:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            cmd = [
+                "python3",
+                str(HERE / "zonendpoint-malwarebazaar.py"),
+                "deploy-hsb",
+                "--lock-file",
+                str(self.lock_file),
+                "--db",
+                str(self.base_path / "mb.db"),
+                "--hsb-path",
+                str(self.base_path / "mb.hsb"),
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 3)
+            self.assertIn("Another clamd deploy/update process is currently running", proc.stdout + proc.stderr)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+
+    def test_tf_deploy_hsb_aborts_code_3_when_lock_held(self):
+        """L-6: Test that zonendpoint-threatfox.py deploy-hsb exits with code 3 if shared deploy lock is held."""
+        with open(str(self.lock_file), "w") as fd:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            cmd = [
+                "python3",
+                str(HERE / "zonendpoint-threatfox.py"),
+                "deploy-hsb",
+                "--lock-file",
+                str(self.lock_file),
+                "--db",
+                str(self.base_path / "tf.db"),
+                "--hsb-path",
+                str(self.base_path / "tf.hsb"),
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 3)
             self.assertIn("Another clamd deploy/update process is currently running", proc.stdout + proc.stderr)
             fcntl.flock(fd, fcntl.LOCK_UN)
 

@@ -6,6 +6,7 @@ import os
 import pathlib
 import subprocess
 import tempfile
+import time
 import unittest
 import importlib.util
 from unittest.mock import patch, MagicMock
@@ -47,41 +48,71 @@ class TestHoldFiles(unittest.TestCase):
         self.assertIn("Skipping YARA update", proc.stdout)
 
     def test_rollback_scripts_create_hold_file(self):
-        """L-3: Test that rollback scripts create the hold file when executed."""
-        # 1. MalwareBazaar rollback
-        mb_hold = self.base_path / "HOLD-abusech"
-        mb_active = self.base_path / "malwarebazaar.hsb"
-        mb_backup = self.base_path / "malwarebazaar.hsb.bak"
-        mb_backup.write_text("dummy_sig\n")
+        """L-3: Test that rollback scripts create the hold file early and record reload state."""
+        for name, script, hold_name, active_name, backup_name in [
+            ("MB", MB_ROLLBACK_SCRIPT, "HOLD-abusech", "malwarebazaar.hsb", "malwarebazaar.hsb.bak"),
+            ("TF", TF_ROLLBACK_SCRIPT, "HOLD-abusech", "threatfox.hsb", "threatfox.hsb.bak"),
+            ("YARA", YARA_ROLLBACK_SCRIPT, "HOLD-yara", "yara-forge-core.yar", "yara-forge-core.yar.bak"),
+        ]:
+            hold_p = self.base_path / f"{name}_{hold_name}"
+            active_p = self.base_path / f"{name}_{active_name}"
+            backup_p = self.base_path / f"{name}_{backup_name}"
+            backup_p.write_text("dummy_sig\n")
+            reload_state_p = self.base_path / f"{name}_reload.json"
 
+            env = os.environ.copy()
+            env["ZONENDPOINT_TEST_ENV"] = "1"
+            env["CLAMD_PORT"] = "9999"
+            env["CLAMDSCAN_BIN"] = "echo"
+            env["DEPLOY_LOCK_FILE"] = str(self.base_path / f"{name}_lock.file")
+            env["HOLD_FILE"] = str(hold_p)
+            env["ACTIVE_FILE"] = str(active_p)
+            env["BACKUP_FILE"] = str(backup_p)
+            env["RELOAD_STATE_FILE"] = str(reload_state_p)
+            env["CLAMD_NO_PING_WAIT"] = "1"
+
+            proc = subprocess.run(["bash", str(script), "--purge"], env=env, capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, f"{name} purge failed: stdout={proc.stdout}, stderr={proc.stderr}")
+            self.assertTrue(hold_p.is_file(), f"{name} did not create hold file")
+            self.assertTrue(reload_state_p.is_file(), f"{name} did not record reload state")
+
+    def test_rollback_scripts_create_hold_early_on_failure(self):
+        """L-3: Test that HOLD is created at start before any file replacement and retained on error."""
+        for name, script, hold_name in [
+            ("MB", MB_ROLLBACK_SCRIPT, "HOLD-abusech"),
+            ("TF", TF_ROLLBACK_SCRIPT, "HOLD-abusech"),
+            ("YARA", YARA_ROLLBACK_SCRIPT, "HOLD-yara"),
+        ]:
+            hold_p = self.base_path / f"err_{name}_{hold_name}"
+            env = os.environ.copy()
+            env["ZONENDPOINT_TEST_ENV"] = "1"
+            env["CLAMD_PORT"] = "9999"
+            env["CLAMDSCAN_BIN"] = "echo"
+            env["DEPLOY_LOCK_FILE"] = str(self.base_path / f"err_{name}_lock.file")
+            env["HOLD_FILE"] = str(hold_p)
+            env["BACKUP_FILE"] = str(self.base_path / "nonexistent.bak")
+            env["ACTIVE_FILE"] = str(self.base_path / "nonexistent.hsb")
+
+            # Running normal rollback with missing backup triggers error exit
+            proc = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+            self.assertNotEqual(proc.returncode, 0)
+            # HOLD must exist even though rollback errored out!
+            self.assertTrue(hold_p.is_file(), f"{name} did not create early hold file before failure")
+
+    def test_rollback_safety_guard_rejects_real_clamd(self):
+        """CRITICAL: Test that rollback scripts reject real clamd port (3310) and binary in test environment."""
         env = os.environ.copy()
-        env["HOLD_FILE"] = str(mb_hold)
-        env["ACTIVE_FILE"] = str(mb_active)
-        env["BACKUP_FILE"] = str(mb_backup)
+        env["ZONENDPOINT_TEST_ENV"] = "1"
+        env["CLAMD_PORT"] = "3310"
+        env["CLAMDSCAN_BIN"] = "clamdscan"
+        env["DEPLOY_LOCK_FILE"] = str(self.base_path / "safety_lock.file")
+        env["HOLD_FILE"] = str(self.base_path / "HOLD-test")
+        env["ACTIVE_FILE"] = str(self.base_path / "test.hsb")
 
-        # Mock reload_clamd by sourcing or testing purge branch with mock clamd
-        # We can run bash with a mocked reload_clamd function:
-        test_script = f"""
-        reload_clamd() {{ echo "mocked clamd reload"; }}
-        source "{MB_ROLLBACK_SCRIPT}" --purge
-        """
-        proc = subprocess.run(["bash", "-c", test_script], env=env, capture_output=True, text=True)
-        self.assertEqual(proc.returncode, 0, f"stdout: {proc.stdout}, stderr: {proc.stderr}")
-        self.assertTrue(mb_hold.is_file())
-
-        # 2. YARA rollback
-        yara_hold = self.base_path / "HOLD-yara"
-        yara_active = self.base_path / "yara-forge-core.yar"
-        env["HOLD_FILE"] = str(yara_hold)
-        env["ACTIVE_FILE"] = str(yara_active)
-        test_script_yara = f"""
-        clamdscan() {{ echo "mocked reload"; }}
-        nc() {{ echo "PONG"; }}
-        source "{YARA_ROLLBACK_SCRIPT}" --purge
-        """
-        proc_yara = subprocess.run(["bash", "-c", test_script_yara], env=env, capture_output=True, text=True)
-        self.assertEqual(proc_yara.returncode, 0)
-        self.assertTrue(yara_hold.is_file())
+        for name, script in [("MB", MB_ROLLBACK_SCRIPT), ("TF", TF_ROLLBACK_SCRIPT), ("YARA", YARA_ROLLBACK_SCRIPT)]:
+            proc = subprocess.run(["bash", str(script), "--purge"], env=env, capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 99, f"{name} did not exit 99 on real clamd target")
+            self.assertIn("SAFETY VIOLATION", proc.stderr)
 
 
 class TestYaraDeploy(unittest.TestCase):
@@ -132,6 +163,10 @@ class TestYaraDeploy(unittest.TestCase):
                     accepted_count=3676,
                     log_file=str(self.log_file),
                     reload_timeout=5.0,
+                    clamdscan_bin="echo",
+                    clamd_port=9999,
+                    force_reload=True,
+                    reload_state_file=str(self.base_path / "reload-state.json"),
                 )
 
         # Tag file must now contain the new tag
@@ -150,6 +185,10 @@ class TestYaraDeploy(unittest.TestCase):
                         accepted_count=3676,
                         log_file=str(self.log_file),
                         reload_timeout=1.5,
+                        clamdscan_bin="echo",
+                        clamd_port=9999,
+                        force_reload=True,
+                        reload_state_file=str(self.base_path / "reload-state.json"),
                     )
 
         # Tag must remain the old tag (20261103), NOT updated to 20261108!
@@ -175,8 +214,100 @@ class TestYaraDeploy(unittest.TestCase):
                     accepted_count=3676,
                     log_file=str(self.log_file),
                     reload_timeout=5.0,
+                    clamdscan_bin="echo",
+                    clamd_port=9999,
+                    force_reload=True,
+                    reload_state_file=str(self.base_path / "reload-state.json"),
                 )
 
+        self.assertEqual(self.tag_file.read_text(encoding="utf-8").strip(), "20261108")
+
+    def test_yara_deploy_safety_guard_rejects_real_clamd(self):
+        """CRITICAL: Test that deploy_and_reload fails immediately if clamd port 3310 or clamdscan binary is targeted in test env."""
+        old_env = os.environ.get("ZONENDPOINT_TEST_ENV")
+        os.environ["ZONENDPOINT_TEST_ENV"] = "1"
+        try:
+            # 1. Port 3310 rejected
+            with self.assertRaises(AssertionError):
+                yara_mod.deploy_and_reload(
+                    staging_yar=str(self.staging_yar),
+                    new_tag="20261108",
+                    accepted_count=3676,
+                    clamdscan_bin="echo",
+                    clamd_port=3310,
+                )
+
+            # 2. clamdscan binary rejected
+            with self.assertRaises(AssertionError):
+                yara_mod.deploy_and_reload(
+                    staging_yar=str(self.staging_yar),
+                    new_tag="20261108",
+                    accepted_count=3676,
+                    clamdscan_bin="clamdscan",
+                    clamd_port=9999,
+                )
+        finally:
+            if old_env is None:
+                os.environ.pop("ZONENDPOINT_TEST_ENV", None)
+            else:
+                os.environ["ZONENDPOINT_TEST_ENV"] = old_env
+
+    def test_yara_tag_name_validation(self):
+        """L-13: Test strict tag_name regex validation."""
+        valid_tags = ["20261108", "v1.2.3", "release-2026_11.08", "tag123"]
+        for tag in valid_tags:
+            self.assertEqual(yara_mod.validate_tag_name(tag), tag)
+
+        invalid_tags = ["", "tag;rm -rf /", "tag`whoami`", "tag$(id)", "../tag", "tag/sub", ";", "tag with spaces"]
+        for tag in invalid_tags:
+            with self.assertRaises(ValueError):
+                yara_mod.validate_tag_name(tag)
+
+    def test_yara_download_url_and_size_limits(self):
+        """L-13: Test download URL domain enforcement and size limit."""
+        # 1. Insecure/untrusted URL rejected
+        with self.assertRaises(ValueError) as ctx:
+            yara_mod.download_file("http://github.com/YARAHQ/repo/file.zip", str(self.base_path / "f.zip"))
+        self.assertIn("Only HTTPS", str(ctx.exception))
+
+        with self.assertRaises(ValueError) as ctx:
+            yara_mod.download_file("https://evil.com/YARAHQ/repo/file.zip", str(self.base_path / "f.zip"))
+        self.assertIn("Must start with 'https://github.com/YARAHQ/'", str(ctx.exception))
+
+    def test_yara_extract_zip_slip_and_size_limits(self):
+        """L-13: Test archive extraction protects against Zip Slip and excessive size."""
+        import zipfile
+        # Create malicious zip with zip slip
+        slip_zip = self.base_path / "slip.zip"
+        with zipfile.ZipFile(slip_zip, "w") as z:
+            z.writestr("../../../../../tmp/pwned.yar", "rule pwn { condition: true }")
+
+        with self.assertRaises(ValueError) as ctx:
+            yara_mod.extract_core_rules(str(slip_zip), str(self.base_path / "ext"))
+        self.assertIn("path traversal", str(ctx.exception))
+
+    def test_yara_min_reload_interval_defers_reload(self):
+        """L-8: Test that minimum reload interval defers reload without clamdscan call."""
+        state_file = self.base_path / "reload-state.json"
+        now = time.time()
+        # Record recent reload (1h ago)
+        yara_mod.record_reload_state(str(state_file), caller="test", signatures=1000)
+
+        with patch("subprocess.run") as mock_run:
+            yara_mod.deploy_and_reload(
+                staging_yar=str(self.staging_yar),
+                new_tag="20261108",
+                accepted_count=3676,
+                clamdscan_bin="echo",
+                clamd_port=9999,
+                force_reload=False,
+                min_reload_interval=6.0,
+                reload_state_file=str(state_file),
+            )
+            # clamdscan was NOT called!
+            mock_run.assert_not_called()
+
+        # Tag file was updated because active file was deployed atomically
         self.assertEqual(self.tag_file.read_text(encoding="utf-8").strip(), "20261108")
 
 

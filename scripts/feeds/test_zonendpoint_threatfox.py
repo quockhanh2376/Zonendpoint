@@ -166,9 +166,17 @@ class ThreatFoxTests(unittest.TestCase):
     def test_deploy_hsb_passes_log_file(self):
         with tempfile.TemporaryDirectory() as d:
             fake_db = pathlib.Path(d) / "tf.db"
+            fake_lock = pathlib.Path(d) / "deploy.lock"
+            fake_state = pathlib.Path(d) / "reload-state.json"
             with mock.patch.object(tf.mb, "deploy_hsb") as mock_deploy:
                 with mock.patch.object(tf.mb, "load_auth_key", return_value="dummy"):
-                    with mock.patch("sys.argv", ["zonendpoint-threatfox.py", "deploy-hsb", "--db", str(fake_db), "--log-file", "/tmp/custom_clamav.log"]):
+                    with mock.patch("sys.argv", [
+                        "zonendpoint-threatfox.py", "deploy-hsb",
+                        "--db", str(fake_db),
+                        "--log-file", "/tmp/custom_clamav.log",
+                        "--lock-file", str(fake_lock),
+                        "--reload-state-file", str(fake_state),
+                    ]):
                         ret = tf.main()
                         self.assertEqual(ret, 0)
                         mock_deploy.assert_called_once()
@@ -337,6 +345,17 @@ class ThreatFoxTests(unittest.TestCase):
                     os.environ.pop("MALWAREBAZAAR_DB_PATH", None)
                 else:
                     os.environ["MALWAREBAZAAR_DB_PATH"] = old_env
+
+    def test_threatfox_https_url_validation(self):
+        """L-14: Test HTTPS URL validation on ThreatFox fetch."""
+        limiter = mock.Mock()
+        with self.assertRaises(ValueError) as ctx:
+            tf.fetch_full("http://threatfox-api.abuse.ch/v2/files/exports/{auth_key}/full.csv.zip", "key123", limiter)
+        self.assertIn("Insecure URL scheme", str(ctx.exception))
+
+        with self.assertRaises(ValueError) as ctx:
+            tf.fetch_recent("http://threatfox-api.abuse.ch/v2/files/exports/{auth_key}/recent.csv", "key123", limiter)
+        self.assertIn("Insecure URL scheme", str(ctx.exception))
 
 
 if __name__ == "__main__":

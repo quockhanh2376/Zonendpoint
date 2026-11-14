@@ -61,7 +61,7 @@ DEFAULT_RATE_LIMIT_FILE = DEFAULT_STATE
 DEFAULT_LOCK_FILE = os.environ.get("DEPLOY_LOCK_FILE", "/run/lock/zonendpoint-clamd-deploy.lock")
 DEFAULT_LAST_RUN_FILE = "/opt/zonendpoint/abusech/last-run.json"
 DEFAULT_HOLD_FILE = "/opt/zonendpoint/HOLD-abusech"
-DEFAULT_RELOAD_STATE_FILE = "/opt/zonendpoint/abusech/reload-state.json"
+DEFAULT_RELOAD_STATE_FILE = os.environ.get("RELOAD_STATE_FILE", "/opt/zonendpoint/reload-state.json")
 DEFAULT_MIN_RELOAD_INTERVAL_HOURS = 6.0
 
 DEFAULT_MB_RECENT_URL = getattr(mb, "DEFAULT_RECENT_DUMP_URL", "https://mb-api.abuse.ch/v2/files/exports/{auth_key}/recent.csv")
@@ -74,9 +74,9 @@ DEFAULT_TF_BACKUP_DIR = "/var/backups/clamav-threatfox"
 DEFAULT_TF_RECENT_DUMP = getattr(tf, "DEFAULT_RECENT_DUMP", "/opt/zonendpoint/threatfox/last-recent.csv")
 
 DEFAULT_CLAMAV_DB_DIR = "/var/lib/clamav"
-DEFAULT_CLAMD_HOST = "127.0.0.1"
-DEFAULT_CLAMD_PORT = 3310
-DEFAULT_CLAMD_LOG_FILE = "/var/log/clamav/clamav.log"
+DEFAULT_CLAMD_HOST = os.environ.get("CLAMD_HOST", "127.0.0.1")
+DEFAULT_CLAMD_PORT = int(os.environ.get("CLAMD_PORT", "3310"))
+DEFAULT_CLAMD_LOG_FILE = os.environ.get("CLAMD_LOG_FILE", "/var/log/clamav/clamav.log")
 
 MIN_RAM_BYTES = 3 * 1024 * 1024 * 1024  # 3 GB
 DEFAULT_RELOAD_TIMEOUT = 120.0
@@ -87,7 +87,11 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("zonendpoint-abusech-update")
-logger.addFilter(mb.SensitiveKeyFilter())
+_sensitive_filter = mb.SensitiveKeyFilter()
+logger.addFilter(_sensitive_filter)
+logging.getLogger().addFilter(_sensitive_filter)
+for _h in logging.getLogger().handlers:
+    _h.addFilter(_sensitive_filter)
 
 
 def mask_key(val: str, key: str = None) -> str:
@@ -164,38 +168,16 @@ def get_last_reload_timestamp(state_file: pathlib.Path) -> Optional[float]:
         return None
     try:
         data = json.loads(state_file.read_text(encoding="utf-8"))
-        ts = data.get("last_successful_reload_timestamp")
+        ts = data.get("last_reload_timestamp") or data.get("last_successful_reload_timestamp")
         return float(ts) if ts is not None else None
     except Exception as e:
         logger.warning("Could not read reload state file '%s': %s", state_file, e)
         return None
 
 
-def save_last_reload_state(state_file: pathlib.Path, timestamp: float, sig_after: int) -> None:
-    """Atomically records successful clamd reload timestamp in state file."""
-    data = {
-        "last_successful_reload_timestamp": timestamp,
-        "last_successful_reload_utc": datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc).isoformat(),
-        "signatures_after": sig_after,
-    }
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix=state_file.name + ".", dir=state_file.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        try:
-            os.chmod(temp_path, 0o644)
-        except OSError:
-            pass
-        os.replace(temp_path, state_file)
-    finally:
-        if os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
+def save_last_reload_state(state_file: pathlib.Path, timestamp: float, sig_after: Optional[int]) -> None:
+    """Atomically records successful clamd reload timestamp in state file (Task L-8)."""
+    mb.record_reload_state(str(state_file), caller="abusech_hourly", signatures=sig_after)
 
 
 def verify_hsbs_on_temp_db(
@@ -204,7 +186,7 @@ def verify_hsbs_on_temp_db(
     clamscan_bin: str = "clamscan",
 ) -> dict:
     """
-    Validates staged .hsb contents on an isolated temporary DB with base CVD/CLDs.
+    Validates staged .hsb contents on an isolated temporary DB with only new .hsb files (Task L-9).
     hsb_contents: {"malwarebazaar.hsb": content, "threatfox.hsb": content}
     """
     benign_candidates = ["/etc/hosts", "/usr/bin/python3", "/etc/passwd"]
@@ -214,31 +196,11 @@ def verify_hsbs_on_temp_db(
 
     with tempfile.TemporaryDirectory(prefix="zon-abusech-tempdb-") as temp_dir:
         temp_dir_p = pathlib.Path(temp_dir)
-        clamav_p = pathlib.Path(clamav_db_dir)
-        base_db_count = 0
-        if clamav_p.is_dir():
-            for db_file in clamav_p.iterdir():
-                if db_file.is_file() and any(
-                    db_file.name.startswith(pfx)
-                    for pfx in ("main.", "daily.", "bytecode.")
-                ):
-                    target_link = temp_dir_p / db_file.name
-                    try:
-                        os.symlink(str(db_file), str(target_link))
-                        base_db_count += 1
-                    except Exception:
-                        try:
-                            shutil.copyfile(str(db_file), str(target_link))
-                            base_db_count += 1
-                        except Exception as copy_err:
-                            logger.warning("Could not link/copy base DB %s: %s", db_file.name, copy_err)
-
         for fname, content in hsb_contents.items():
             (temp_dir_p / fname).write_text(content, encoding="utf-8")
 
         logger.info(
-            "Running pre-flight verification on temporary DB (base DBs: %d, .hsb files: %d) against %d benign targets...",
-            base_db_count,
+            "Running pre-flight verification on temporary DB (.hsb files: %d) against %d benign targets...",
             len(hsb_contents),
             len(benign_targets),
         )
@@ -247,7 +209,7 @@ def verify_hsbs_on_temp_db(
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         except FileNotFoundError:
             logger.warning("'%s' not found on PATH. Pre-flight clamscan verification skipped.", clamscan_bin)
-            return {"status": "SKIPPED", "known_viruses": None, "base_dbs": base_db_count}
+            return {"status": "SKIPPED", "known_viruses": None, "base_dbs": 0}
 
         if res.returncode != 0:
             logger.error("Temporary DB clamscan failed (exit %d):\nSTDOUT:\n%s\nSTDERR:\n%s", res.returncode, res.stdout, res.stderr)
@@ -274,7 +236,7 @@ def verify_hsbs_on_temp_db(
         return {
             "status": "PASS",
             "known_viruses": known_viruses,
-            "base_dbs": base_db_count,
+            "base_dbs": 0,
         }
 
 
@@ -374,6 +336,10 @@ def deploy_combined_hsbs(
             time.sleep(2.0)
             if log_p and log_p.is_file():
                 try:
+                    cur_size = log_p.stat().st_size
+                    if cur_size < log_pos_before:
+                        logger.warning("clamd log was rotated during reload (size %d < %d). Resetting offset to 0.", cur_size, log_pos_before)
+                        log_pos_before = 0
                     with open(log_p, "r", encoding="utf-8", errors="replace") as lf:
                         lf.seek(log_pos_before)
                         new_log = lf.read()
@@ -399,7 +365,7 @@ def deploy_combined_hsbs(
             logger.critical("[ALERT-LOKI] %s", msg)
             raise RuntimeError(msg)
 
-        # Verify signature delta
+        # Verify signature delta (Task L-5)
         expected_total_delta = sum(item["new_signatures_delta"] for item in deploy_items.values())
         if sig_before is not None and sig_after is not None:
             delta = sig_after - sig_before
@@ -409,6 +375,10 @@ def deploy_combined_hsbs(
                     f"got delta +{delta} ({sig_before} -> {sig_after})"
                 )
             logger.info("Signature count delta verified: %d -> %d (+%d)", sig_before, sig_after, delta)
+        elif sig_after is None:
+            logger.warning(
+                "Could not parse signature count after reload from log; ping is OK. Marking as unverified (skipping delta verification without rollback per Task L-5)."
+            )
 
         return {
             "reloaded": True,
@@ -440,6 +410,8 @@ def deploy_combined_hsbs(
         mb.trigger_clamd_zreload(host=clamd_host, port=clamd_port)
         time.sleep(2.0)
         mb.check_clamd_ping(host=clamd_host, port=clamd_port)
+        reload_state_p = pathlib.Path(DEFAULT_RELOAD_STATE_FILE)
+        mb.record_reload_state(str(reload_state_p), caller="abusech_emergency_rollback", forced=True)
         raise
 
 
@@ -560,8 +532,11 @@ def run_hourly_update(args) -> int:
         # 2. Step 1: MalwareBazaar recent update
         mb_db = mb.MalwareDatabase(args.mb_db)
         mb_count_before = mb_db.get_hash_count()
+        mb_base_url = getattr(args, "mb_base_url", None)
+        if not isinstance(mb_base_url, str):
+            mb_base_url = mb.DEFAULT_BASE_URL
         mb_client = mb.MalwareBazaarClient(
-            base_url=getattr(args, "mb_base_url", mb.DEFAULT_BASE_URL),
+            base_url=mb_base_url,
             key_file=args.key_file,
             rate_limiter=limiter,
             timeout=args.timeout,

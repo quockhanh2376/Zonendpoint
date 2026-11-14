@@ -13,7 +13,7 @@ StandardError=journal
 SyslogIdentifier=zonendpoint-yara-update
 TimeoutStartSec=600
 
-# Sandbox & Security Hardening (Task L-12)
+# Sandbox & Security Hardening (Task L-12 / V-62)
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
@@ -21,5 +21,5 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 ProtectSystem=strict
-ReadWritePaths=/opt/zonendpoint /var/lib/clamav /var/backups /run/lock
+ReadWritePaths=/opt/zonendpoint /var/lib/clamav /var/backups/clamav-yara /run/lock
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

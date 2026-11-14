@@ -287,32 +287,57 @@ class ThreatDatabase:
 
     def export_hsb(self, output):
         conn = self.connect()
-        mb_conn = None
         try:
-            # MalwareBazaar hashes are excluded to prevent duplicate clamd signatures.
+            # MalwareBazaar hashes are excluded to prevent duplicate clamd signatures (Task L-10).
             mb_db = os.getenv("MALWAREBAZAAR_DB_PATH", "/opt/zonendpoint/malwarebazaar/malwarebazaar.db")
-            existing = set()
+            has_mb = False
             if pathlib.Path(mb_db).exists():
-                mb_conn = sqlite3.connect(f"file:{pathlib.Path(mb_db).resolve().as_posix()}?immutable=1", uri=True)
-                existing = {r[0] for r in mb_conn.execute("SELECT sha256 FROM malware_hashes")}
-            lines = []
-            for sha, malware, size in conn.execute("SELECT sha256,malware,file_size FROM hashes ORDER BY sha256"):
-                if not HASH.fullmatch(sha) or sha in existing:
-                    continue
-                safe = re.sub(r"[^A-Za-z0-9_.-]", "_", malware or "Unknown").strip("._") or "Unknown"
-                name = f"ThreatFox.{safe}.UNOFFICIAL"
-                lines.append(f"{sha}:{size}:{name}\n" if size else f"{sha}:*:{name}:73\n")
-            pathlib.Path(output).write_text("".join(lines), encoding="utf-8")
-            return len(lines)
+                uri = f"file:{pathlib.Path(mb_db).resolve().as_posix()}?immutable=1"
+                try:
+                    conn.execute(f"ATTACH DATABASE '{uri}' AS mbdb")
+                    has_mb = True
+                except Exception:
+                    try:
+                        conn.execute("ATTACH DATABASE ? AS mbdb", (mb_db,))
+                        has_mb = True
+                    except Exception:
+                        has_mb = False
+
+            if has_mb:
+                query = (
+                    "SELECT sha256, malware, file_size FROM hashes "
+                    "WHERE NOT EXISTS (SELECT 1 FROM mbdb.malware_hashes mb WHERE mb.sha256 = hashes.sha256) "
+                    "ORDER BY sha256"
+                )
+            else:
+                query = "SELECT sha256, malware, file_size FROM hashes ORDER BY sha256"
+
+            count = 0
+            out_path = pathlib.Path(output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as out:
+                cursor = conn.execute(query)
+                for sha, malware, size in cursor:
+                    if not HASH.fullmatch(sha):
+                        continue
+                    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", malware or "Unknown").strip("._") or "Unknown"
+                    name = f"ThreatFox.{safe}.UNOFFICIAL"
+                    line = f"{sha}:{size}:{name}\n" if size else f"{sha}:*:{name}:73\n"
+                    out.write(line)
+                    count += 1
+            if has_mb:
+                try:
+                    conn.execute("DETACH DATABASE mbdb")
+                except Exception:
+                    pass
+            return count
         finally:
             conn.close()
-            if mb_conn:
-                mb_conn.close()
 
 
 def fetch_full(url, key, limiter, dump_path=None, timeout=120, temp_dir=None):
     limiter.check_and_record("threatfox")
-    actual = url.format(auth_key=key)
+    actual = mb.validate_https_url(url.format(auth_key=key))
     req = urllib.request.Request(actual, headers={"User-Agent": "Zonendpoint ThreatFox importer/1.0"})
 
     if dump_path is None:
@@ -367,7 +392,7 @@ def fetch_full(url, key, limiter, dump_path=None, timeout=120, temp_dir=None):
 
 def fetch_recent(url, key, limiter, dump_path=None, timeout=120, temp_dir=None):
     limiter.check_and_record("threatfox")
-    actual = url.format(auth_key=key)
+    actual = mb.validate_https_url(url.format(auth_key=key))
     req = urllib.request.Request(actual, headers={"User-Agent": "Zonendpoint ThreatFox importer/1.0"})
 
     if dump_path is None:
@@ -431,8 +456,9 @@ def fetch_recent(url, key, limiter, dump_path=None, timeout=120, temp_dir=None):
 
 def check_api(key, limiter, timeout=30):
     limiter.check_and_record("threatfox")
+    api_url = mb.validate_https_url("https://threatfox-api.abuse.ch/api/v1/")
     req = urllib.request.Request(
-        "https://threatfox-api.abuse.ch/api/v1/",
+        api_url,
         data=json.dumps({"query": "get_iocs", "days": 1}).encode(),
         headers={"Auth-Key": key, "Content-Type": "application/json"},
         method="POST",
@@ -469,6 +495,10 @@ def main():
     ap.add_argument("--clamd-host", default="127.0.0.1")
     ap.add_argument("--clamd-port", type=int, default=3310)
     ap.add_argument("--log-file", default="/var/log/clamav/clamav.log")
+    ap.add_argument("--lock-file", default=os.getenv("DEPLOY_LOCK_FILE", mb.DEFAULT_LOCK_FILE))
+    ap.add_argument("--reload-state-file", default=os.getenv("RELOAD_STATE_FILE", mb.DEFAULT_RELOAD_STATE_FILE))
+    ap.add_argument("--min-reload-interval", type=float, default=mb.DEFAULT_MIN_RELOAD_INTERVAL)
+    ap.add_argument("--force-reload", action="store_true", help="Bypass minimum reload interval check")
     args = ap.parse_args()
     key = ""
     try:
@@ -530,49 +560,62 @@ def main():
             count = ThreatDatabase(args.db).export_hsb(args.output)
             print(f"Exported {count} signatures")
         else:
-            db = ThreatDatabase(args.db)
-            # Reuse MalwareBazaar's guarded staged deploy via an adapter exposing its expected query.
-            class Adapter:
-                def _get_connection(self):
-                    c = db.connect()
+            lock = mb.DeployLock(args.lock_file)
+            if not lock.acquire():
+                print(f"Another clamd deploy/update process is currently running (lock '{args.lock_file}' held). Exiting.", file=sys.stderr)
+                return 3
+            try:
+                if not args.force_reload and not mb.check_reload_interval(args.reload_state_file, args.min_reload_interval):
+                    print(f"Skipping reload: minimum reload interval ({args.min_reload_interval}s) not reached.")
+                    return 0
+
+                db = ThreatDatabase(args.db)
+                # Reuse MalwareBazaar's guarded staged deploy via an adapter exposing its expected query.
+                class Adapter:
+                    def _get_connection(self):
+                        c = db.connect()
+                        mb_db = os.getenv("MALWAREBAZAAR_DB_PATH", "/opt/zonendpoint/malwarebazaar/malwarebazaar.db")
+                        if pathlib.Path(mb_db).exists():
+                            uri = f"file:{pathlib.Path(mb_db).resolve().as_posix()}?immutable=1"
+                            try:
+                                c.execute(f"ATTACH DATABASE '{uri}' AS mbdb")
+                            except Exception:
+                                c.execute("ATTACH DATABASE ? AS mbdb", (mb_db,))
+                            c.execute("CREATE TEMP VIEW malware_hashes AS SELECT sha256,file_size,malware AS signature FROM hashes WHERE NOT EXISTS (SELECT 1 FROM mbdb.malware_hashes mb WHERE mb.sha256=hashes.sha256)")
+                        else:
+                            c.execute("CREATE TEMP VIEW malware_hashes AS SELECT sha256,file_size,malware AS signature FROM hashes")
+                        return c
+
+                with db.connect() as conn:
+                    tf_hashes = conn.execute("SELECT count(*) FROM hashes").fetchone()[0]
                     mb_db = os.getenv("MALWAREBAZAAR_DB_PATH", "/opt/zonendpoint/malwarebazaar/malwarebazaar.db")
+                    dupes = 0
                     if pathlib.Path(mb_db).exists():
                         uri = f"file:{pathlib.Path(mb_db).resolve().as_posix()}?immutable=1"
                         try:
-                            c.execute(f"ATTACH DATABASE '{uri}' AS mbdb")
+                            conn.execute(f"ATTACH DATABASE '{uri}' AS mbdb")
                         except Exception:
-                            c.execute("ATTACH DATABASE ? AS mbdb", (mb_db,))
-                        c.execute("CREATE TEMP VIEW malware_hashes AS SELECT sha256,file_size,malware AS signature FROM hashes WHERE NOT EXISTS (SELECT 1 FROM mbdb.malware_hashes mb WHERE mb.sha256=hashes.sha256)")
-                    else:
-                        c.execute("CREATE TEMP VIEW malware_hashes AS SELECT sha256,file_size,malware AS signature FROM hashes")
-                    return c
+                            conn.execute("ATTACH DATABASE ? AS mbdb", (mb_db,))
+                        dupes = conn.execute("SELECT count(*) FROM hashes WHERE EXISTS (SELECT 1 FROM mbdb.malware_hashes mb WHERE mb.sha256=hashes.sha256)").fetchone()[0]
+                    net_unique = tf_hashes - dupes
+                    print(f"ThreatFox total hashes: {tf_hashes}, duplicates with MalwareBazaar excluded: {dupes}, net unique to deploy: {net_unique}")
 
-            with db.connect() as conn:
-                tf_hashes = conn.execute("SELECT count(*) FROM hashes").fetchone()[0]
-                mb_db = os.getenv("MALWAREBAZAAR_DB_PATH", "/opt/zonendpoint/malwarebazaar/malwarebazaar.db")
-                dupes = 0
-                if pathlib.Path(mb_db).exists():
-                    uri = f"file:{pathlib.Path(mb_db).resolve().as_posix()}?immutable=1"
-                    try:
-                        conn.execute(f"ATTACH DATABASE '{uri}' AS mbdb")
-                    except Exception:
-                        conn.execute("ATTACH DATABASE ? AS mbdb", (mb_db,))
-                    dupes = conn.execute("SELECT count(*) FROM hashes WHERE EXISTS (SELECT 1 FROM mbdb.malware_hashes mb WHERE mb.sha256=hashes.sha256)").fetchone()[0]
-                net_unique = tf_hashes - dupes
-                print(f"ThreatFox total hashes: {tf_hashes}, duplicates with MalwareBazaar excluded: {dupes}, net unique to deploy: {net_unique}")
-
-            result = mb.deploy_hsb(
-                Adapter(),
-                active_hsb_path=args.hsb_path,
-                backup_dir=args.backup_dir,
-                clamav_db_dir=args.clamav_db_dir,
-                clamd_host=args.clamd_host,
-                clamd_port=args.clamd_port,
-                log_file=args.log_file,
-                prefix="ThreatFox",
-                allow_wildcard=True,
-            )
-            print(f"Deploy result: {result}")
+                result = mb.deploy_hsb(
+                    Adapter(),
+                    active_hsb_path=args.hsb_path,
+                    backup_dir=args.backup_dir,
+                    clamav_db_dir=args.clamav_db_dir,
+                    clamd_host=args.clamd_host,
+                    clamd_port=args.clamd_port,
+                    log_file=args.log_file,
+                    prefix="ThreatFox",
+                    allow_wildcard=True,
+                )
+                if result:
+                    mb.record_reload_state(args.reload_state_file)
+                print(f"Deploy result: {result}")
+            finally:
+                lock.release()
     except Exception as exc:
         print(f"ERROR: {mask(exc, key)}", file=sys.stderr)
         return 1
