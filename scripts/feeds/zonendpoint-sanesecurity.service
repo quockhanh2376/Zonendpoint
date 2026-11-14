@@ -1,0 +1,25 @@
+[Unit]
+Description=Zonendpoint Sanesecurity Signature Feed Update
+Documentation=https://sanesecurity.com/
+After=network-online.target clamav-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /usr/local/bin/zonendpoint-sanesecurity.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zonendpoint-sanesecurity
+TimeoutStartSec=600
+
+# Sandbox & Security Hardening (Task L-12 / V-62 / V-68)
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/zonendpoint/sanesecurity /var/lib/clamav /var/backups/clamav-sanesecurity /run/lock
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

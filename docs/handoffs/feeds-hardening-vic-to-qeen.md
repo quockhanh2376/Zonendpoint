@@ -1,15 +1,15 @@
-# Handoff: Task V-58 & V-62 — Server Feeds Hardening (optimisse.md §5 & Sửa lỗi Q-43) — Vic to Qeen
+# Handoff: Task V-58, V-62 & V-68 — Server Feeds Hardening & Sanesecurity Integration — Vic to Qeen
 
 **Date**: 2026-11-14  
 **From**: Victor (Vic)  
 **To**: Qeen (Auditor & Lab Ops)  
-**Task**: V-58 (Script feed & service hardening theo `optimisse.md` §5) + V-62 (Sửa dứt điểm lỗi Q-43 & hoàn thiện phần còn lại của optimisse.md §5)  
-**Zon Assignment**: 2026-11-14 (Branch `vic/feeds-hardening`, cô lập repo/test, KHÔNG triển khai lab trong task này)  
-**Branch**: `vic/feeds-hardening`  
-**Base Commit**: `908535eec72d4c89a31b8376c7c40c6e3d345c67` (`origin/main`)  
-**Lab Environment Tested**: Host `udevlevel73` (`100.96.250.245`, Ubuntu 24.04, Python 3.14.4, ClamAV 1.5.4) trong thư mục tạm `/tmp/v62` (đã dọn dẹp sạch sẽ)  
-**Test Status**: **108/108 unit tests PASS 100%** (0 network calls thật, mock/fixture đầy đủ, 0 real clamd reload — đã chứng minh qua journalctl), `systemd-analyze verify` PASS (exit 0), `systemd-analyze security` đạt mức **7.1 MEDIUM**  
-**Deployment Policy**: CHỈ SỬA CODE VÀ TEST TRONG REPO. Toàn bộ triển khai lên lab cần Zon duyệt trước.  
+**Task**: V-58 (Script feed & service hardening theo `optimisse.md` §5) + V-62 (Sửa dứt điểm lỗi Q-43 & hoàn thiện optimisse.md §5) + V-68 (Bộ cập nhật Sanesecurity & tích hợp cơ chế bảo vệ clamd)  
+**Zon Assignment**: 2026-11-14 (Branch `vic/feed-sanesecurity-impl`, cô lập repo/test, KHÔNG triển khai lab trong task này — triển khai gộp chung sau khi nghiệm thu)  
+**Branch**: `vic/feed-sanesecurity-impl`  
+**Base Commit**: `cb65ed7` (tip của `vic/feeds-hardening`), cherry-pick 2 commit V-67 (`19bc16b`, `f96fe58`)  
+**Lab Environment Tested**: Host `udevlevel73` (`100.96.250.245`, Ubuntu 24.04, Python 3.14.4, ClamAV 1.5.4) trong thư mục tạm `/tmp/v68` (đã dọn dẹp sạch sẽ)  
+**Test Status**: **122/122 unit tests PASS 100%** (14/14 tests Sanesecurity mới + 108 tests feed hiện hữu; 0 network calls thật, mock/fixture đầy đủ, 0 real clamd reload — đã chứng minh qua journalctl), `systemd-analyze verify` PASS (exit 0), `systemd-analyze security` đạt mức **7.1 MEDIUM**  
+**Deployment Policy**: CHỈ SỬA CODE VÀ TEST TRONG REPO. Toàn bộ triển khai lên lab cần Zon duyệt trước và gộp chung trong một đợt bảo trì duy nhất.  
 
 ---
 
@@ -88,24 +88,48 @@
 
 ---
 
+### Đợt 3 (Task V-68) — Bộ Cập nhật Sanesecurity & Tích hợp Bảo vệ clamd
+
+#### 1. Rà soát & Loại bỏ Placeholder (Task V-68 Mục 1)
+- Kiểm tra nội dung thực tế trên lab của 3 file `winnow_*` (`winnow_malware.hdb`, `winnow_extended_malware.hdb`, `winnow_bad_cw.hdb`): Cả 3 file đều chỉ có dung lượng 65-66 bytes và nội dung chỉ chứa hash chuỗi test EICAR từ feed OITC cũ đã ngừng cập nhật.
+- Kết luận: Loại bỏ hoàn toàn 3 file `winnow_*` khỏi danh mục allowlist. Bộ Sanesecurity chính thức của Zonendpoint gồm **9 tập tin**: `rogue.hdb`, `malwarehash.hsb`, `hackingteam.hsb`, `foxhole_generic.cdb`, `foxhole_filename.cdb`, `bofhland_malware_attach.hdb`, `porcupine.hsb`, `sigwhitelist.ign2`, `sanesecurity.ftm`.
+
+#### 2. Kiến trúc Script Cập nhật `zonendpoint-sanesecurity.py` (Mục 2)
+- **Thư viện chuẩn Python 100%**: Thiết kế độc lập, không phụ thuộc package bên ngoài, cấu trúc tương đồng `zonendpoint-yara-update.py`.
+- **Mirror HTTPS & Tải có điều kiện**: Mặc định `https://mirror.seichter.de/sanesecurity/`, chỉ chấp nhận giao thức HTTPS; lưu trữ `ETag` và `last_modified` trong `state.json` để nhận diện `304 Not Modified`; giới hạn kích thước đệm tối đa 20 MiB/file; kiểm tra khoảng cách tối thiểu giữa 2 lần kiểm tra mirror (2.0 giờ).
+- **Xác minh chữ ký GPG độc lập**: Keyring riêng tại `/opt/zonendpoint/sanesecurity/gnupg`; khóa công khai bắt buộc khớp fingerprint chính thức: `890D413C9E6EFD809D0EE892D6F4C53697CD8EE6`. File không vượt qua kiểm tra chữ ký sẽ bị hủy bỏ ngay trong thư mục staging, giữ nguyên bản DB cũ trên hệ thống.
+- **Staging & Preflight (L-9)**: Tải và giải nén trong staging directory tạm thời; chạy `clamscan -d <staged_files>` kiểm tra cú pháp trên file rỗng trước khi triển khai.
+- **Triển khai nguyên tử & Sao lưu (L-11)**: Sử dụng `safe_atomic_write` (mkstemp, fchmod 0644 clamav:clamav, fsync, os.replace) vào `/var/lib/clamav`; tự động sao lưu bản cũ vào `/var/backups/clamav-sanesecurity/<name>.bak`.
+- **Khóa chung (L-6) & Khoảng cách nạp lại (L-8)**: Chiếm khóa độc quyền `/run/lock/zonendpoint-clamd-deploy.lock`; tích hợp kiểm tra `/opt/zonendpoint/reload-state.json` với `--min-reload-interval` (6.0 giờ). Nếu chưa đủ thời gian, việc reload được hoãn lại an toàn (`reload_deferred=True`).
+- **Kiểm tra sức khỏe sau reload & Emergency Rollback (L-4/L-5)**: Giám sát chuỗi `Database correctly reloaded` trong log clamd (hỗ trợ log rotation) và xác nhận `PING` -> `PONG`; nếu thất bại, tự động kích hoạt `emergency_rollback` (khôi phục từ backup, tạo HOLD file `/opt/zonendpoint/HOLD-sanesecurity`, và reload clamd khẩn cấp).
+- **Ghi nhận trạng thái**: Xuất file `/opt/zonendpoint/sanesecurity/last-run.json` không chứa dữ liệu nhạy cảm.
+
+#### 3. Service Sandbox, Timer & Script Rollback (Mục 3)
+- `zonendpoint-sanesecurity.service`: Sandbox L-12 hoàn chỉnh (`ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`, `NoNewPrivileges=true`, `ReadWritePaths=/var/lib/clamav /var/backups/clamav-sanesecurity /opt/zonendpoint/sanesecurity /run/lock`).
+- `zonendpoint-sanesecurity.timer`: Chạy định kỳ 2 giờ một lần (`OnCalendar=*-*-* 00/2:15:00`), `RandomizedDelaySec=900` (15 phút), `Persistent=true`.
+- `zonendpoint-sanesecurity-rollback.sh`: Tạo HOLD file `/opt/zonendpoint/HOLD-sanesecurity` ngay dòng đầu tiên, chiếm khóa `/run/lock/zonendpoint-clamd-deploy.lock`, khôi phục các file `.bak` hoặc hỗ trợ cờ `--purge` để gỡ bỏ toàn bộ feed.
+
+---
+
 ## 2. Kết quả Kiểm thử Toàn diện trên Lab Server
 
-Tất cả các bài kiểm thử được chạy trực tiếp trên máy chủ lab trong thư mục tạm `/tmp/v62` (đã dọn dẹp sạch sẽ):
+Tất cả các bài kiểm thử được chạy trực tiếp trên máy chủ lab trong thư mục tạm `/tmp/v68` (đã dọn dẹp sạch sẽ):
 
 ```text
-Ran 108 tests in 31.467s
+Ran 122 tests in 34.120s
 OK (failures=0, errors=0)
 ```
 
 Chi tiết các suite:
-1. `test_zonendpoint_malwarebazaar.py`: **37/37 tests PASS** (L-2, L-5, L-8, L-9, L-10, L-14, safety guard, streaming, log banner, key mask).
-2. `test_zonendpoint_threatfox.py`: **16/16 tests PASS** (import, SQLite NOT EXISTS dedup, dump validation, rate limiting, deploy-hsb lock).
-3. `test_zonendpoint_abusech_update.py`: **18/18 tests PASS** (L-1 429/401/403, L-8 min-reload-interval, L-3 hold file, L-6 lock non-zero).
-4. `test_zonendpoint_yara_hold.py`: **12/12 tests PASS** (L-3 hold file early creation, L-4 tag timing, L-8 defer reload, L-13 URL/size/ZipSlip/tag regex, safety guard).
-5. `test_zonendpoint_deploy_lock.py`: **7/7 tests PASS** (L-6 shared flock across Python & Shell rollback scripts, manual deploy-hsb lock, fail-safe).
-6. `test_zonendpoint_secure_temp.py`: **4/4 tests PASS** (L-11 mkstemp, fchmod 0644, fsync, atomic replace).
-7. `test_abusech_rate_limit.py`: **8/8 tests PASS** (shared ledger, sliding window, reservation token cancellation).
-8. `test_abusech_timer_simulation.py`: **6/6 tests PASS** (OnUnitInactiveSec timer simulation, fairness preservation).
+1. `test_zonendpoint_sanesecurity.py`: **14/14 tests PASS** (safety guard, hold file, lock code 3, reject non-https, 304 not modified, GPG fingerprint mismatch abort, GPG failure preserve old, max size 20MB, preflight fail abort, reload interval deferred, emergency rollback + hold, rollback script hold & restore, rollback --purge, min check interval 2h).
+2. `test_zonendpoint_malwarebazaar.py`: **37/37 tests PASS** (L-2, L-5, L-8, L-9, L-10, L-14, safety guard, streaming, log banner, key mask).
+3. `test_zonendpoint_threatfox.py`: **16/16 tests PASS** (import, SQLite NOT EXISTS dedup, dump validation, rate limiting, deploy-hsb lock).
+4. `test_zonendpoint_abusech_update.py`: **18/18 tests PASS** (L-1 429/401/403, L-8 min-reload-interval, L-3 hold file, L-6 lock non-zero).
+5. `test_zonendpoint_yara_hold.py`: **12/12 tests PASS** (L-3 hold file early creation, L-4 tag timing, L-8 defer reload, L-13 URL/size/ZipSlip/tag regex, safety guard).
+6. `test_zonendpoint_deploy_lock.py`: **7/7 tests PASS** (L-6 shared flock across Python & Shell rollback scripts, manual deploy-hsb lock, fail-safe).
+7. `test_zonendpoint_secure_temp.py`: **4/4 tests PASS** (L-11 mkstemp, fchmod 0644, fsync, atomic replace).
+8. `test_abusech_rate_limit.py`: **8/8 tests PASS** (shared ledger, sliding window, reservation token cancellation).
+9. `test_abusech_timer_simulation.py`: **6/6 tests PASS** (OnUnitInactiveSec timer simulation, fairness preservation).
 
 ### Đánh giá An ninh & Cú pháp Systemd
 - `systemd-analyze verify /tmp/v62/scripts/feeds/*.service /tmp/v62/scripts/feeds/*.timer`: **PASS (exit code 0)**.
@@ -132,10 +156,12 @@ Khi anh Zon phê duyệt triển khai, quy trình thực hiện tuần tự như
 # 1.1 Dừng timer (chỉ stop, TUYỆT ĐỐI KHÔNG disable)
 sudo systemctl stop zonendpoint-abusech-update.timer
 sudo systemctl stop zonendpoint-yara-update.timer
+sudo systemctl stop zonendpoint-sanesecurity.timer 2>/dev/null || true
 
 # 1.2 Chờ cho các service hoàn tất lượt chạy (nếu đang chạy)
 sudo systemctl is-active zonendpoint-abusech-update.service
 sudo systemctl is-active zonendpoint-yara-update.service
+sudo systemctl is-active zonendpoint-sanesecurity.service 2>/dev/null || true
 ```
 
 ### Bước 2: Tạo thư mục Backup có gắn ngày và lưu mã băm SHA256
@@ -161,6 +187,7 @@ sudo cp scripts/feeds/zonendpoint-abusech-update.py /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-malwarebazaar.py /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-threatfox.py /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-yara-update.py /usr/local/bin/
+sudo cp scripts/feeds/zonendpoint-sanesecurity.py /usr/local/bin/
 sudo cp scripts/feeds/abusech_rate_limit.py /usr/local/bin/
 sudo cp scripts/feeds/filter_yara_clamav.py /opt/zonendpoint/yara/
 sudo cp scripts/server/zonendpoint-sigcount.py /usr/local/bin/
@@ -168,18 +195,23 @@ sudo cp scripts/server/zonendpoint-sigcount.py /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-malwarebazaar-rollback.sh /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-threatfox-rollback.sh /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-yara-rollback.sh /usr/local/bin/
+sudo cp scripts/feeds/zonendpoint-sanesecurity-rollback.sh /usr/local/bin/
 
 sudo chmod 0755 /usr/local/bin/zonendpoint-*.py /usr/local/bin/zonendpoint-*.sh /opt/zonendpoint/yara/filter_yara_clamav.py
 
 # 3.2 Tạo các thư mục backup phân quyền theo L-12
-sudo mkdir -p /var/backups/clamav-malwarebazaar /var/backups/clamav-threatfox /var/backups/clamav-yara
+sudo mkdir -p /var/backups/clamav-malwarebazaar /var/backups/clamav-threatfox /var/backups/clamav-yara /var/backups/clamav-sanesecurity
 sudo chmod 0750 /var/backups/clamav-*
+sudo mkdir -p /opt/zonendpoint/sanesecurity/gnupg
+sudo chmod 0700 /opt/zonendpoint/sanesecurity/gnupg
 
 # 3.3 Cài đặt systemd units đã sandbox
 sudo cp scripts/feeds/zonendpoint-abusech-update.service /etc/systemd/system/
 sudo cp scripts/feeds/zonendpoint-abusech-update.timer /etc/systemd/system/
 sudo cp scripts/feeds/zonendpoint-yara-update.service /etc/systemd/system/
 sudo cp scripts/feeds/zonendpoint-yara-update.timer /etc/systemd/system/
+sudo cp scripts/feeds/zonendpoint-sanesecurity.service /etc/systemd/system/
+sudo cp scripts/feeds/zonendpoint-sanesecurity.timer /etc/systemd/system/
 sudo cp scripts/server/zonendpoint-sigcount.service /etc/systemd/system/
 
 sudo chmod 0644 /etc/systemd/system/zonendpoint-*.service /etc/systemd/system/zonendpoint-*.timer
@@ -194,8 +226,12 @@ sudo systemctl daemon-reload
 systemd-analyze verify /etc/systemd/system/zonendpoint-*.service /etc/systemd/system/zonendpoint-*.timer
 systemd-analyze security --offline=true /etc/systemd/system/zonendpoint-abusech-update.service
 systemd-analyze security --offline=true /etc/systemd/system/zonendpoint-yara-update.service
+systemd-analyze security --offline=true /etc/systemd/system/zonendpoint-sanesecurity.service
 
-# 4.3 Chạy thử nghiệm sigcount một lần
+# 4.3 Chạy thử nghiệm Sanesecurity lần đầu bằng lệnh thủ công
+sudo /usr/local/bin/zonendpoint-sanesecurity.py --force-check --force-reload
+
+# 4.4 Chạy thử nghiệm sigcount một lần
 sudo systemctl restart zonendpoint-sigcount.service
 cat /var/lib/zonendpoint/status/signatures.json
 ```
@@ -204,6 +240,7 @@ cat /var/lib/zonendpoint/status/signatures.json
 ```bash
 sudo systemctl start zonendpoint-abusech-update.timer
 sudo systemctl start zonendpoint-yara-update.timer
+sudo systemctl enable --now zonendpoint-sanesecurity.timer
 
 # Kiểm tra trạng thái timer hoạt động
 systemctl list-timers zonendpoint-*
@@ -219,6 +256,7 @@ Nếu có bất kỳ sự cố nào xảy ra trong quá trình triển khai ho�
    ```bash
    sudo systemctl stop zonendpoint-abusech-update.timer
    sudo systemctl stop zonendpoint-yara-update.timer
+   sudo systemctl stop zonendpoint-sanesecurity.timer
    ```
 
 2. **Khôi phục nguyên trạng từ thư mục backup có ngày** (TUYỆT ĐỐI KHÔNG DÙNG `git checkout` TRÊN LAB):
@@ -252,6 +290,6 @@ Nếu có bất kỳ sự cố nào xảy ra trong quá trình triển khai ho�
 4. **Dọn dẹp lock hoặc hold file tồn dư (nếu cần gỡ chặn)**:
    ```bash
    sudo rm -f /run/lock/zonendpoint-clamd-deploy.lock
-   sudo rm -f /opt/zonendpoint/HOLD-abusech /opt/zonendpoint/HOLD-yara
+   sudo rm -f /opt/zonendpoint/HOLD-abusech /opt/zonendpoint/HOLD-yara /opt/zonendpoint/HOLD-sanesecurity
    ```
 

@@ -354,4 +354,30 @@
   - Quét tập mẫu 445 file (300 file nhị phân `/usr/bin` & `/usr/lib`, 65 file docs repo, 40 file html, 1 file pdf, 1 file docx, 1 file xlsx, 7 file js, json...): A = 32.04 s / 1,197,111 KiB vs B = 32.71 s / 1,204,781 KiB ($\Delta$ thời gian: +0.67 s, +2.08%; $\Delta$ RAM: +7,671 KiB / +7.49 MiB, +0.64%).
   - Cảnh báo nhầm: **0 FOUND** trên toàn bộ 445 tập tin vô hại qua 3 lần quét của cả 2 bộ (100% clean).
 - Đề xuất triển khai: Kiến nghị dùng script Python nội bộ (`zonendpoint-sanesecurity.py`) thay vì Fangfrisch để tích hợp chuẩn xác với khóa triển khai chung `deploy.lock` và kiểm tra khoảng cách nạp lại tối thiểu 6.0 giờ (`reload-state.json`) theo chuẩn V-62; backup tại `/var/backups/clamav-sanesecurity/`; ước tính RAM clamd chỉ tăng ~7.5 MiB, thời gian reload tăng <0.5 s.
-- Chi tiết báo cáo tại `docs/ops/sanesecurity-eval.md`.
+- Báo cáo kết quả chi tiết tại `docs/ops/sanesecurity-eval.md`.
+
+## 2026-11-14 - V-68 (Bộ cập nhật Sanesecurity & Tích hợp bảo vệ clamd)
+- Thực hiện theo chỉ đạo của anh Zon ngày 2026-11-14 (Branch `vic/feed-sanesecurity-impl`, cô lập trong repo, không triển khai lab):
+  - Rà soát 3 file `winnow_*`: Xác minh trực tiếp trên lab nội dung 3 file `winnow_malware.hdb`, `winnow_extended_malware.hdb`, `winnow_bad_cw.hdb` (65-66 bytes) chỉ chứa hash chuỗi thử nghiệm EICAR từ feed OITC cũ đã ngưng cập nhật. Đã loại bỏ hoàn toàn khỏi allowlist và cập nhật giải trình vào `docs/ops/sanesecurity-eval.md`. Danh sách DB chính thức gồm 9 tập tin: `rogue.hdb`, `malwarehash.hsb`, `hackingteam.hsb`, `foxhole_generic.cdb`, `foxhole_filename.cdb`, `bofhland_malware_attach.hdb`, `porcupine.hsb`, `sigwhitelist.ign2`, `sanesecurity.ftm`.
+  - Bộ cập nhật Python `scripts/feeds/zonendpoint-sanesecurity.py` (chỉ dùng thư viện chuẩn Python):
+    * Allowlist 9 file cố định, mirror HTTPS mặc định `https://mirror.seichter.de/sanesecurity/`.
+    * Tải có điều kiện qua HTTP `ETag` và `If-Modified-Since` (lưu tại `state.json`), giới hạn 20 MiB/file, không retry khi lỗi. Tôn trọng khoảng cách kiểm tra tối thiểu 2.0 giờ giữa các lần truy vấn mirror.
+    * Xác minh chữ ký GPG rời (`.sig`) với isolated keyring `/opt/zonendpoint/sanesecurity/gnupg`, kiểm tra chặt chẽ fingerprint chính thức `890D413C9E6EFD809D0EE892D6F4C53697CD8EE6`. Bỏ qua file lỗi GPG, giữ nguyên bản cũ.
+    * Staging tạm thời, preflight `clamscan -d` trên file rỗng (Task L-9) trước khi triển khai.
+    * Cài đặt nguyên tử (`safe_atomic_write` với mkstemp, fchmod 0644 clamav:clamav, fsync, os.replace) vào `/var/lib/clamav`, tự động backup sang `/var/backups/clamav-sanesecurity/<name>.bak`.
+    * Dùng khóa chung `/run/lock/zonendpoint-clamd-deploy.lock` (exit 3 khi bị chiếm). Tích hợp `reload-state.json` và khoảng cách nạp lại tối thiểu 6.0 giờ (Task L-8).
+    * Giám sát sau nạp lại: chờ chuỗi `Database correctly reloaded` trong log (xử lý log rotation) và PING -> PONG. Khi thất bại, tự động kích hoạt `emergency_rollback` khôi phục backup và tạo HOLD file `/opt/zonendpoint/HOLD-sanesecurity`.
+    * Ghi `last-run.json` không chứa dữ liệu nhạy cảm.
+  - Cấu hình Systemd & Rollback:
+    * `zonendpoint-sanesecurity.service`: Sandbox L-12 hoàn chỉnh (`ProtectSystem=strict`, `ReadWritePaths` tối thiểu).
+    * `zonendpoint-sanesecurity.timer`: Chạy định kỳ 2 giờ/lần, RandomizedDelaySec=900 (15 phút), Persistent=true.
+    * `zonendpoint-sanesecurity-rollback.sh`: Tạo HOLD ngay dòng đầu tiên, lấy khóa chung, khôi phục backup (hoặc `--purge` gỡ bỏ hoàn toàn feed).
+- Quality Gates & Testing trên Lab (`udevlevel73`, Ubuntu 24.04, Python 3.14.4 trong `/tmp/v68`):
+  - `test_zonendpoint_sanesecurity.py`: **14/14 unit tests PASS 100%**.
+  - Toàn bộ suite `scripts/feeds/`: **122/122 unit tests PASS 100%** (0 cuộc gọi mạng thật, mock hoàn chỉnh).
+  - `systemd-analyze verify`: **PASS (exit code 0)** trên bản copy của service và timer.
+  - `systemd-analyze security --offline=true`: Đạt mức **7.1 MEDIUM** :-| (tương đương chuẩn L-12 các service khác).
+  - Bằng chứng không reload clamd thật: `clamd` MainPID giữ nguyên `132505`; `journalctl -u clamav-daemon.service --since '2026-11-14 22:28:10'` trả về `-- No entries --` (zero real reloads).
+- Tài liệu & Bàn giao:
+  - Tạo tài liệu vận hành chi tiết `docs/ops/sanesecurity.md`.
+  - Cập nhật handoff `docs/handoffs/feeds-hardening-vic-to-qeen.md` với mục V-68 và quy trình triển khai gộp chung V-58/V-62/V-68 (dừng timer, backup+sha256, cài đặt, daemon-reload, verify, kích hoạt timer).

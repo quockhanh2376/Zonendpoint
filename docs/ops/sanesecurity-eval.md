@@ -133,11 +133,30 @@ Do đó, bộ cơ sở dữ liệu Sanesecurity tối ưu được đề xuất 
 5. `foxhole_filename.cdb`: Nhận dạng tên file mã độc phổ biến ẩn trong file nén.
 6. `bofhland_malware_attach.hdb`: Hash MD5 các mẫu mã độc đính kèm phổ biến.
 7. `porcupine.hsb`: Hash SHA-256 các script độc hại định dạng VBS và JSE (vốn là vector tấn công rất phổ biến trên Windows).
-8. `winnow_malware.hdb`: Hash MD5 virus và trojan cập nhật từ OITC.
-9. `winnow_extended_malware.hdb`: Hash MD5 mở rộng từ OITC.
-10. `winnow_bad_cw.hdb`: Hash MD5 mã độc từ các mạng lưới botnet.
+8. `winnow_malware.hdb`: Hash MD5 virus và trojan cập nhật từ OITC (Xem mục 2.3: placeholder EICAR -> LOẠI).
+9. `winnow_extended_malware.hdb`: Hash MD5 mở rộng từ OITC (Xem mục 2.3: placeholder EICAR -> LOẠI).
+10. `winnow_bad_cw.hdb`: Hash MD5 mã độc từ các mạng lưới botnet (Xem mục 2.3: placeholder EICAR -> LOẠI).
 11. `sigwhitelist.ign2`: Danh sách trắng chính thức của Sanesecurity nhằm tức thời bỏ qua các chữ ký bị lỗi FP.
 12. `sanesecurity.ftm`: Định nghĩa kiểu tập tin cho ClamAV.
+
+### 2.3. Kiểm tra thực tế nội dung 3 tập tin winnow_* và quyết định loại bỏ (Task V-68)
+Khi kiểm tra nội dung thực tế tải về từ mirror chính thức:
+- `winnow_malware.hdb` (65 bytes): `44d88612fea8a8f36de82e1278abb02f:68:winnow.malware.test.eicar.com`
+- `winnow_extended_malware.hdb` (65 bytes): `44d88612fea8a8f36de82e1278abb02f:68:winnow.malware.test.eicar.com`
+- `winnow_bad_cw.hdb` (66 bytes): `44d88612fea8a8f36de82e1278abb02f:68:winnow.malware.test.eicar.com`
+
+Cả 3 tập tin chỉ chứa duy nhất một dòng chữ ký thử nghiệm EICAR (`44d88612fea8a8f36de82e1278abb02f` là mã băm MD5 tiêu chuẩn của chuỗi EICAR test string). Đây là các tập tin placeholder/thông báo của OITC cũ đã ngừng hoạt động và không cung cấp thêm bất kỳ chữ ký mã độc thực tế nào.
+
+Do đó, theo chỉ đạo của Zon ngày 2026-11-14 (Task V-68), **cả 3 tập tin `winnow_*` chính thức bị LOẠI khỏi danh sách triển khai**. Danh sách cơ sở dữ liệu Sanesecurity triển khai chính thức được chốt gồm **9 tập tin**:
+1. `rogue.hdb`
+2. `malwarehash.hsb`
+3. `hackingteam.hsb`
+4. `foxhole_generic.cdb`
+5. `foxhole_filename.cdb`
+6. `bofhland_malware_attach.hdb`
+7. `porcupine.hsb`
+8. `sigwhitelist.ign2`
+9. `sanesecurity.ftm`
 
 ---
 

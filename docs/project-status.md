@@ -453,3 +453,35 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - `systemd-analyze security --offline=true`: **7.1 MEDIUM** cho cả 2 service unit.
   - Đã dọn dẹp sạch sẽ thư mục `/tmp/v62` trên lab.
 - Bàn giao: Cập nhật `docs/handoffs/feeds-hardening-vic-to-qeen.md` với quy trình triển khai chuẩn (dừng timer, backup + sha256 vào thư mục có ngày, copy bản mới, daemon-reload, analyze, start timer; rollback = khôi phục đúng thư mục có ngày, tuyệt đối không dùng git checkout trên lab). Đẩy nhánh `vic/feeds-hardening`. Không merge main.
+
+## V-67 — FEED-LAB Đánh giá Sanesecurity (2026-11-14)
+- Đánh giá A/B cơ sở dữ liệu Sanesecurity theo chuẩn Q-46 trong môi trường cô lập `/tmp/v67` trên lab.
+- Giấy phép cá nhân/phi thương mại miễn phí hợp lệ; mirror HTTPS Ralph Seichter; xác minh chữ ký GPG độc lập (fingerprint `890D413C9E6EFD809D0EE892D6F4C53697CD8EE6`) PASS 12/12 file.
+- Đo kiểm hiệu năng: Bộ A (hiện tại) vs Bộ B (A + 12 DB Sanesecurity): RAM clamd chỉ tăng +7.5 MiB (+0.64%), thời gian nạp chênh lệch -0.37s, thời gian quét 445 file tăng +0.67s (+2.08%).
+- Đánh giá cảnh báo nhầm: **0 FOUND** trên 445 file mẫu vô hại đa dạng (nhị phân, repo docs, pdf, docx, xlsx, html, js).
+- Tài liệu chi tiết: `docs/ops/sanesecurity-eval.md`. Đẩy nhánh `vic/feed-sanesecurity`. Không merge.
+
+## V-68 — Sanesecurity Feed Updater & Rollback Implementation (2026-11-14)
+- Triển khai theo chỉ đạo của anh Zon ngày 2026-11-14 (Branch `vic/feed-sanesecurity-impl`, base `vic/feeds-hardening` cb65ed7 + cherry-pick V-67):
+  - Rà soát 3 file `winnow_*`: Xác minh nội dung 65 byte chứa hash EICAR test từ feed cũ đã ngưng cập nhật -> loại bỏ khỏi allowlist. Danh sách database chính thức gồm 9 file: `rogue.hdb`, `malwarehash.hsb`, `hackingteam.hsb`, `foxhole_generic.cdb`, `foxhole_filename.cdb`, `bofhland_malware_attach.hdb`, `porcupine.hsb`, `sigwhitelist.ign2`, `sanesecurity.ftm`.
+  - Bộ cập nhật Python `scripts/feeds/zonendpoint-sanesecurity.py` (chỉ dùng standard library Python):
+    * Allowlist 9 file, mirror HTTPS, conditional download (`ETag` / `If-Modified-Since` trong `state.json`), max 20 MiB/file, khoảng cách kiểm tra tối thiểu 2.0h.
+    * Xác minh chữ ký GPG rời keyring riêng `/opt/zonendpoint/sanesecurity/gnupg`, fingerprint `890D413C9E6EFD809D0EE892D6F4C53697CD8EE6`.
+    * Staging tạm thời, preflight `clamscan -d` trên file rỗng (Task L-9) trước khi triển khai.
+    * Triển khai nguyên tử (`safe_atomic_write` fchmod 0644 clamav:clamav), backup sang `/var/backups/clamav-sanesecurity/<name>.bak`.
+    * Chiếm khóa chung `/run/lock/zonendpoint-clamd-deploy.lock`, chia sẻ `reload-state.json` và khoảng cách reload tối thiểu 6.0h (Task L-8).
+    * Giám sát sau reload: chờ `Database correctly reloaded` trong log (hỗ trợ log rotation) và PING -> PONG. Emergency rollback tự động khôi phục backup và tạo HOLD file `/opt/zonendpoint/HOLD-sanesecurity` khi lỗi.
+    * Ghi `last-run.json`.
+  - Cấu hình Systemd & Rollback:
+    * `zonendpoint-sanesecurity.service`: Sandbox L-12 hoàn chỉnh (`ProtectSystem=strict`, `ReadWritePaths` tối thiểu).
+    * `zonendpoint-sanesecurity.timer`: Chạy định kỳ 2 giờ/lần, RandomizedDelaySec=900 (15 phút), Persistent=true.
+    * `zonendpoint-sanesecurity-rollback.sh`: Đặt HOLD ngay đầu script, chiếm khóa deploy, khôi phục backup (hoặc `--purge` gỡ bỏ hoàn toàn feed).
+- Quality Gates & Testing trên Lab (`udevlevel73`, Ubuntu 24.04, Python 3.14.4 trong `/tmp/v68`):
+  - `test_zonendpoint_sanesecurity.py`: **14/14 unit tests PASS 100%**.
+  - Toàn bộ suite `scripts/feeds/`: **122/122 unit tests PASS 100%** (0 real network calls, mock hoàn chỉnh).
+  - `systemd-analyze verify`: **PASS (exit code 0)** trên bản copy của service và timer.
+  - `systemd-analyze security --offline=true`: Đạt mức **7.1 MEDIUM** :-| (chuẩn L-12).
+  - Bằng chứng không reload clamd thật: `clamd` MainPID giữ nguyên `132505`; `journalctl -u clamav-daemon.service` không có sự kiện reload nào (`-- No entries --`).
+- Tài liệu & Bàn giao:
+  - Tạo hướng dẫn vận hành `docs/ops/sanesecurity.md`.
+  - Cập nhật handoff `docs/handoffs/feeds-hardening-vic-to-qeen.md` với mục V-68 và quy trình triển khai lab gộp chung V-58/V-62/V-68.
