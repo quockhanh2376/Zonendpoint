@@ -688,8 +688,33 @@ pub async fn scan_file_with_engine_timeout(
             (None, None)
         };
         if let Some(cached) = cached_verdict {
-            let (verify_hash, verify_size, verify_snapshot) = hash_file(&path).await?;
-            if verify_hash != hash || verify_size != size || verify_snapshot != file_snapshot {
+            let current_meta = match tokio::fs::metadata(&path).await {
+                Ok(m) => m,
+                Err(error) => {
+                    return Ok::<ScanResult, String>(ScanResult::new(
+                        &path,
+                        ScanStatus::Unknown,
+                        Some(hex::encode(hash)),
+                        Some(format!(
+                            "read file metadata while validating cached verdict: {error}"
+                        )),
+                        size,
+                    ));
+                }
+            };
+            let current_snapshot = match snapshot(&current_meta) {
+                Ok(s) => s,
+                Err(error) => {
+                    return Ok::<ScanResult, String>(ScanResult::new(
+                        &path,
+                        ScanStatus::Unknown,
+                        Some(hex::encode(hash)),
+                        Some(format!("validate cached metadata: {error}")),
+                        size,
+                    ));
+                }
+            };
+            if current_snapshot.size != size || current_snapshot != file_snapshot {
                 return Ok::<ScanResult, String>(ScanResult::new(
                     &path,
                     ScanStatus::Unknown,
@@ -1318,9 +1343,16 @@ mod tests {
 
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        match ENV_MUTEX.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
     #[test]
     fn priority_env_overrides_saved_and_default() {
-        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard = lock_env();
         let temp_dir =
             std::env::temp_dir().join(format!("zonendpoint-cfg-prio-{}", uuid::Uuid::new_v4()));
         let cfg_file = temp_dir.join("config.json");
@@ -1389,7 +1421,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_read_failure_treated_as_miss_and_scans_normally() {
-        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard = lock_env();
         let temp_dir = test_temp_dir("cache-read-err");
         let file_path = temp_dir.join("clean.txt");
         std::fs::write(&file_path, b"hello safe clean content").unwrap();
@@ -1444,7 +1476,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_or_missing_server_status_completely_disables_cache() {
-        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard = lock_env();
         let temp_dir = test_temp_dir("no-status-cache");
         let file_path = temp_dir.join("clean.txt");
         std::fs::write(&file_path, b"safe file without status").unwrap();
@@ -1484,7 +1516,7 @@ mod tests {
 
     #[tokio::test]
     async fn valid_server_status_caches_and_sig_generation_change_bypasses_cache() {
-        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let _env_guard = lock_env();
         let temp_dir = test_temp_dir("status-cache-bypass");
         let file_path = temp_dir.join("clean.txt");
         std::fs::write(&file_path, b"safe file with status").unwrap();
@@ -1566,6 +1598,84 @@ mod tests {
             ScanStatus::Error,
             "signature count change must bypass old cache and attempt live scan"
         );
+
+        unsafe {
+            std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
+        }
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn cache_hit_detects_metadata_mtime_or_size_change() {
+        let _env_guard = lock_env();
+        let temp_dir = test_temp_dir("p1-metadata-recheck");
+        let file_path = temp_dir.join("clean.txt");
+        std::fs::write(&file_path, b"safe original content").unwrap();
+        let cache_path = temp_dir.join("cache.db");
+        let status_file = temp_dir.join("server-status.json");
+
+        std::fs::write(
+            &status_file,
+            r#"{"signatures": 8616464, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_file);
+        }
+
+        // 1. Initial scan -> Clean & cached
+        let (addr, daemon) = mock_clamd(vec![b"stream: OK\0".to_vec()], false).await;
+        let semaphore = Arc::new(ScanLimiter::new(1));
+        let (_tx, cancel) = watch::channel(false);
+
+        let result1 = scan_file_with_engine_override(
+            file_path.clone(),
+            cache_path.clone(),
+            addr,
+            Some("ClamAV 1.5.4/28182".into()),
+            cancel.clone(),
+            semaphore.clone(),
+        )
+        .await;
+        assert_eq!(result1.status, ScanStatus::Clean);
+        let _ = daemon.await.unwrap();
+
+        // 2. Normal cache hit (metadata matches, single hash with lightweight metadata verification)
+        let offline_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let offline_addr = offline_listener.local_addr().unwrap();
+        drop(offline_listener);
+
+        let result2 = scan_file_with_engine_override(
+            file_path.clone(),
+            cache_path.clone(),
+            offline_addr,
+            Some("ClamAV 1.5.4/28182".into()),
+            cancel.clone(),
+            semaphore.clone(),
+        )
+        .await;
+        assert_eq!(result2.status, ScanStatus::Clean);
+        assert_eq!(
+            result2.reason.as_deref(),
+            Some("verified content cache hit")
+        );
+
+        // 3. Verify snapshot equality logic: different size or mtime triggers inequality
+        let meta = std::fs::metadata(&file_path).unwrap();
+        let snap1 = snapshot(&meta).unwrap();
+        let snap_diff_size = FileSnapshot {
+            size: snap1.size + 1,
+            modified: snap1.modified,
+        };
+        assert_ne!(snap1, snap_diff_size, "size mismatch must invalidate snapshot");
+
+        let snap_diff_mtime = FileSnapshot {
+            size: snap1.size,
+            modified: snap1.modified - Duration::from_secs(10),
+        };
+        assert_ne!(snap1, snap_diff_mtime, "mtime mismatch must invalidate snapshot");
 
         unsafe {
             std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
