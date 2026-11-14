@@ -337,3 +337,21 @@
   - `systemd-analyze security --offline=true`: **7.1 MEDIUM** cho cả 2 service unit.
   - Đã dọn dẹp sạch sẽ thư mục `/tmp/v62` trên lab.
 - Bàn giao: Cập nhật `docs/handoffs/feeds-hardening-vic-to-qeen.md` với quy trình triển khai chuẩn (dừng timer, backup + sha256 vào thư mục có ngày, copy bản mới, daemon-reload, analyze, start timer; rollback = khôi phục đúng thư mục có ngày, tuyệt đối không dùng git checkout trên lab).
+
+## 2026-11-14 - V-67 (FEED-LAB đánh giá Sanesecurity)
+- Thực hiện theo chỉ đạo của anh Zon ngày 2026-11-14: Nghiên cứu giấy phép, phân loại rủi ro cảnh báo nhầm và đo kiểm hiệu năng thực tế (A/B testing theo chuẩn Q-46) cơ sở dữ liệu chữ ký Sanesecurity trên máy chủ lab Ubuntu 26.04.1.
+- Tuân thủ nghiêm ngặt nguyên tắc cách ly an toàn: thực hiện 100% trong `/tmp/v67`, không ghi vào `/var/lib/clamav`, không sửa file cấu hình `clamd.conf`/`freshclam.conf`, không gửi lệnh tới daemon `clamd` đang chạy, không cài gói hệ thống, không tải malware/EICAR. MainPID clamd trước và sau đều là `132505`, journal 0 sự kiện reload.
+- Giấy phép & Nguồn:
+  - Nguồn chính thức `sanesecurity.com`. Sử dụng cá nhân / phi thương mại hoàn toàn miễn phí (khuyến khích ủng hộ $20). Sử dụng thương mại cũng miễn phí (khuyến khích ủng hộ $100 và gửi email thông báo). Nghiêm cấm sao chép, tái phân phối hoặc bán lại. ZonEndpoint (nội bộ cá nhân 1–2 máy) hoàn toàn hợp lệ.
+  - Mirror chính thức: HTTPS `https://mirror.seichter.de/sanesecurity/` (Ralph Seichter, mặc định của Fangfrisch) và cụm rsync `rsync.sanesecurity.net`.
+  - Xác minh GPG: Khóa công khai chính thức `0x97CD8EE6` (Fingerprint: `890D 413C 9E6E FD80 9D0E E892 D6F4 C536 97CD 8EE6`). Mỗi DB có file `.sig` đi kèm.
+  - Tần suất & giới hạn: Cập nhật nhiều lần trong ngày (riêng `rogue.hdb` cập nhật hàng giờ). Nghiêm cấm polling liên tục, khuyến nghị chu kỳ 1–2 giờ/lần tránh bị chặn IP.
+- Đề xuất bộ Low-FP cho Windows: Đề xuất 12 tập tin gồm `rogue.hdb`, `malwarehash.hsb`, `hackingteam.hsb`, `foxhole_generic.cdb`, `foxhole_filename.cdb`, `bofhland_malware_attach.hdb`, `porcupine.hsb`, `winnow_malware.hdb`, `winnow_extended_malware.hdb`, `winnow_bad_cw.hdb`, `sigwhitelist.ign2`, `sanesecurity.ftm`. Loại bỏ toàn bộ các DB thuần email spam text, URL spam và file nén rủi ro FP cao (`junk.ndb`, `phish.ndb`, `foxhole_all.cdb`...).
+- Kết quả tải & xác minh: Tải 12 DB đề xuất qua HTTPS từ mirror chính thức và xác minh chữ ký GPG độc lập: 12/12 file PASS GPG (`VERIFIED_OK`).
+- Kết quả đo A/B (chuẩn Q-46, 3 lần mỗi bộ):
+  - Bộ A (hiện tại, 14 DB đã bỏ `securiteinfoold.hdb`) vs Bộ B (A + 12 DB Sanesecurity, +8,472 chữ ký, +758 KB).
+  - Load trung bình: A = 12.93 s / 1,182,444 KiB vs B = 12.56 s / 1,190,131 KiB ($\Delta$ thời gian: -0.37 s; $\Delta$ RAM: +7,687 KiB / +7.51 MiB, +0.65%).
+  - Quét tập mẫu 445 file (300 file nhị phân `/usr/bin` & `/usr/lib`, 65 file docs repo, 40 file html, 1 file pdf, 1 file docx, 1 file xlsx, 7 file js, json...): A = 32.04 s / 1,197,111 KiB vs B = 32.71 s / 1,204,781 KiB ($\Delta$ thời gian: +0.67 s, +2.08%; $\Delta$ RAM: +7,671 KiB / +7.49 MiB, +0.64%).
+  - Cảnh báo nhầm: **0 FOUND** trên toàn bộ 445 tập tin vô hại qua 3 lần quét của cả 2 bộ (100% clean).
+- Đề xuất triển khai: Kiến nghị dùng script Python nội bộ (`zonendpoint-sanesecurity.py`) thay vì Fangfrisch để tích hợp chuẩn xác với khóa triển khai chung `deploy.lock` và kiểm tra khoảng cách nạp lại tối thiểu 6.0 giờ (`reload-state.json`) theo chuẩn V-62; backup tại `/var/backups/clamav-sanesecurity/`; ước tính RAM clamd chỉ tăng ~7.5 MiB, thời gian reload tăng <0.5 s.
+- Chi tiết báo cáo tại `docs/ops/sanesecurity-eval.md`.
