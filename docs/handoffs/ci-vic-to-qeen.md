@@ -39,8 +39,12 @@ All GitHub Actions used across the workflows are pinned to immutable commit SHAs
 
 ## 3. GitHub Actions CI Runs & Verification Evidence
 
-- Run 1 ID: `43602489284`
-- Run 1 URL: https://github.com/quockhanh2376/Zonendpoint/actions/runs/43602489284
+- **Run 1 ID**: `43602489284`
+  - URL: https://github.com/quockhanh2376/Zonendpoint/actions/runs/43602489284
+  - Note: Initial run; `npm ci` and `npm run build` were skipped due to default pipeline cancellation after `cargo test`.
+- **Run 2 ID**: `43603293961`
+  - URL: https://github.com/quockhanh2376/Zonendpoint/actions/runs/43603293961
+  - Note: Updated with `if: always()` on frontend steps; confirmed `npm ci` and `npm run build` execute to completion and PASS cleanly.
 
 ### Job Results Summary
 
