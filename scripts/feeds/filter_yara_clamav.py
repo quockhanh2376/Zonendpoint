@@ -266,7 +266,7 @@ def write_yara_file(rules: List[Dict[str, Any]], output_path: str):
 def run_clamscan_check(yar_path: str) -> Tuple[int, int, List[str]]:
     """Run clamscan and return (loaded_count, failed_count, error_lines)."""
     cmd = ['clamscan', '-d', yar_path, '/etc/hosts']
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     
     loaded = 0
     failed = 0

@@ -244,7 +244,7 @@ def verify_hsbs_on_temp_db(
         )
         try:
             cmd = [clamscan_bin, "-d", str(temp_dir_p)] + benign_targets
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         except FileNotFoundError:
             logger.warning("'%s' not found on PATH. Pre-flight clamscan verification skipped.", clamscan_bin)
             return {"status": "SKIPPED", "known_viruses": None, "base_dbs": base_db_count}
@@ -706,12 +706,13 @@ def run_hourly_update(args) -> int:
         deploy_items = {}
         if mb_new_sigs > 0:
             logger.info("Generating staging .hsb for MalwareBazaar (%d signatures)...", mb_db_total)
-            mb_content, _ = mb.generate_hsb_content(mb_db, prefix="MalwareBazaar", allow_wildcard=True)
+            mb_content, mb_real_count = mb.generate_hsb_content(mb_db, prefix="MalwareBazaar", allow_wildcard=True)
+            mb_real_delta = max(0, mb_real_count - mb_active_count)
             deploy_items["malwarebazaar"] = {
                 "active_path": mb_active_p,
                 "backup_dir": pathlib.Path(args.mb_backup_dir),
                 "staged_content": mb_content,
-                "new_signatures_delta": mb_new_sigs,
+                "new_signatures_delta": mb_real_delta,
             }
 
         if tf_new_sigs > 0:
@@ -725,11 +726,13 @@ def run_hourly_update(args) -> int:
                 if os.path.exists(tf_tmp_path):
                     os.unlink(tf_tmp_path)
 
+            tf_real_count = sum(1 for line in tf_content.splitlines() if line.strip())
+            tf_real_delta = max(0, tf_real_count - tf_active_count)
             deploy_items["threatfox"] = {
                 "active_path": tf_active_p,
                 "backup_dir": pathlib.Path(args.tf_backup_dir),
                 "staged_content": tf_content,
-                "new_signatures_delta": tf_new_sigs,
+                "new_signatures_delta": tf_real_delta,
             }
 
         # Safe deployment with single clamd reload

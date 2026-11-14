@@ -143,7 +143,7 @@ def extract_core_rules(zip_path: str, extract_dir: str) -> str:
 
 
 def run_clamscan(args: list) -> subprocess.CompletedProcess:
-    return subprocess.run(["clamscan"] + args, capture_output=True, text=True)
+    return subprocess.run(["clamscan"] + args, capture_output=True, text=True, timeout=120)
 
 
 def check_clamd_ping(host: str = "127.0.0.1", port: int = 3310, timeout: float = 5.0) -> bool:
