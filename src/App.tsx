@@ -490,69 +490,79 @@ function App() {
               alt="ZonEndpoint"
             />
             <div className="server-status-col">
-              <button
-                type="button"
-                className={`server-status status-${serverStatus}`}
-                data-status={serverStatus}
-                title={serverTooltip}
-                aria-label={serverTooltip}
-                onClick={() => {
-                  if (serverStatus === "connected") {
-                    setShowServerManual((prev) => !prev);
-                  }
-                  void checkServer(true);
-                }}
-                disabled={serverStatus === "checking"}
-              >
-              {serverStatus === "connected" && (
-                <svg className="server-status-icon status-icon-connected" viewBox="0 0 20 20" aria-hidden="true">
-                  <circle cx="10" cy="10" r="10" fill="var(--clean)" />
-                  <path
-                    d="m5.5 10 3 3 6-6"
-                    fill="none"
-                    stroke="var(--clean-button-text)"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              )}
-              {serverStatus === "disconnected" && (
-                <svg className="server-status-icon status-icon-disconnected" viewBox="0 0 20 20" aria-hidden="true">
-                  <circle cx="10" cy="10" r="10" fill="var(--infected)" />
-                  <path
-                    d="m6.5 6.5 7 7m0-7-7 7"
-                    fill="none"
-                    stroke="var(--clean-button-text)"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              )}
-              {serverStatus === "checking" && (
-                <svg className="server-status-icon server-status-spinner" viewBox="0 0 20 20" aria-hidden="true">
-                  <circle
-                    className="spinner-track"
-                    cx="10"
-                    cy="10"
-                    r="7.5"
-                    fill="none"
-                    stroke="var(--button-border)"
-                    strokeWidth="2"
-                    opacity="0.5"
-                  />
-                  <path
-                    className="spinner-head"
-                    d="M10 2.5 A 7.5 7.5 0 0 1 17.5 10"
-                    fill="none"
-                    stroke="var(--muted)"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              )}
-              </button>
+              <div className="server-status-row">
+                <button
+                  type="button"
+                  className={`server-status status-${serverStatus}`}
+                  data-status={serverStatus}
+                  title={serverTooltip}
+                  aria-label={serverTooltip}
+                  onClick={() => {
+                    if (serverStatus === "connected") {
+                      setShowServerManual((prev) => !prev);
+                    }
+                    void checkServer(true);
+                  }}
+                  disabled={serverStatus === "checking"}
+                >
+                {serverStatus === "connected" && (
+                  <svg className="server-status-icon status-icon-connected" viewBox="0 0 20 20" aria-hidden="true">
+                    <circle cx="10" cy="10" r="10" fill="var(--clean)" />
+                    <path
+                      d="m5.5 10 3 3 6-6"
+                      fill="none"
+                      stroke="var(--clean-button-text)"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+                {serverStatus === "disconnected" && (
+                  <svg className="server-status-icon status-icon-disconnected" viewBox="0 0 20 20" aria-hidden="true">
+                    <circle cx="10" cy="10" r="10" fill="var(--infected)" />
+                    <path
+                      d="m6.5 6.5 7 7m0-7-7 7"
+                      fill="none"
+                      stroke="var(--clean-button-text)"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+                {serverStatus === "checking" && (
+                  <svg className="server-status-icon server-status-spinner" viewBox="0 0 20 20" aria-hidden="true">
+                    <circle
+                      className="spinner-track"
+                      cx="10"
+                      cy="10"
+                      r="7.5"
+                      fill="none"
+                      stroke="var(--button-border)"
+                      strokeWidth="2"
+                      opacity="0.5"
+                    />
+                    <path
+                      className="spinner-head"
+                      d="M10 2.5 A 7.5 7.5 0 0 1 17.5 10"
+                      fill="none"
+                      stroke="var(--muted)"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                )}
+                </button>
+                {serverConfig?.env_override && (
+                  <span
+                    className="server-env-badge"
+                    title={`Active: ${serverConfig.effective_addr}`}
+                  >
+                    Env active
+                  </span>
+                )}
+              </div>
               {appVersion && <span className="app-version">{appVersion}</span>}
             </div>
           </div>
@@ -646,11 +656,6 @@ function App() {
                     >
                       {serverSaving ? "Saving…" : "Save"}
                     </button>
-                    {serverConfig?.env_override && (
-                      <span className="server-env-badge" title={`Active: ${serverConfig.effective_addr}`}>
-                        Env active
-                      </span>
-                    )}
                   </form>
                   {serverConfigMsg && (
                     <p className={`server-msg ${serverConfigMsg.error ? "server-msg-error" : "server-msg-ok"}`}>
