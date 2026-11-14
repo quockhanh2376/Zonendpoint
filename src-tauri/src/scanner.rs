@@ -26,7 +26,7 @@ const MAX_RESPONSE_BYTES: usize = 1024;
 const RECOVERY_SUCCESS_THRESHOLD: usize = 50;
 pub const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
 pub const CACHE_TTL_SECONDS: i64 = 12 * 60 * 60;
-pub const POLICY_VERSION: &str = "zonendpoint-mvp-1";
+pub const POLICY_VERSION: &str = "zonendpoint-0.3.1-v1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub const PREFLIGHT_ERROR_MSG: &str = "Cannot connect to ZonEndpoint server";
 const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -668,16 +668,24 @@ pub async fn scan_file_with_engine_timeout(
             .duration_since(UNIX_EPOCH)
             .map_err(|error| error.to_string())?
             .as_secs() as i64;
-        let (cached_verdict, cache_read_error) = match crate::cache::get(
-            &cache_path,
-            &hash,
-            &engine_version,
-            POLICY_VERSION,
-            now,
-            CACHE_TTL_SECONDS,
-        ) {
-            Ok(cached) => (cached, None),
-            Err(error) => (None, Some(format!("cache read error: {error}"))),
+        let server_status = crate::server_status::load_server_status();
+        let sig_generation = server_status.signature_generation();
+
+        let (cached_verdict, cache_read_error) = if let Some(sig_gen) = &sig_generation {
+            match crate::cache::get(
+                &cache_path,
+                &hash,
+                &engine_version,
+                sig_gen,
+                POLICY_VERSION,
+                now,
+                CACHE_TTL_SECONDS,
+            ) {
+                Ok(cached) => (cached, None),
+                Err(error) => (None, Some(format!("cache read error: {error}"))),
+            }
+        } else {
+            (None, None)
         };
         if let Some(cached) = cached_verdict {
             let (verify_hash, verify_size, verify_snapshot) = hash_file(&path).await?;
@@ -761,22 +769,25 @@ pub async fn scan_file_with_engine_timeout(
                 });
             }
             result.engine_version = Some(engine_version.clone());
-            if let Err(error) = crate::cache::put(
-                &cache_path,
-                &hash,
-                &engine_version,
-                POLICY_VERSION,
-                outcome.status,
-                outcome.reason.as_deref(),
-                now,
-            ) {
-                result.reason = Some(format!(
-                    "{}; cache write failed: {error}",
-                    result
-                        .reason
-                        .take()
-                        .unwrap_or_else(|| "scan completed".into())
-                ));
+            if let Some(sig_gen) = &sig_generation {
+                if let Err(error) = crate::cache::put(
+                    &cache_path,
+                    &hash,
+                    &engine_version,
+                    sig_gen,
+                    POLICY_VERSION,
+                    outcome.status,
+                    outcome.reason.as_deref(),
+                    now,
+                ) {
+                    result.reason = Some(format!(
+                        "{}; cache write failed: {error}",
+                        result
+                            .reason
+                            .take()
+                            .unwrap_or_else(|| "scan completed".into())
+                    ));
+                }
             }
             return Ok(result);
         }
@@ -1134,6 +1145,7 @@ mod tests {
             &cache_path,
             &old_hash,
             "ClamAV test/signature-1",
+            "sig:8616464:2026-11-14T11:41:49+07:00",
             POLICY_VERSION,
             ScanStatus::Clean,
             None,
@@ -1179,6 +1191,7 @@ mod tests {
             &cache_path,
             &hash,
             "ClamAV 1.5.4/28175/Sat Nov 7 2026",
+            "sig:8616464:2026-11-14T11:41:49+07:00",
             POLICY_VERSION,
             ScanStatus::Clean,
             None,
@@ -1265,6 +1278,7 @@ mod tests {
             &cache_path,
             &hash,
             "ClamAV 1.5.4/28175/Sat Nov 7 2026",
+            "sig:8616464:2026-11-14T11:41:49+07:00",
             POLICY_VERSION,
             ScanStatus::Clean,
             None,
@@ -1302,8 +1316,11 @@ mod tests {
         assert!(validate_clamd_addr("not-an-ip:3310").is_err());
     }
 
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn priority_env_overrides_saved_and_default() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
         let temp_dir =
             std::env::temp_dir().join(format!("zonendpoint-cfg-prio-{}", uuid::Uuid::new_v4()));
         let cfg_file = temp_dir.join("config.json");
@@ -1372,9 +1389,20 @@ mod tests {
 
     #[tokio::test]
     async fn cache_read_failure_treated_as_miss_and_scans_normally() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
         let temp_dir = test_temp_dir("cache-read-err");
         let file_path = temp_dir.join("clean.txt");
         std::fs::write(&file_path, b"hello safe clean content").unwrap();
+
+        let status_file = temp_dir.join("server-status.json");
+        std::fs::write(
+            &status_file,
+            r#"{"signatures": 8616464, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_file);
+        }
 
         // Make parent of cache_path a regular file so SQLite/FS cannot open or create it
         let blocked_parent = temp_dir.join("blocked_file");
@@ -1395,6 +1423,10 @@ mod tests {
         )
         .await;
 
+        unsafe {
+            std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
+        }
+
         // Must still produce a Clean verdict from clamd without failing as ERROR
         assert_eq!(result.status, ScanStatus::Clean);
         assert!(
@@ -1406,6 +1438,138 @@ mod tests {
             "expected cache read error noted in reason, got: {:?}",
             result.reason
         );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn invalid_or_missing_server_status_completely_disables_cache() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let temp_dir = test_temp_dir("no-status-cache");
+        let file_path = temp_dir.join("clean.txt");
+        std::fs::write(&file_path, b"safe file without status").unwrap();
+        let cache_path = temp_dir.join("cache.db");
+
+        // Point to a non-existent status file
+        let invalid_status_file = temp_dir.join("non_existent_status.json");
+        unsafe {
+            std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &invalid_status_file);
+        }
+
+        let (addr, _daemon) = mock_clamd(vec![b"stream: OK\0".to_vec()], false).await;
+        let semaphore = Arc::new(ScanLimiter::new(1));
+        let (_tx, cancel) = watch::channel(false);
+
+        let result = scan_file_with_engine_override(
+            file_path,
+            cache_path.clone(),
+            addr,
+            Some("ClamAV 1.5.4/28182".into()),
+            cancel,
+            semaphore,
+        )
+        .await;
+
+        unsafe {
+            std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
+        }
+
+        assert_eq!(result.status, ScanStatus::Clean);
+        // Because status is invalid, cache must NOT have been written
+        let stats = crate::cache::stats(&cache_path).unwrap();
+        assert_eq!(stats.entries, 0, "no valid status means no cache written");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn valid_server_status_caches_and_sig_generation_change_bypasses_cache() {
+        let _env_guard = ENV_MUTEX.lock().unwrap();
+        let temp_dir = test_temp_dir("status-cache-bypass");
+        let file_path = temp_dir.join("clean.txt");
+        std::fs::write(&file_path, b"safe file with status").unwrap();
+        let cache_path = temp_dir.join("cache.db");
+        let status_file = temp_dir.join("server-status.json");
+
+        // Write initial status with 8616464 signatures
+        std::fs::write(
+            &status_file,
+            r#"{"signatures": 8616464, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_file);
+        }
+
+        let (addr, daemon) = mock_clamd(vec![b"stream: OK\0".to_vec()], false).await;
+        let semaphore = Arc::new(ScanLimiter::new(1));
+        let (_tx, cancel) = watch::channel(false);
+
+        let result1 = scan_file_with_engine_override(
+            file_path.clone(),
+            cache_path.clone(),
+            addr,
+            Some("ClamAV 1.5.4/28182".into()),
+            cancel.clone(),
+            semaphore.clone(),
+        )
+        .await;
+
+        assert_eq!(result1.status, ScanStatus::Clean);
+        let _ = daemon.await.unwrap();
+
+        // 1 entry cached under generation sig:8616464:...
+        let stats = crate::cache::stats(&cache_path).unwrap();
+        assert_eq!(stats.entries, 1);
+
+        // Second scan with same status -> verified cache hit without connecting to clamd
+        let offline_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let offline_addr = offline_listener.local_addr().unwrap();
+        drop(offline_listener);
+
+        let result2 = scan_file_with_engine_override(
+            file_path.clone(),
+            cache_path.clone(),
+            offline_addr,
+            Some("ClamAV 1.5.4/28182".into()),
+            cancel.clone(),
+            semaphore.clone(),
+        )
+        .await;
+        assert_eq!(result2.status, ScanStatus::Clean);
+        assert_eq!(
+            result2.reason.as_deref(),
+            Some("verified content cache hit")
+        );
+
+        // Update server-status.json to new signature count 8616497
+        std::fs::write(
+            &status_file,
+            r#"{"signatures": 8616497, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
+        )
+        .unwrap();
+
+        // Third scan with updated signatures -> cache miss! Must try live connection
+        // (which fails because offline_addr is offline)
+        let result3 = scan_file_with_engine_override(
+            file_path.clone(),
+            cache_path.clone(),
+            offline_addr,
+            Some("ClamAV 1.5.4/28182".into()),
+            cancel,
+            semaphore,
+        )
+        .await;
+        assert_eq!(
+            result3.status,
+            ScanStatus::Error,
+            "signature count change must bypass old cache and attempt live scan"
+        );
+
+        unsafe {
+            std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
+        }
 
         let _ = std::fs::remove_dir_all(temp_dir);
     }

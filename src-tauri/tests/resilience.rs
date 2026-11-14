@@ -355,6 +355,16 @@ async fn test_engine_signature_change_invalidates_cache_reuse() {
     let (root, target, cache_db) = create_temp_test_dir("identity-change");
     std::fs::write(&target, b"identity test content").unwrap();
 
+    let status_file = root.join("server-status.json");
+    std::fs::write(
+        &status_file,
+        r#"{"signatures": 8616464, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
+    )
+    .unwrap();
+    unsafe {
+        std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_file);
+    }
+
     // 1. Scan 1 under version 28175 -> CLEAN
     let (addr1, handle1) = spawn_mock_clamd(
         "ClamAV 1.5.4/28175/Sat Nov  7 08:34:12 2026\0",
@@ -417,6 +427,10 @@ async fn test_engine_signature_change_invalidates_cache_reuse() {
         ScanStatus::Error,
         "Offline engine must produce ERROR, never cached CLEAN"
     );
+
+    unsafe {
+        std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
+    }
 
     let _ = std::fs::remove_dir_all(root);
 }

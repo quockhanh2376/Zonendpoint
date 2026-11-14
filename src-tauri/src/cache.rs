@@ -108,27 +108,25 @@ fn open(path: &Path) -> Result<Connection> {
 fn migrate(db: &mut Connection) -> Result<()> {
     let tx = db.transaction()?;
     let version: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 2 {
-        bail!("cache schema version {version} is newer than supported version 2");
+    if version > 3 {
+        bail!("cache schema version {version} is newer than supported version 3");
     }
-    if version == 0 {
-        // Old metadata-only rows have no trustworthy engine identity or content key.
+    if version < 3 {
+        // Schema v3 binds cache entries to signature generation
         tx.execute_batch(
             "DROP TABLE IF EXISTS scan_cache;
              CREATE TABLE scan_cache (
                sha256 BLOB NOT NULL CHECK(length(sha256) = 32),
                engine_version TEXT NOT NULL,
+               sig_generation TEXT NOT NULL,
                policy_version TEXT NOT NULL,
                status TEXT NOT NULL CHECK(status IN ('CLEAN', 'INFECTED')),
                threat_name TEXT,
                scanned_at INTEGER NOT NULL,
-               PRIMARY KEY(sha256, engine_version, policy_version)
+               PRIMARY KEY(sha256, engine_version, sig_generation, policy_version)
              );",
         )?;
-        tx.pragma_update(None, "user_version", 2)?;
-    } else if version == 1 {
-        tx.execute_batch("ALTER TABLE scan_cache ADD COLUMN threat_name TEXT;")?;
-        tx.pragma_update(None, "user_version", 2)?;
+        tx.pragma_update(None, "user_version", 3)?;
     }
     tx.commit()?;
     Ok(())
@@ -163,6 +161,7 @@ pub fn get(
     path: &Path,
     sha256: &[u8; 32],
     engine_version: &str,
+    sig_generation: &str,
     policy_version: &str,
     now: i64,
     ttl_seconds: i64,
@@ -172,8 +171,15 @@ pub fn get(
     let row: Option<(String, Option<String>)> = db
         .query_row(
             "SELECT status, threat_name FROM scan_cache
-             WHERE sha256=?1 AND engine_version=?2 AND policy_version=?3 AND scanned_at BETWEEN ?4 AND ?5",
-            params![sha256.as_slice(), engine_version, policy_version, cutoff, now],
+             WHERE sha256=?1 AND engine_version=?2 AND sig_generation=?3 AND policy_version=?4 AND scanned_at BETWEEN ?5 AND ?6",
+            params![
+                sha256.as_slice(),
+                engine_version,
+                sig_generation,
+                policy_version,
+                cutoff,
+                now
+            ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
@@ -209,6 +215,7 @@ pub fn put(
     path: &Path,
     sha256: &[u8; 32],
     engine_version: &str,
+    sig_generation: &str,
     policy_version: &str,
     status: ScanStatus,
     threat_name: Option<&str>,
@@ -226,13 +233,14 @@ pub fn put(
     };
 
     db.execute(
-        "INSERT INTO scan_cache(sha256, engine_version, policy_version, status, threat_name, scanned_at)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(sha256, engine_version, policy_version)
+        "INSERT INTO scan_cache(sha256, engine_version, sig_generation, policy_version, status, threat_name, scanned_at)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(sha256, engine_version, sig_generation, policy_version)
          DO UPDATE SET status=excluded.status, threat_name=excluded.threat_name, scanned_at=excluded.scanned_at",
         params![
             sha256.as_slice(),
             engine_version,
+            sig_generation,
             policy_version,
             status.cache_value()?,
             clean_threat_name,
@@ -266,6 +274,7 @@ mod tests {
     };
 
     static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
+    const TEST_SIG_GEN: &str = "sig:8616464:2026-11-14T11:41:49+07:00";
 
     fn test_path(label: &str) -> PathBuf {
         let count = TEST_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -288,6 +297,7 @@ mod tests {
             &path,
             &hash1,
             "clamd-1/sig-10",
+            TEST_SIG_GEN,
             "policy-1",
             ScanStatus::Clean,
             None,
@@ -295,41 +305,97 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            get(&path, &hash1, "clamd-1/sig-10", "policy-1", 110, 20)
-                .unwrap()
-                .unwrap()
-                .status,
+            get(
+                &path,
+                &hash1,
+                "clamd-1/sig-10",
+                TEST_SIG_GEN,
+                "policy-1",
+                110,
+                20
+            )
+            .unwrap()
+            .unwrap()
+            .status,
             ScanStatus::Clean
         );
         assert!(
-            get(&path, &hash2, "clamd-1/sig-10", "policy-1", 110, 20)
-                .unwrap()
-                .is_none()
+            get(
+                &path,
+                &hash2,
+                "clamd-1/sig-10",
+                TEST_SIG_GEN,
+                "policy-1",
+                110,
+                20
+            )
+            .unwrap()
+            .is_none()
         );
         assert!(
-            get(&path, &hash1, "clamd-2/sig-10", "policy-1", 110, 20)
-                .unwrap()
-                .is_none()
+            get(
+                &path,
+                &hash1,
+                "clamd-2/sig-10",
+                TEST_SIG_GEN,
+                "policy-1",
+                110,
+                20
+            )
+            .unwrap()
+            .is_none()
         );
         assert!(
-            get(&path, &hash1, "clamd-1/sig-10", "policy-2", 110, 20)
-                .unwrap()
-                .is_none()
+            get(
+                &path,
+                &hash1,
+                "clamd-1/sig-10",
+                TEST_SIG_GEN,
+                "policy-2",
+                110,
+                20
+            )
+            .unwrap()
+            .is_none()
         );
         assert!(
-            get(&path, &hash1, "clamd-1/sig-10", "policy-1", 121, 20)
-                .unwrap()
-                .is_none()
+            get(
+                &path,
+                &hash1,
+                "clamd-1/sig-10",
+                "sig:9999999:2026-11-14T11:41:49+07:00",
+                "policy-1",
+                110,
+                20
+            )
+            .unwrap()
+            .is_none()
         );
         assert!(
-            get(&path, &hash1, "clamd-1/sig-10", "policy-1", 90, 20)
-                .unwrap()
-                .is_none()
+            get(
+                &path,
+                &hash1,
+                "clamd-1/sig-10",
+                TEST_SIG_GEN,
+                "policy-1",
+                121,
+                20
+            )
+            .unwrap()
+            .is_none()
         );
         assert!(
-            get(&path, &hash1, "clamd-1/sig-10", "policy-1", 90, 20)
-                .unwrap()
-                .is_none()
+            get(
+                &path,
+                &hash1,
+                "clamd-1/sig-10",
+                TEST_SIG_GEN,
+                "policy-1",
+                90,
+                20
+            )
+            .unwrap()
+            .is_none()
         );
         let _ = std::fs::remove_file(path);
     }
@@ -345,7 +411,7 @@ mod tests {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         let _ = std::fs::remove_file(path);
     }
 
@@ -371,7 +437,7 @@ mod tests {
         let db = open(&path).unwrap();
         assert!(
             db.execute(
-                "INSERT INTO scan_cache VALUES(?1, 'engine', 'policy', 'CLEAN', NULL, 1)",
+                "INSERT INTO scan_cache VALUES(?1, 'engine', 'sig', 'policy', 'CLEAN', NULL, 1)",
                 [vec![0u8; 31]]
             )
             .is_err()
@@ -390,6 +456,7 @@ mod tests {
             &path,
             &hash,
             "ClamAV 1.5.4/28176",
+            TEST_SIG_GEN,
             "policy-v1",
             ScanStatus::Infected,
             Some(threat),
@@ -397,9 +464,17 @@ mod tests {
         )
         .unwrap();
 
-        let verdict = get(&path, &hash, "ClamAV 1.5.4/28176", "policy-v1", 1050, 3600)
-            .unwrap()
-            .expect("cache hit expected");
+        let verdict = get(
+            &path,
+            &hash,
+            "ClamAV 1.5.4/28176",
+            TEST_SIG_GEN,
+            "policy-v1",
+            1050,
+            3600,
+        )
+        .unwrap()
+        .expect("cache hit expected");
 
         assert_eq!(verdict.status, ScanStatus::Infected);
         assert_eq!(verdict.threat_name.as_deref(), Some(threat));
@@ -415,6 +490,7 @@ mod tests {
             &path,
             &hash,
             "ClamAV 1.5.4/28176",
+            TEST_SIG_GEN,
             "policy-v1",
             ScanStatus::Clean,
             None,
@@ -422,9 +498,17 @@ mod tests {
         )
         .unwrap();
 
-        let verdict = get(&path, &hash, "ClamAV 1.5.4/28176", "policy-v1", 1050, 3600)
-            .unwrap()
-            .expect("cache hit expected");
+        let verdict = get(
+            &path,
+            &hash,
+            "ClamAV 1.5.4/28176",
+            TEST_SIG_GEN,
+            "policy-v1",
+            1050,
+            3600,
+        )
+        .unwrap()
+        .expect("cache hit expected");
 
         assert_eq!(verdict.status, ScanStatus::Clean);
         assert_eq!(verdict.threat_name, None);
@@ -432,10 +516,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v1_database_migrates_safely_and_treats_unnamed_infected_as_miss() {
-        let path = test_path("legacy-v1-migration");
+    fn legacy_v2_database_migrates_to_v3_discarding_old_rows() {
+        let path = test_path("legacy-v2-migration");
 
-        // Manually construct a valid schema v1 database
+        // Manually construct a valid schema v2 database (without sig_generation)
         let db = Connection::open(&path).unwrap();
         db.execute_batch(
             "CREATE TABLE scan_cache (
@@ -443,101 +527,129 @@ mod tests {
                engine_version TEXT NOT NULL,
                policy_version TEXT NOT NULL,
                status TEXT NOT NULL CHECK(status IN ('CLEAN', 'INFECTED')),
+               threat_name TEXT,
                scanned_at INTEGER NOT NULL,
                PRIMARY KEY(sha256, engine_version, policy_version)
              );
-             PRAGMA user_version = 1;",
+             PRAGMA user_version = 2;",
         )
         .unwrap();
 
         let hash_clean = [0x11; 32];
-        let hash_infected_legacy = [0x22; 32];
-
         db.execute(
             "INSERT INTO scan_cache(sha256, engine_version, policy_version, status, scanned_at)
              VALUES (?1, 'ClamAV 1.5.4/28176', 'policy-v1', 'CLEAN', 1000)",
             params![hash_clean.as_slice()],
         )
         .unwrap();
-
-        db.execute(
-            "INSERT INTO scan_cache(sha256, engine_version, policy_version, status, scanned_at)
-             VALUES (?1, 'ClamAV 1.5.4/28176', 'policy-v1', 'INFECTED', 1000)",
-            params![hash_infected_legacy.as_slice()],
-        )
-        .unwrap();
         drop(db);
 
-        // Open via open(&path) -> triggers migrate() from version 1 to 2
+        // Open via open(&path) -> triggers migrate() to v3
         let db = open(&path).unwrap();
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2, "user_version must be bumped to 2");
+        assert_eq!(version, 3, "user_version must be bumped to 3");
 
-        // Check entry count (both rows preserved)
+        // Legacy rows without sig_generation are discarded
         let count: i64 = db
             .query_row("SELECT COUNT(*) FROM scan_cache", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 2, "Both rows preserved in migration");
+        assert_eq!(count, 0, "Old rows without sig_generation are discarded");
         drop(db);
 
-        // 1. CLEAN row should hit cache normally
-        let clean_verdict = get(
+        // Put a new entry with sig_generation into the migrated v3 schema
+        put(
             &path,
             &hash_clean,
             "ClamAV 1.5.4/28176",
+            TEST_SIG_GEN,
             "policy-v1",
-            1050,
-            3600,
-        )
-        .unwrap()
-        .expect("CLEAN entry should be a cache hit");
-        assert_eq!(clean_verdict.status, ScanStatus::Clean);
-        assert_eq!(clean_verdict.threat_name, None);
-
-        // 2. Legacy INFECTED row with NULL threat_name MUST be treated as a cache miss!
-        let infected_verdict = get(
-            &path,
-            &hash_infected_legacy,
-            "ClamAV 1.5.4/28176",
-            "policy-v1",
-            1050,
-            3600,
-        )
-        .unwrap();
-        assert!(
-            infected_verdict.is_none(),
-            "Legacy infected entry without threat name MUST be treated as cache miss to trigger rescan"
-        );
-
-        // 3. Now simulate a re-scan updating the entry with a threat name
-        put(
-            &path,
-            &hash_infected_legacy,
-            "ClamAV 1.5.4/28176",
-            "policy-v1",
-            ScanStatus::Infected,
-            Some("Win.Test.EICAR_Handoff"),
+            ScanStatus::Clean,
+            None,
             1100,
         )
         .unwrap();
 
-        // 4. Query again: now it should hit cache with the threat name
         let rescanned = get(
             &path,
-            &hash_infected_legacy,
+            &hash_clean,
             "ClamAV 1.5.4/28176",
+            TEST_SIG_GEN,
             "policy-v1",
             1120,
             3600,
         )
         .unwrap()
-        .expect("Rescanned infected entry should now hit cache");
-        assert_eq!(rescanned.status, ScanStatus::Infected);
-        assert_eq!(
-            rescanned.threat_name.as_deref(),
-            Some("Win.Test.EICAR_Handoff")
+        .expect("Entry with sig_generation hits cache");
+        assert_eq!(rescanned.status, ScanStatus::Clean);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn signature_generation_change_invalidates_cache_entry() {
+        let path = test_path("sig-gen-invalidation");
+        let hash = [0x33; 32];
+        let sig_gen_1 = "sig:8616464:2026-11-14T11:41:49+07:00";
+        let sig_gen_count_change = "sig:8616497:2026-11-14T11:41:49+07:00";
+        let sig_gen_time_change = "sig:8616464:2026-11-14T12:00:00+07:00";
+
+        put(
+            &path,
+            &hash,
+            "ClamAV 1.5.4",
+            sig_gen_1,
+            "policy-v1",
+            ScanStatus::Clean,
+            None,
+            1000,
+        )
+        .unwrap();
+
+        // Exact match hits
+        assert!(
+            get(
+                &path,
+                &hash,
+                "ClamAV 1.5.4",
+                sig_gen_1,
+                "policy-v1",
+                1050,
+                3600
+            )
+            .unwrap()
+            .is_some()
+        );
+
+        // Signatures count bump misses
+        assert!(
+            get(
+                &path,
+                &hash,
+                "ClamAV 1.5.4",
+                sig_gen_count_change,
+                "policy-v1",
+                1050,
+                3600
+            )
+            .unwrap()
+            .is_none()
+        );
+
+        // Loaded_at reload time bump misses
+        assert!(
+            get(
+                &path,
+                &hash,
+                "ClamAV 1.5.4",
+                sig_gen_time_change,
+                "policy-v1",
+                1050,
+                3600
+            )
+            .unwrap()
+            .is_none()
         );
 
         let _ = std::fs::remove_file(path);
@@ -554,6 +666,7 @@ mod tests {
                 &path,
                 &hash,
                 "ClamAV 1.5.4",
+                TEST_SIG_GEN,
                 "policy-1",
                 ScanStatus::Error,
                 None,
@@ -566,6 +679,7 @@ mod tests {
                 &path,
                 &hash,
                 "ClamAV 1.5.4",
+                TEST_SIG_GEN,
                 "policy-1",
                 ScanStatus::Unknown,
                 None,
@@ -578,6 +692,7 @@ mod tests {
                 &path,
                 &hash,
                 "ClamAV 1.5.4",
+                TEST_SIG_GEN,
                 "policy-1",
                 ScanStatus::Cancelled,
                 None,
@@ -590,6 +705,7 @@ mod tests {
                 &path,
                 &hash,
                 "ClamAV 1.5.4",
+                TEST_SIG_GEN,
                 "policy-1",
                 ScanStatus::Skipped,
                 None,
@@ -602,16 +718,16 @@ mod tests {
         let db = open(&path).unwrap();
         assert!(
             db.execute(
-                "INSERT INTO scan_cache(sha256, engine_version, policy_version, status, threat_name, scanned_at)
-                 VALUES (?1, 'engine', 'policy', 'ERROR', NULL, 100)",
+                "INSERT INTO scan_cache(sha256, engine_version, sig_generation, policy_version, status, threat_name, scanned_at)
+                 VALUES (?1, 'engine', 'sig', 'policy', 'ERROR', NULL, 100)",
                 params![hash.as_slice()],
             )
             .is_err()
         );
         assert!(
             db.execute(
-                "INSERT INTO scan_cache(sha256, engine_version, policy_version, status, threat_name, scanned_at)
-                 VALUES (?1, 'engine', 'policy', 'UNKNOWN', NULL, 100)",
+                "INSERT INTO scan_cache(sha256, engine_version, sig_generation, policy_version, status, threat_name, scanned_at)
+                 VALUES (?1, 'engine', 'sig', 'policy', 'UNKNOWN', NULL, 100)",
                 params![hash.as_slice()],
             )
             .is_err()
@@ -639,6 +755,7 @@ mod tests {
                 &path,
                 &hash,
                 "ClamAV 1.5.4",
+                TEST_SIG_GEN,
                 "policy-1",
                 ScanStatus::Infected,
                 None,
@@ -653,6 +770,7 @@ mod tests {
                 &path,
                 &hash,
                 "ClamAV 1.5.4",
+                TEST_SIG_GEN,
                 "policy-1",
                 ScanStatus::Infected,
                 Some("   "),
@@ -678,6 +796,7 @@ mod tests {
             &path,
             &hash,
             "engine-v1",
+            TEST_SIG_GEN,
             "policy-1",
             ScanStatus::Clean,
             None,
@@ -686,7 +805,7 @@ mod tests {
         assert!(result.is_ok(), "corrupt db must automatically recover: {result:?}");
 
         // Cache must work properly after recovery
-        let cached = get(&path, &hash, "engine-v1", "policy-1", 110, 60).unwrap();
+        let cached = get(&path, &hash, "engine-v1", TEST_SIG_GEN, "policy-1", 110, 60).unwrap();
         assert_eq!(cached.unwrap().status, ScanStatus::Clean);
 
         // Verify a corrupt backup file was created
@@ -718,6 +837,7 @@ mod tests {
             &path,
             &hash,
             "engine-v1",
+            TEST_SIG_GEN,
             "policy-1",
             ScanStatus::Clean,
             None,
@@ -738,6 +858,7 @@ mod tests {
             &path,
             &hash1,
             "engine-v1",
+            TEST_SIG_GEN,
             "policy-1",
             ScanStatus::Clean,
             None,
@@ -749,6 +870,7 @@ mod tests {
             &path,
             &hash2,
             "engine-v1",
+            TEST_SIG_GEN,
             "policy-1",
             ScanStatus::Clean,
             None,
@@ -761,12 +883,12 @@ mod tests {
         assert_eq!(deleted, 1);
 
         assert!(
-            get(&path, &hash1, "engine-v1", "policy-1", 600, 600)
+            get(&path, &hash1, "engine-v1", TEST_SIG_GEN, "policy-1", 600, 600)
                 .unwrap()
                 .is_none()
         );
         assert!(
-            get(&path, &hash2, "engine-v1", "policy-1", 600, 600)
+            get(&path, &hash2, "engine-v1", TEST_SIG_GEN, "policy-1", 600, 600)
                 .unwrap()
                 .is_some()
         );

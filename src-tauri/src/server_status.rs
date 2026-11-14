@@ -14,6 +14,17 @@ pub struct ServerStatusDto {
     pub stale: bool,
 }
 
+impl ServerStatusDto {
+    pub fn signature_generation(&self) -> Option<String> {
+        match (self.signatures, &self.loaded_at) {
+            (Some(sigs), Some(loaded)) if sigs > 0 && !loaded.trim().is_empty() => {
+                Some(format!("{sigs}:{loaded}"))
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct RawServerStatus {
     signatures: Option<serde_json::Value>,
