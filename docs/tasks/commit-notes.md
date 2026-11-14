@@ -115,3 +115,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/release-candidate | e15b864 | YES | Merge branch 'origin/main' into vic/release-candidate |
 | 2026-11-14 | vic/release-candidate | efb5707 | YES | feat(cover): add ClamAV signature cover badge and server extraction (Task V-52) |
 | 2026-11-14 | vic/release-candidate | e9e7349 | YES | fix(tunnel): apply non-interactive ssh flags and execution timeout watchdog (Task V-52) |
+| 2026-11-14 | vic/release-candidate | 21e6191 | YES | fix(cover): resolve UTF-8 BOM, add fetched_at_utc and strict validation (Task V-53) |
