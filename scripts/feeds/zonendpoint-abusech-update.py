@@ -35,6 +35,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+from typing import Optional, Dict, Any, Tuple
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -59,6 +60,8 @@ DEFAULT_TF_DB = "/opt/zonendpoint/threatfox/threatfox.db"
 DEFAULT_RATE_LIMIT_FILE = DEFAULT_STATE
 DEFAULT_LOCK_FILE = "/opt/zonendpoint/abusech/update.lock"
 DEFAULT_LAST_RUN_FILE = "/opt/zonendpoint/abusech/last-run.json"
+DEFAULT_RELOAD_STATE_FILE = "/opt/zonendpoint/abusech/reload-state.json"
+DEFAULT_MIN_RELOAD_INTERVAL_HOURS = 6.0
 
 DEFAULT_MB_RECENT_URL = getattr(mb, "DEFAULT_RECENT_DUMP_URL", "https://mb-api.abuse.ch/v2/files/exports/{auth_key}/recent.csv")
 DEFAULT_TF_RECENT_URL = getattr(tf, "DEFAULT_RECENT_URL", "https://threatfox-api.abuse.ch/v2/files/exports/{auth_key}/recent.csv")
@@ -152,6 +155,46 @@ def write_last_run(
     finally:
         if temp_file.exists():
             temp_file.unlink(missing_ok=True)
+
+
+def get_last_reload_timestamp(state_file: pathlib.Path) -> Optional[float]:
+    """Reads the last successful reload timestamp from reload-state.json."""
+    if not state_file.is_file():
+        return None
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        ts = data.get("last_successful_reload_timestamp")
+        return float(ts) if ts is not None else None
+    except Exception as e:
+        logger.warning("Could not read reload state file '%s': %s", state_file, e)
+        return None
+
+
+def save_last_reload_state(state_file: pathlib.Path, timestamp: float, sig_after: int) -> None:
+    """Atomically records successful clamd reload timestamp in state file."""
+    data = {
+        "last_successful_reload_timestamp": timestamp,
+        "last_successful_reload_utc": datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc).isoformat(),
+        "signatures_after": sig_after,
+    }
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=state_file.name + ".", dir=state_file.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(temp_path, 0o644)
+        except OSError:
+            pass
+        os.replace(temp_path, state_file)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 
 def verify_hsbs_on_temp_db(
@@ -416,6 +459,7 @@ def run_hourly_update(args) -> int:
             "total": 0,
         },
         "reloaded": False,
+        "reload_deferred": False,
         "signatures_before": None,
         "signatures_after": None,
         "reload_duration_seconds": 0.0,
@@ -598,6 +642,26 @@ def run_hourly_update(args) -> int:
         if mb_new_sigs == 0 and tf_new_sigs == 0:
             logger.info("No new signatures to deploy across feeds. Skipping clamd reload (clamd reloads at most once per hour).")
             status_record["reloaded"] = False
+            status_record["reload_deferred"] = False
+            status_record["duration_seconds"] = round(time.time() - start_time, 2)
+            write_last_run(last_run_p, status_record, auth_key)
+            return 0
+
+        # L-8: Check minimum reload interval
+        reload_state_p = pathlib.Path(getattr(args, "reload_state_file", DEFAULT_RELOAD_STATE_FILE))
+        min_interval_hours = float(getattr(args, "min_reload_interval", DEFAULT_MIN_RELOAD_INTERVAL_HOURS))
+        min_interval_sec = min_interval_hours * 3600.0
+        now_ts = time.time()
+        last_reload_ts = get_last_reload_timestamp(reload_state_p)
+        if last_reload_ts is not None and (now_ts - last_reload_ts) < min_interval_sec:
+            hours_elapsed = (now_ts - last_reload_ts) / 3600.0
+            logger.info(
+                "L-8: New signatures available (MB=%d, TF=%d) but minimum reload interval has not elapsed "
+                "(%.2fh elapsed < %.2fh configured). Deferring export and clamd reload.",
+                mb_new_sigs, tf_new_sigs, hours_elapsed, min_interval_hours
+            )
+            status_record["reloaded"] = False
+            status_record["reload_deferred"] = True
             status_record["duration_seconds"] = round(time.time() - start_time, 2)
             write_last_run(last_run_p, status_record, auth_key)
             return 0
@@ -645,9 +709,12 @@ def run_hourly_update(args) -> int:
         )
 
         status_record["reloaded"] = deploy_result["reloaded"]
+        status_record["reload_deferred"] = False
         status_record["signatures_before"] = deploy_result["sig_before"]
         status_record["signatures_after"] = deploy_result["sig_after"]
         status_record["reload_duration_seconds"] = deploy_result["reload_duration"]
+        if deploy_result["reloaded"]:
+            save_last_reload_state(reload_state_p, now_ts, deploy_result["sig_after"])
         logger.info(
             "SUCCESS: Combined deployment completed! clamd signatures %s -> %s in %.2fs",
             deploy_result["sig_before"], deploy_result["sig_after"], deploy_result["reload_duration"]
@@ -706,6 +773,17 @@ def parse_args():
     p.add_argument("--timeout", type=float, default=120.0)
     p.add_argument("--reload-timeout", type=float, default=DEFAULT_RELOAD_TIMEOUT)
     p.add_argument("--min-ram-bytes", type=int, default=MIN_RAM_BYTES)
+    p.add_argument(
+        "--min-reload-interval",
+        type=float,
+        default=DEFAULT_MIN_RELOAD_INTERVAL_HOURS,
+        help=f"Minimum interval in hours between clamd reloads triggered by this updater (default: {DEFAULT_MIN_RELOAD_INTERVAL_HOURS})",
+    )
+    p.add_argument(
+        "--reload-state-file",
+        default=DEFAULT_RELOAD_STATE_FILE,
+        help=f"Path to JSON state file tracking last successful reload timestamp (default: {DEFAULT_RELOAD_STATE_FILE})",
+    )
     return p.parse_args()
 
 

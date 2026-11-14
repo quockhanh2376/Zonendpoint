@@ -115,6 +115,7 @@ class TestAbusechUpdate(unittest.TestCase):
         self.rate_limit_file = self.base_path / "rate_limit.json"
         self.lock_file = self.base_path / "update.lock"
         self.last_run_file = self.base_path / "last-run.json"
+        self.reload_state_file = self.base_path / "reload-state.json"
 
         self.mb_db = self.base_path / "malwarebazaar.db"
         self.tf_db = self.base_path / "threatfox.db"
@@ -135,6 +136,8 @@ class TestAbusechUpdate(unittest.TestCase):
         self.args.rate_limit_file = str(self.rate_limit_file)
         self.args.lock_file = str(self.lock_file)
         self.args.last_run_file = str(self.last_run_file)
+        self.args.reload_state_file = str(self.reload_state_file)
+        self.args.min_reload_interval = 6.0
         self.args.mb_url = f"http://127.0.0.1:{self.server_port}/mb/{{auth_key}}/recent.csv"
         self.args.tf_url = f"http://127.0.0.1:{self.server_port}/tf/{{auth_key}}/recent.csv"
         self.args.tf_recent_dump = str(self.base_path / "last-recent.csv")
@@ -416,6 +419,96 @@ class TestAbusechUpdate(unittest.TestCase):
         self.assertIn("MalwareBazaar", last_run["error"])
         self.assertIn("403", last_run["error"])
         self.assertEqual(last_run["requests"]["threatfox"], 0)
+
+    def test_14_min_reload_interval_defers_reload_when_interval_not_elapsed(self):
+        """L-8: Test that if new hashes are present but < min-reload-interval, reload is deferred."""
+        now = time.time()
+        # Last reload was 1 hour ago (< 6h min interval)
+        self.reload_state_file.write_text(json.dumps({
+            "last_successful_reload_timestamp": now - 3600,
+            "last_successful_reload_utc": "2026-11-14T07:00:00Z",
+            "signatures_after": 1000,
+        }), encoding="utf-8")
+
+        fake_deploy = MagicMock()
+        with patch.object(update_mod, "deploy_combined_hsbs", fake_deploy):
+            ret = update_mod.run_hourly_update(self.args)
+            self.assertEqual(ret, 0)
+
+            # Deployed combined hsbs must NOT have been called (reload deferred!)
+            fake_deploy.assert_not_called()
+
+            # But feeds were fetched and ingested
+            self.assertEqual(len(MockHttpHandler.request_log), 2)
+
+            # last-run.json reflects reload_deferred=True
+            last_run = json.loads(self.last_run_file.read_text(encoding="utf-8"))
+            self.assertFalse(last_run["reloaded"])
+            self.assertTrue(last_run["reload_deferred"])
+            self.assertEqual(last_run["new_hashes"]["total"], 2)
+
+            # State file was NOT overwritten with new timestamp
+            state = json.loads(self.reload_state_file.read_text(encoding="utf-8"))
+            self.assertAlmostEqual(state["last_successful_reload_timestamp"], now - 3600, delta=5)
+
+    def test_15_min_reload_interval_allows_reload_when_interval_has_elapsed(self):
+        """L-8: Test that if new hashes are present and >= min-reload-interval, reload proceeds."""
+        now = time.time()
+        # Last reload was 7 hours ago (>= 6h min interval)
+        self.reload_state_file.write_text(json.dumps({
+            "last_successful_reload_timestamp": now - 7 * 3600,
+            "last_successful_reload_utc": "2026-11-14T01:00:00Z",
+            "signatures_after": 1000,
+        }), encoding="utf-8")
+
+        fake_deploy = MagicMock(return_value={
+            "reloaded": True,
+            "sig_before": 1000,
+            "sig_after": 1002,
+            "reload_duration": 0.5,
+        })
+        with patch.object(update_mod, "deploy_combined_hsbs", fake_deploy):
+            ret = update_mod.run_hourly_update(self.args)
+            self.assertEqual(ret, 0)
+
+            # deploy was called
+            fake_deploy.assert_called_once()
+
+            # last-run.json reflects successful reload
+            last_run = json.loads(self.last_run_file.read_text(encoding="utf-8"))
+            self.assertTrue(last_run["reloaded"])
+            self.assertFalse(last_run["reload_deferred"])
+
+            # State file was atomically updated with new timestamp
+            state = json.loads(self.reload_state_file.read_text(encoding="utf-8"))
+            self.assertAlmostEqual(state["last_successful_reload_timestamp"], now, delta=10)
+            self.assertEqual(state["signatures_after"], 1002)
+
+    def test_16_min_reload_interval_first_run_no_state_file_reloads_and_creates_state(self):
+        """L-8: Test that first run with no state file reloads and creates reload-state.json atomically."""
+        if self.reload_state_file.exists():
+            self.reload_state_file.unlink()
+
+        now = time.time()
+        fake_deploy = MagicMock(return_value={
+            "reloaded": True,
+            "sig_before": 1000,
+            "sig_after": 1002,
+            "reload_duration": 0.5,
+        })
+        with patch.object(update_mod, "deploy_combined_hsbs", fake_deploy):
+            ret = update_mod.run_hourly_update(self.args)
+            self.assertEqual(ret, 0)
+
+            fake_deploy.assert_called_once()
+            last_run = json.loads(self.last_run_file.read_text(encoding="utf-8"))
+            self.assertTrue(last_run["reloaded"])
+            self.assertFalse(last_run["reload_deferred"])
+
+            self.assertTrue(self.reload_state_file.is_file())
+            state = json.loads(self.reload_state_file.read_text(encoding="utf-8"))
+            self.assertAlmostEqual(state["last_successful_reload_timestamp"], now, delta=10)
+            self.assertEqual(state["signatures_after"], 1002)
 
 
 if __name__ == "__main__":
