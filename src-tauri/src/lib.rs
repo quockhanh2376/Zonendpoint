@@ -477,6 +477,7 @@ fn mark_user_cancelled(summary: &mut ScanSummary, path: &std::path::Path) {
 
     if summary.clean == 1 {
         summary.clean = 0;
+        summary.unlisted_by_status.clean = summary.unlisted_by_status.clean.saturating_sub(1);
         summary.cancelled_files = summary.cancelled_files.saturating_add(1);
         let cancelled_result = scanner::ScanResult::new(
             path,

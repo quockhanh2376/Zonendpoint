@@ -152,6 +152,43 @@ function getOrphanChildren(pid) {
   return res.stdout.trim().split(/\\s+/).map(Number).filter(Boolean);
 }
 
+function findTestAppPid() {
+  const resolvedBinary = path.resolve(binary);
+  const targetDir = path.resolve(target);
+  const worktreeName = path.basename(root);
+  const ps = `
+    $targetBin = '${resolvedBinary.replace(/'/g, "''")}';
+    $targetDir = '${targetDir.replace(/'/g, "''")}';
+    $wName = '${worktreeName.replace(/'/g, "''")}';
+
+    # 1. Look up via Win32_Process with full ExecutablePath
+    $proc = Get-CimInstance Win32_Process -Filter "Name = 'zonendpoint.exe'" | Where-Object {
+      ($_.ExecutablePath -and $_.ExecutablePath -eq $targetBin) -or
+      ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($targetDir, [System.StringComparison]::OrdinalIgnoreCase)) -or
+      ($_.ExecutablePath -and $_.ExecutablePath -like "*$wName*")
+    } | Sort-Object CreationDate -Descending | Select-Object -First 1;
+
+    if (-not $proc) {
+      # 2. Fallback to Get-Process
+      $proc = Get-Process -Name 'zonendpoint' -ErrorAction SilentlyContinue | Where-Object {
+        ($_.Path -and $_.Path -eq $targetBin) -or
+        ($_.Path -and $_.Path.StartsWith($targetDir, [System.StringComparison]::OrdinalIgnoreCase)) -or
+        ($_.Path -and $_.Path -like "*$wName*")
+      } | Select-Object -First 1;
+    }
+
+    if ($proc) { $proc.ProcessId }
+  `;
+  for (let i = 0; i < 15; i++) {
+    const res = spawnSync('powershell.exe', ['-NoProfile', '-Command', ps], { encoding: 'utf8' });
+    const pid = parseInt(res.stdout.trim().split(/\\s+/)[0], 10);
+    if (pid && !isNaN(pid)) return pid;
+    const end = Date.now() + 200;
+    while (Date.now() < end) {}
+  }
+  return NaN;
+}
+
 function startMockServer(port = 0) {
   server = createServer(s => {
     sockets.add(s);
@@ -708,10 +745,7 @@ try {
     });
 
     await check('window close after scan and during scan terminates cleanly without orphan processes (V-30)', async () => {
-      const worktreeName = path.basename(root);
-      const findPidPs = `(Get-Process -Name 'zonendpoint' -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*${worktreeName}*' }).Id`;
-      const findRes = spawnSync('powershell.exe', ['-NoProfile', '-Command', findPidPs], { encoding: 'utf8' });
-      const appPid = parseInt(findRes.stdout.trim().split(/\s+/)[0], 10);
+      const appPid = findTestAppPid();
       assert.ok(appPid, 'Test application PID must be found');
 
       // 1. Test close after scan:
@@ -732,9 +766,7 @@ try {
       // 2. Test close during active scan:
       mode = 'delay';
       await session();
-      const findPid2Ps = `(Get-Process -Name 'zonendpoint' -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*${worktreeName}*' }).Id`;
-      const findRes2 = spawnSync('powershell.exe', ['-NoProfile', '-Command', findPid2Ps], { encoding: 'utf8' });
-      const appPid2 = parseInt(findRes2.stdout.trim().split(/\s+/)[0], 10);
+      const appPid2 = findTestAppPid();
       assert.ok(appPid2, 'Second test application PID must be found');
 
       const startBtn = await button('Start scan');

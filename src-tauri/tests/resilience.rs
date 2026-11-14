@@ -147,6 +147,17 @@ async fn spawn_mock_clamd(
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+static RESILIENCE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn write_valid_server_status(root: &std::path::Path) -> PathBuf {
+    let status_file = root.join("server-status.json");
+    std::fs::write(
+        &status_file,
+        r#"{"signatures": 8616464, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
+    )
+    .unwrap();
+    status_file
+}
 
 fn create_temp_test_dir(name: &str) -> (PathBuf, PathBuf, PathBuf) {
     let count = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -351,16 +362,13 @@ async fn test_cancel_during_stall_returns_cancelled() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_engine_signature_change_invalidates_cache_reuse() {
+    let _env_lock = RESILIENCE_ENV_LOCK.lock().unwrap();
     let (root, target, cache_db) = create_temp_test_dir("identity-change");
     std::fs::write(&target, b"identity test content").unwrap();
 
-    let status_file = root.join("server-status.json");
-    std::fs::write(
-        &status_file,
-        r#"{"signatures": 8616464, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
-    )
-    .unwrap();
+    let status_file = write_valid_server_status(&root);
     unsafe {
         std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_file);
     }
@@ -783,9 +791,16 @@ async fn test_preflight_without_eof_rejected() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_infected_cache_hit_preserves_exact_threat_name() {
+    let _env_lock = RESILIENCE_ENV_LOCK.lock().unwrap();
     let (root, target, cache_db) = create_temp_test_dir("infected-cache-hit-name");
     std::fs::write(&target, b"payload with threat").unwrap();
+
+    let status_file = write_valid_server_status(&root);
+    unsafe {
+        std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_file);
+    }
 
     let threat_name = "YARA.ZonQA_Benign_Marker.UNOFFICIAL";
     let (addr, handle) =
@@ -829,14 +844,24 @@ async fn test_infected_cache_hit_preserves_exact_threat_name() {
         "Cache hit on INFECTED file must return the exact threat name, not generic cache hit message"
     );
 
+    unsafe {
+        std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
+    }
     handle.abort();
     let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_clean_cache_hit_preserves_verified_content_cache_hit_message() {
+    let _env_lock = RESILIENCE_ENV_LOCK.lock().unwrap();
     let (root, target, cache_db) = create_temp_test_dir("clean-cache-hit-msg");
     std::fs::write(&target, b"clean payload bytes").unwrap();
+
+    let status_file = write_valid_server_status(&root);
+    unsafe {
+        std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_file);
+    }
 
     let (addr, handle) = spawn_mock_clamd(STANDARD_VERSION, FaultMode::Clean).await;
     let (_tx, cancel) = watch::channel(false);
@@ -873,6 +898,69 @@ async fn test_clean_cache_hit_preserves_verified_content_cache_hit_message() {
         "Cache hit on CLEAN file must preserve verified content cache hit message"
     );
 
+    unsafe {
+        std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
+    }
     handle.abort();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_missing_server_status_bypasses_cache() {
+    let _env_lock = RESILIENCE_ENV_LOCK.lock().unwrap();
+    let (root, target, cache_db) = create_temp_test_dir("missing-status-bypass");
+    std::fs::write(&target, b"content without server status").unwrap();
+
+    let non_existent_status = root.join("non-existent-status.json");
+    unsafe {
+        std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &non_existent_status);
+    }
+
+    let (addr, handle) = spawn_mock_clamd(STANDARD_VERSION, FaultMode::Clean).await;
+    let (_tx, cancel) = watch::channel(false);
+
+    // Scan 1: Live scan succeeds under clean engine
+    let result1 = scan_file_with_timeout(
+        target.clone(),
+        cache_db.clone(),
+        addr,
+        cancel,
+        Arc::new(ScanLimiter::new(1)),
+        Duration::from_secs(2),
+    )
+    .await;
+    assert_eq!(result1.status, ScanStatus::Clean);
+
+    // Verify cache insertion was bypassed due to missing status (X-5)
+    let stats = cache::stats(&cache_db).unwrap();
+    assert_eq!(
+        stats.entries, 0,
+        "Missing server status must bypass cache insertion"
+    );
+
+    // Stop mock daemon so live scan would fail
+    handle.abort();
+
+    // Scan 2: Must NOT return cached clean verdict; must fail with Error because daemon is offline
+    let (_tx2, cancel2) = watch::channel(false);
+    let result2 = scan_file_with_timeout(
+        target.clone(),
+        cache_db.clone(),
+        addr,
+        cancel2,
+        Arc::new(ScanLimiter::new(1)),
+        Duration::from_secs(2),
+    )
+    .await;
+    assert_eq!(
+        result2.status,
+        ScanStatus::Error,
+        "Missing server status must bypass cache lookup and fail when daemon is offline"
+    );
+
+    unsafe {
+        std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
+    }
     let _ = std::fs::remove_dir_all(root);
 }

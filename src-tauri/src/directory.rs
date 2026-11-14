@@ -14,7 +14,9 @@ use tokio::{
     task::JoinSet,
 };
 
-pub const MAX_RETAINED_RESULTS: usize = 1000;
+pub const MAX_RETAINED_INFECTED: usize = 10_000;
+pub const MAX_RETAINED_OTHER: usize = 1000;
+pub const MAX_RETAINED_RESULTS: usize = MAX_RETAINED_OTHER;
 const QUEUE_CAPACITY: usize = 32;
 
 fn record_result(
@@ -39,6 +41,16 @@ fn record_result(
     *cancel.borrow()
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct UnlistedByStatus {
+    pub clean: usize,
+    pub infected: usize,
+    pub unknown: usize,
+    pub errors: usize,
+    pub skipped: usize,
+    pub cancelled: usize,
+}
+
 #[derive(Clone, Serialize)]
 pub struct ScanSummary {
     pub complete: bool,
@@ -51,6 +63,7 @@ pub struct ScanSummary {
     pub skipped: usize,
     pub cancelled_files: usize,
     pub details_truncated: bool,
+    pub unlisted_by_status: UnlistedByStatus,
     pub results: Vec<ScanResult>,
 }
 
@@ -67,54 +80,78 @@ impl Default for ScanSummary {
             skipped: 0,
             cancelled_files: 0,
             details_truncated: false,
+            unlisted_by_status: UnlistedByStatus::default(),
             results: Vec::new(),
         }
     }
 }
 
 impl ScanSummary {
+    pub fn retained_infected(&self) -> usize {
+        self.results
+            .iter()
+            .filter(|r| r.status == ScanStatus::Infected)
+            .count()
+    }
+
+    pub fn retained_other(&self) -> usize {
+        self.results
+            .iter()
+            .filter(|r| r.status != ScanStatus::Infected)
+            .count()
+    }
+
     pub fn record(&mut self, result: ScanResult) {
         self.scanned = self.scanned.saturating_add(1);
         match result.status {
             ScanStatus::Clean => {
                 self.clean = self.clean.saturating_add(1);
-                return;
+                self.unlisted_by_status.clean = self.unlisted_by_status.clean.saturating_add(1);
             }
-            ScanStatus::Infected => self.infected = self.infected.saturating_add(1),
+            ScanStatus::Infected => {
+                self.infected = self.infected.saturating_add(1);
+                if self.retained_infected() < MAX_RETAINED_INFECTED {
+                    self.results.push(result);
+                } else {
+                    self.details_truncated = true;
+                    self.unlisted_by_status.infected =
+                        self.unlisted_by_status.infected.saturating_add(1);
+                }
+            }
             ScanStatus::Unknown => {
                 self.unknown = self.unknown.saturating_add(1);
                 self.complete = false;
+                self.record_other(result, |u| &mut u.unknown);
             }
             ScanStatus::Error => {
                 self.errors = self.errors.saturating_add(1);
                 self.complete = false;
+                self.record_other(result, |u| &mut u.errors);
             }
             ScanStatus::Skipped => {
                 self.skipped = self.skipped.saturating_add(1);
                 self.complete = false;
+                self.record_other(result, |u| &mut u.skipped);
             }
             ScanStatus::Cancelled => {
                 self.cancelled_files = self.cancelled_files.saturating_add(1);
                 self.cancelled = true;
                 self.complete = false;
+                self.record_other(result, |u| &mut u.cancelled);
             }
         }
-        if self.results.len() < MAX_RETAINED_RESULTS {
+    }
+
+    fn record_other<F>(&mut self, result: ScanResult, unlisted_field: F)
+    where
+        F: FnOnce(&mut UnlistedByStatus) -> &mut usize,
+    {
+        if self.retained_other() < MAX_RETAINED_OTHER {
             self.results.push(result);
-        } else if result.status == ScanStatus::Infected {
-            if let Some(pos) = self
-                .results
-                .iter()
-                .rposition(|r| r.status != ScanStatus::Infected)
-            {
-                self.results.remove(pos);
-                self.results.push(result);
-                self.details_truncated = true;
-            } else {
-                self.details_truncated = true;
-            }
         } else {
             self.details_truncated = true;
+            let field = unlisted_field(&mut self.unlisted_by_status);
+            *field = field.saturating_add(1);
         }
     }
 }
@@ -549,6 +586,7 @@ mod tests {
         assert_eq!(summary.errors, MAX_RETAINED_RESULTS + 2);
         assert_eq!(summary.results.len(), MAX_RETAINED_RESULTS);
         assert!(summary.details_truncated);
+        assert_eq!(summary.unlisted_by_status.errors, 2);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -566,6 +604,7 @@ mod tests {
         }
         assert_eq!(summary.scanned, MAX_RETAINED_RESULTS + 10);
         assert_eq!(summary.clean, MAX_RETAINED_RESULTS + 10);
+        assert_eq!(summary.unlisted_by_status.clean, MAX_RETAINED_RESULTS + 10);
         assert!(summary.results.is_empty());
         assert!(!summary.details_truncated);
 
@@ -584,23 +623,32 @@ mod tests {
         assert_eq!(summary.results.len(), 1);
         assert_eq!(summary.results[0].path, "C:\\malware\\threat.exe");
         assert_eq!(summary.results[0].status, ScanStatus::Infected);
+        assert_eq!(summary.unlisted_by_status.infected, 0);
         assert!(!summary.details_truncated);
     }
 
     #[tokio::test]
-    async fn infected_result_evicts_non_infected_when_retained_is_full() {
+    async fn independent_retention_limits_for_infected_and_other() {
         let mut summary = ScanSummary::default();
-        for index in 0..MAX_RETAINED_RESULTS {
+        for index in 0..MAX_RETAINED_OTHER {
             summary.record(ScanResult::error(
                 format!("error_{index}.txt"),
                 "read error",
             ));
         }
-        assert_eq!(summary.results.len(), MAX_RETAINED_RESULTS);
-        assert_eq!(summary.errors, MAX_RETAINED_RESULTS);
+        assert_eq!(summary.results.len(), MAX_RETAINED_OTHER);
+        assert_eq!(summary.errors, MAX_RETAINED_OTHER);
+        assert_eq!(summary.unlisted_by_status.errors, 0);
         assert!(!summary.details_truncated);
 
-        // Record an infected result when full -> evicts non-infected
+        // 1001st error exceeds OTHER limit -> not added to results, increment unlisted_by_status.errors
+        summary.record(ScanResult::error("error_overflow.txt", "read error"));
+        assert_eq!(summary.results.len(), MAX_RETAINED_OTHER);
+        assert_eq!(summary.errors, MAX_RETAINED_OTHER + 1);
+        assert_eq!(summary.unlisted_by_status.errors, 1);
+        assert!(summary.details_truncated);
+
+        // An infected result arrives: has its own 10,000 capacity, so it is retained!
         summary.record(ScanResult::new(
             "C:\\threats\\virus.exe",
             ScanStatus::Infected,
@@ -609,15 +657,49 @@ mod tests {
             100,
         ));
 
-        assert_eq!(summary.results.len(), MAX_RETAINED_RESULTS);
+        assert_eq!(summary.results.len(), MAX_RETAINED_OTHER + 1);
         assert_eq!(summary.infected, 1);
-        assert!(summary.details_truncated);
+        assert_eq!(summary.unlisted_by_status.infected, 0);
         assert!(
             summary
                 .results
                 .iter()
                 .any(|r| r.path == "C:\\threats\\virus.exe" && r.status == ScanStatus::Infected)
         );
+    }
+
+    #[tokio::test]
+    async fn infected_retention_bounded_at_ten_thousand_and_counts_unlisted() {
+        let mut summary = ScanSummary::default();
+        for index in 0..MAX_RETAINED_INFECTED {
+            summary.record(ScanResult::new(
+                format!("C:\\threats\\bad_{index}.exe"),
+                ScanStatus::Infected,
+                None,
+                Some("Trojan.Generic".into()),
+                50,
+            ));
+        }
+        assert_eq!(summary.results.len(), MAX_RETAINED_INFECTED);
+        assert_eq!(summary.infected, MAX_RETAINED_INFECTED);
+        assert_eq!(summary.unlisted_by_status.infected, 0);
+        assert!(!summary.details_truncated);
+
+        // Record 5 more infected beyond 10,000
+        for index in 0..5 {
+            summary.record(ScanResult::new(
+                format!("C:\\threats\\overflow_{index}.exe"),
+                ScanStatus::Infected,
+                None,
+                Some("Trojan.Generic".into()),
+                50,
+            ));
+        }
+
+        assert_eq!(summary.results.len(), MAX_RETAINED_INFECTED);
+        assert_eq!(summary.infected, MAX_RETAINED_INFECTED + 5);
+        assert_eq!(summary.unlisted_by_status.infected, 5);
+        assert!(summary.details_truncated);
     }
 
     #[tokio::test]

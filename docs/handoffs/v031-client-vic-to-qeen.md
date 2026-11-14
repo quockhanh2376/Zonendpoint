@@ -22,14 +22,19 @@ Các hạng mục loại trừ đã được tuân thủ nghiêm ngặt (không 
 
 ## 2. Chi tiết 8 hạng mục triển khai
 
-### Mục 1 (S-1): Giới hạn lưu trữ ScanSummary ưu tiên mối đe dọa INFECTED
-- **Commit**: `b72d7e6` `fix(scan): retain only non-clean scan results prioritizing infected items (S-1)`
-- **File**: `src-tauri/src/directory.rs`, `src-tauri/src/lib.rs`
+### Mục 1 (S-1): Giới hạn lưu trữ ScanSummary phân tầng độc lập và cảnh báo mối đe dọa không liệt kê
+- **Commit**: `b72d7e6` (ban đầu) & cập nhật V-65
+- **File**: `src-tauri/src/directory.rs`, `src-tauri/src/lib.rs`, `src/App.tsx`
 - **Cơ chế**:
-  - `ScanSummary.results` chỉ lưu trữ chi tiết các file không-CLEAN (`Infected`, `Error`, `Skipped`, `Unknown`, `Cancelled`), tối đa trần `MAX_RETAINED_RESULTS = 1000`.
-  - Toàn bộ kết quả `INFECTED` luôn được giữ lại. Nếu danh sách đầy (đạt 1000), thuật toán sẽ chủ động đẩy bớt (evict) các mục không phải `INFECTED` (chẳng hạn file `Error` hoặc `Skipped`) để nhường chỗ cho `INFECTED`. Nếu đầy 1000 mối đe dọa `INFECTED`, các mục `INFECTED` mới vẫn tiếp tục được lưu.
-  - Các bộ đếm tổng hợp (`total_scanned`, `clean`, `infected`, `errors`, `skipped`, `unknown`, `cancelled_files`) vẫn tăng chính xác 100%.
-  - Unit tests bổ sung: `clean_files_do_not_crowd_out_subsequent_infected_result`, `infected_result_evicts_non_infected_when_retained_is_full`.
+  - `ScanSummary.results` chỉ lưu trữ chi tiết các file không-CLEAN (`Infected`, `Error`, `Skipped`, `Unknown`, `Cancelled`).
+  - Thiết lập trần lưu trữ độc lập:
+    - **INFECTED**: Giới hạn riêng lớn `MAX_RETAINED_INFECTED = 10_000` mục chi tiết.
+    - **Mục khác** (`Error`, `Unknown`, `Skipped`, `Cancelled`): Giới hạn riêng `MAX_RETAINED_OTHER = 1_000` mục chi tiết.
+    - Hai hạn ngạch hoàn toàn độc lập, không xâm lấn hoặc đẩy lẫn nhau.
+  - Bổ sung cấu trúc `unlisted_by_status` trong `ScanSummary` ghi nhận chính xác số lượng mục không được liệt kê chi tiết theo từng trạng thái: `clean`, `infected`, `unknown`, `errors`, `skipped`, `cancelled`.
+  - Khi số lượng mối đe dọa vượt quá trần 10.000, trường `unlisted_by_status.infected` đếm số lượng dôi dư và giao diện hiển thị cảnh báo: `"{N} threats not listed"`.
+  - Các bộ đếm tổng hợp (`scanned`, `clean`, `infected`, `errors`, `skipped`, `unknown`, `cancelled_files`) vẫn tăng chính xác 100%.
+  - Unit tests bổ sung: `clean_files_do_not_crowd_out_subsequent_infected_result`, `independent_retention_limits_for_infected_and_other`, `infected_retention_bounded_at_ten_thousand_and_counts_unlisted`.
 
 ### Mục 2 (S-7 + S-6): Tự động phục hồi cache hỏng và dọn dẹp bản ghi quá hạn TTL
 - **Commit**: `0e2bd9b` `fix(cache): treat cache read failure as miss and auto-recover corrupt db with ttl cleanup (S-7, S-6)`
@@ -111,9 +116,9 @@ Phiên bản đã được nâng cấp đồng bộ từ `0.3.0` lên `0.3.1` t�
 
 ---
 
-## 4. Quality Gates & Verification Evidence
+## 4. Quality Gates & Verification Evidence (Cập nhật sau V-65)
 
-Thực hiện kiểm thử độc lập trong worktree `E:\Zonendpoint-worktrees\v57-client`:
+Thực hiện kiểm thử độc lập trong worktree `E:\Zonendpoint-worktrees\v65-client-fix` với `$env:LOCALAPPDATA` trỏ thư mục tạm cô lập (chứng minh không đọc/ghi dữ liệu thật):
 
 1. **Rust Code Formatting**:
    ```powershell
@@ -127,15 +132,14 @@ Thực hiện kiểm thử độc lập trong worktree `E:\Zonendpoint-worktrees
    ```
    $\rightarrow$ **PASS** (0 warnings, 0 errors).
 
-3. **Rust Test Suite**:
+3. **Rust Test Suite (Chạy 3 lần liên tiếp với LOCALAPPDATA tạm cô lập)**:
    ```powershell
    cargo test
    ```
-   $\rightarrow$ **PASS** (chạy 3 lần liên tiếp đều PASS 100%):
-   - 76 lib tests PASS.
-   - 1 bin test PASS.
-   - 18 resilience integration tests PASS.
-   - Tổng cộng: **95/95 tests PASS**.
+   - **Lần 1**: **97/97 tests PASS** (77 lib, 1 bin, 19 resilience).
+   - **Lần 2**: **97/97 tests PASS** (77 lib, 1 bin, 19 resilience).
+   - **Lần 3**: **97/97 tests PASS** (77 lib, 1 bin, 19 resilience).
+   *(Đã cập nhật fixture `write_valid_server_status` + `RESILIENCE_ENV_LOCK` cho resilience integration tests và bổ sung test `test_missing_server_status_bypasses_cache`)*.
 
 4. **Frontend TypeScript & Vite Build**:
    ```powershell
@@ -143,31 +147,34 @@ Thực hiện kiểm thử độc lập trong worktree `E:\Zonendpoint-worktrees
    ```
    $\rightarrow$ **PASS** (tsc 0 lỗi, vite bundle 0 lỗi).
 
-5. **Native End-to-End Test Suite**:
+5. **Native End-to-End Test Suite (Chạy 2 lần liên tiếp với LOCALAPPDATA tạm cô lập)**:
    ```powershell
    node tests/native/run.mjs
    ```
-   $\rightarrow$ **PASS** (chạy 2 lần liên tiếp đều PASS 100%, 21/21 checks PASS).
+   - **Lần 1 (Full build)**: **21/21 checks PASS** (gồm V-30 window close & clean termination 0 orphan processes).
+   - **Lần 2 (`--skip-build`)**: **21/21 checks PASS** (gồm V-30 window close & clean termination 0 orphan processes).
+   *(Đã sửa hàm `findTestAppPid()` trong harness tìm PID chính xác qua `path.resolve(binary)`, hỗ trợ cả trường hợp `CARGO_TARGET_DIR` tùy biến)*.
 
 ---
 
-## 5. Artifacts & Checksums
+## 5. Artifacts & Checksums (Bản build lại V-65)
 
 - **Thư mục lưu trữ**: `E:\Zonendpoint-tools\artifacts\v57-release\`
 
 | Artifact | File Size | SHA256 Checksum | Description |
 |---|---|---|---|
-| `Zonendpoint_0.3.1_x64-setup.exe` | 3,650,792 bytes | `1305f89913bfef92e65dc86175dde9628fa978c5b43a8ead557af70d6448f126` | Bản cài đặt NSIS x64 chính thức 0.3.1 |
-| `zonendpoint.exe` | 7,931,392 bytes | `7bc7dfda0bc811618d64610c2434110dd6a313458c6db4670a09f0ff0723aff7` | Tệp thực thi standalone release x64 PE32+ |
-| `Zonendpoint_0.3.1_x64-setup.exe.sha256` | 99 bytes | N/A | Tệp đối soát SHA256 cho NSIS setup |
+| `Zonendpoint_0.3.1_x64-setup.exe` | 3,650,792 bytes | `a3cac9eca8b472b2a00b7b2e304ac07c463dec5e25fe3df6b237e10ae2242a33` | Bản cài đặt NSIS x64 chính thức 0.3.1 (build lại sau V-65) |
+| `zonendpoint.exe` | 7,934,464 bytes | `915b1baa61a89feb408705e9809176d632face3d58a93a1e13d28aef0de72318` | Tệp thực thi standalone release x64 PE32+ (build lại sau V-65) |
+| `Zonendpoint_0.3.1_x64-setup.exe.sha256` | 98 bytes | N/A | Tệp đối soát SHA256 cho NSIS setup |
 
 ---
 
 ## 6. Hướng dẫn kiểm tra cho Qeen
 
-1. **Kiểm tra S-1**:
-   - Quét thư mục có > 1.000 file sạch (ví dụ 1.200 file) và kèm theo 1 file EICAR test hoặc 1 file mã độc giả định.
-   - Xác nhận: trên giao diện, chi tiết đường dẫn của file nhiễm mã độc vẫn được hiển thị và giữ nguyên trong kết quả; tổng số file quét hiển thị đúng > 1.200.
+1. **Kiểm tra S-1 (Phân tầng giới hạn & cảnh báo unlisted)**:
+   - Quét thư mục có > 1.000 file sạch (ví dụ 1.200 file) kèm 1 file mã độc: chi tiết file mã độc hiển thị đầy đủ, không bị file sạch chèn ép.
+   - Quét thư mục có > 1.000 file lỗi: chỉ 1.000 file lỗi được lưu chi tiết, các file lỗi tiếp theo tăng `unlisted_by_status.errors`, không ảnh hưởng tới hạn ngạch 10.000 file INFECTED.
+   - Khi vượt 10.000 file INFECTED: `unlisted_by_status.infected` đếm số lượng không được liệt kê và UI hiện cảnh báo `"N threats not listed"`.
 2. **Kiểm tra S-7 & S-6**:
    - Tắt app, cố tình làm hỏng file `%LOCALAPPDATA%\ZonEndpoint\cache.db` (ví dụ ghi đè chuỗi rác "corrupted header").
    - Mở lại app: xác nhận file hỏng đã được tự động đổi tên thành `cache.db.corrupt-...`, file `cache.db` mới được tự động tạo và quét bình thường.

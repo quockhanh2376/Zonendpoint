@@ -320,3 +320,18 @@
   - `npm.cmd run build`: PASS (Vite + TS 0 lỗi).
   - `node tests/native/run.mjs`: **21/21 PASS (chạy 2 lần liên tiếp đều PASS 100%)**.
 - Bàn giao: Soạn handoff `docs/handoffs/v031-client-vic-to-qeen.md`, đóng gói bản cài `Zonendpoint_0.3.1_x64-setup.exe` vào `E:\Zonendpoint-tools\artifacts\v57-release\` (3,650,792 bytes, SHA256: `1305f89913bfef92e65dc86175dde9628fa978c5b43a8ead557af70d6448f126`).
+
+## 2026-11-14 - V-65 (Sửa lỗi Q-44 cho V-57: S-1 phân tầng, cô lập test resilience, fix PID harness)
+- Xử lý các điểm nghiệm thu Q-44 của Qeen trên nhánh `vic/031-client`, worktree `E:\Zonendpoint-worktrees\v65-client-fix`:
+  1. **S-1**: Tách riêng giới hạn lưu trữ chi tiết: INFECTED tối đa 10.000 mục (`MAX_RETAINED_INFECTED`), mục khác (`Error`, `Unknown`, `Skipped`, `Cancelled`) tối đa 1.000 mục (`MAX_RETAINED_OTHER`). Bổ sung cấu trúc `unlisted_by_status` trong `ScanSummary` đếm chính xác số lượng mục không liệt kê theo từng trạng thái. Khi số lượng INFECTED vượt quá 10.000, UI hiển thị cảnh báo `"{N} threats not listed"`. Bổ sung unit tests kiểm tra phân tầng và tràn hạn ngạch.
+  2. **Resilience Test Isolation**: Khắc phục lỗi `test_clean_cache_hit_preserves_verified_content_cache_hit_message` khi chạy với LOCALAPPDATA tạm cô lập bằng cách tạo fixture status hợp lệ (`write_valid_server_status`), đồng bộ hóa biến môi trường qua `RESILIENCE_ENV_LOCK`, và bổ sung test riêng `test_missing_server_status_bypasses_cache` chứng minh thiếu status sẽ vô hiệu hóa cache (không cache CLEAN sai lệch).
+  3. **Native Test PID Lookup**: Sửa hàm `findTestAppPid()` trong `tests/native/run.mjs` sử dụng `path.resolve(binary)` và Win32_Process thay vì chỉ match tên thư mục worktree, khắc phục triệt để lỗi tìm PID trong V-30 khi QA chạy với `CARGO_TARGET_DIR` tạm ngoài worktree.
+- Đã chạy đầy đủ và chứng minh chất lượng trên môi trường LOCALAPPDATA cô lập:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo clippy --all-targets -- -D warnings`: PASS.
+  - `cargo test`: PASS 3 lần liên tiếp (97/97 tests: 77 lib, 1 bin, 19 resilience).
+  - `npm.cmd run build`: PASS (Vite + TS).
+  - `node tests/native/run.mjs`: PASS 2 lần liên tiếp (21/21 checks, gồm V-30 window close & orphan check).
+- Build lại release installer NSIS 0.3.1 và binary release:
+  - `Zonendpoint_0.3.1_x64-setup.exe` (SHA256: `a3cac9eca8b472b2a00b7b2e304ac07c463dec5e25fe3df6b237e10ae2242a33`).
+  - `zonendpoint.exe` (SHA256: `915b1baa61a89feb408705e9809176d632face3d58a93a1e13d28aef0de72318`).

@@ -33,6 +33,14 @@ type Summary = {
   skipped: number;
   cancelled_files: number;
   details_truncated: boolean;
+  unlisted_by_status?: {
+    clean: number;
+    infected: number;
+    unknown: number;
+    errors: number;
+    skipped: number;
+    cancelled: number;
+  };
   results: ScanResult[];
 };
 type Progress = { scan_id: string; scanned: number; clean: number; infected: number; unknown: number; errors: number; skipped: number; cancelled_files: number; latest: ScanResult };
@@ -690,6 +698,9 @@ function App() {
                     Processed {summary.scanned} items · clean {summary.clean} · threats {summary.infected} · unknown {summary.unknown} · errors {summary.errors} · skipped {summary.skipped} · cancelled {summary.cancelled_files}
                   </p>
                   {!summary.complete && <p className="notice warning">Do not treat an incomplete scan as clean.</p>}
+                  {summary.unlisted_by_status && summary.unlisted_by_status.infected > 0 && (
+                    <p className="notice warning">{summary.unlisted_by_status.infected} threats not listed</p>
+                  )}
                   {summary.details_truncated && <p>Result details are limited to keep memory use bounded.</p>}
                   {displayedResults.length > 0 && (
                     <ul className="results">

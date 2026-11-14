@@ -128,4 +128,5 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/031-client | 1124ab8 | YES | fix(config): ensure atomic configuration writes and surface corruption errors (S-5) |
 | 2026-11-14 | vic/031-client | 73e672d | YES | perf(events): throttle clean progress events to 10Hz while emitting non-clean immediately (P-5) |
 | 2026-11-14 | vic/031-client | 0595ac9 | YES | feat(ui): display environment override badge alongside server status icon (X-6) |
-| 2026-11-14 | vic/031-client | e251471 | YES | chore(release): bump version to 0.3.1 and update documentation |
+| 2026-11-14 | vic/031-client | e35f4d7 | YES | chore(release): bump version to 0.3.1 and update documentation |
+| 2026-11-14 | vic/031-client | 79f9a52 | YES | fix(client): resolve Q-44 findings for S-1 tiering, test isolation, and harness PID (Task V-65) |
