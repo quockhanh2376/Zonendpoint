@@ -105,3 +105,6 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-12 | vic/abusech-timer | 7e064a1 | YES | docs(tasks): track Task V-44 snapshot SHA in handoff, daily, and commit-notes |
 | 2026-11-12 | vic/close-fix-merge | 17bdccf | YES | Merge branch 'origin/vic/close-fix' into vic/close-fix-merge (Task V-30M) |
 | 2026-11-12 | vic/close-fix-merge | a493120 | YES | docs(v30m): record V-30M merge of close-fix into main and handoff |
+| 2026-11-10 | vic/securiteinfo | b95f3c6 | YES | docs(ops): record SecuriteInfo Basic integration and operational runbook (Task V-31) |
+| 2026-11-10 | vic/securiteinfo | 06fa7ba | YES | docs(tasks): track final commit in commit-notes |
+| 2026-11-14 | main | (this) | YES | Merge vic/securiteinfo docs (V-31 SecuriteInfo Basic runbook) into main (Zon approved "Merge tài liệu") |
