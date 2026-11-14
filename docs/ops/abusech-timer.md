@@ -280,3 +280,22 @@ sudo sh -c 'journalctl -u zonendpoint-abusech-update.service --no-pager | grep -
 sudo sh -c 'grep -rlFf /etc/zonendpoint/abusech.key /var/log /opt/zonendpoint/abusech/last-run.json || echo NO_KEY_LEAKED'
 ```
 Kết quả mong đợi: `JOURNAL_CLEAN` và `NO_KEY_LEAKED`.
+
+---
+
+## 7. Kiểm tra Sandbox Systemd sau Triển khai (Task L-12)
+
+Sau khi triển khai service unit vào `/etc/systemd/system/zonendpoint-abusech-update.service`:
+```bash
+# 1. Kiểm tra tính hợp lệ cú pháp của unit
+systemd-analyze verify /etc/systemd/system/zonendpoint-abusech-update.service
+
+# 2. Đánh giá mức độ an ninh (sandbox security score)
+systemd-analyze security zonendpoint-abusech-update.service
+```
+Dự kiến điểm exposure giảm mạnh nhờ các rào chắn:
+- `ProtectSystem=strict` kèm `ReadWritePaths=/opt/zonendpoint /var/lib/clamav /var/backups /run/lock`
+- `ReadOnlyPaths=/etc/zonendpoint`
+- `PrivateDevices=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectControlGroups=yes`
+- `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`
+- `NoNewPrivileges=yes`, `PrivateTmp=yes`

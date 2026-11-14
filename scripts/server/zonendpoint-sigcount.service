@@ -6,6 +6,22 @@ Wants=clamav-daemon.service
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 /usr/local/bin/zonendpoint-sigcount.py
-User=root
 StandardOutput=journal
 StandardError=journal
+
+# Dynamic user and journal access (Task L-12)
+DynamicUser=yes
+SupplementaryGroups=systemd-journal
+StateDirectory=zonendpoint/status
+
+# Sandbox & Security Hardening (Task L-12)
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/zonendpoint/status
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

@@ -26,6 +26,16 @@ Extracts active ClamAV signature count and metadata from `clamav-daemon` systemd
    cat /var/lib/zonendpoint/status/signatures.json
    ```
 
+4. Security Verification (Task L-12):
+   Verify syntax and security score of the sandbox:
+   ```bash
+   # Verify unit syntax
+   systemd-analyze verify /etc/systemd/system/zonendpoint-sigcount.service
+
+   # Inspect security score (runs as DynamicUser with sandbox)
+   systemd-analyze security zonendpoint-sigcount.service
+   ```
+
 ## Output Format
 
 File `/var/lib/zonendpoint/status/signatures.json` (permissions `0644`), standard UTC+7 (`Asia/Ho_Chi_Minh`):

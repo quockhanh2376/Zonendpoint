@@ -267,3 +267,21 @@ All task safety constraints were strictly verified:
    - `clamav-check-update-health.timer`: `active`
    - `clamav-daemon.service`: `active`
 4. **Zero EICAR / Malware**: No malware or EICAR strings were introduced.
+
+---
+
+## 7. Kiểm tra Sandbox Systemd sau Triển khai (Task L-12)
+
+Sau khi triển khai service unit vào `/etc/systemd/system/zonendpoint-yara-update.service`:
+```bash
+# 1. Kiểm tra tính hợp lệ cú pháp của unit
+systemd-analyze verify /etc/systemd/system/zonendpoint-yara-update.service
+
+# 2. Đánh giá mức độ an ninh (sandbox security score)
+systemd-analyze security zonendpoint-yara-update.service
+```
+Dự kiến điểm exposure giảm mạnh nhờ các rào chắn sandbox:
+- `ProtectSystem=strict` kèm `ReadWritePaths=/opt/zonendpoint /var/lib/clamav /var/backups /run/lock`
+- `PrivateDevices=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectControlGroups=yes`
+- `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`
+- `NoNewPrivileges=yes`, `PrivateTmp=yes`
