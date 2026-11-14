@@ -107,4 +107,16 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-12 | vic/close-fix-merge | a493120 | YES | docs(v30m): record V-30M merge of close-fix into main and handoff |
 | 2026-11-10 | vic/securiteinfo | b95f3c6 | YES | docs(ops): record SecuriteInfo Basic integration and operational runbook (Task V-31) |
 | 2026-11-10 | vic/securiteinfo | 06fa7ba | YES | docs(tasks): track final commit in commit-notes |
-| 2026-11-14 | main | (this) | YES | Merge vic/securiteinfo docs (V-31 SecuriteInfo Basic runbook) into main (Zon approved "Merge tài liệu") |
+| 2026-11-13 | vic/release-candidate | b79f21e | YES | docs(v51): hand off NSIS release candidate to Qeen (P0) |
+| 2026-11-13 | vic/release-candidate | 80d2a7a | YES | chore(release): bump version to 0.3.0 |
+| 2026-11-13 | vic/release-candidate | bba9e39 | YES | docs(v51): update release candidate handoff and notes for 0.3.0 rebuild |
+| 2026-11-13 | vic/release-candidate | 631dabe | YES | docs(tasks): track Task V-51 snapshot SHA in commit-notes |
+| 2026-11-14 | main | 6e652c3 | YES | Merge vic/securiteinfo docs (V-31 SecuriteInfo Basic runbook) into main (Zon approved "Merge tài liệu") |
+| 2026-11-14 | vic/release-candidate | e15b864 | YES | Merge branch 'origin/main' into vic/release-candidate |
+| 2026-11-14 | vic/release-candidate | efb5707 | YES | feat(cover): add ClamAV signature cover badge and server extraction (Task V-52) |
+| 2026-11-14 | vic/release-candidate | e9e7349 | YES | fix(tunnel): apply non-interactive ssh flags and execution timeout watchdog (Task V-52) |
+| 2026-11-14 | vic/release-candidate | 21e6191 | YES | fix(cover): resolve UTF-8 BOM, add fetched_at_utc and strict validation (Task V-53) |
+| 2026-11-14 | vic/release-candidate | 5a5ea73 | YES | fix(timezone): standardize app and server status to UTC+7 (Task V-53) |
+| 2026-11-14 | vic/release-candidate | d3c33c4 | YES | feat(ui): hide server config row when connected OK and toggle via status icon (Task V-54) |
+| 2026-11-14 | vic/release-candidate | d91279d | YES | feat(ui): auto-compact scan results window to content height (Task V-55) |
+| 2026-11-14 | vic/release-candidate | 02cc273 | YES | test(core): eliminate test directory race conditions across parallel runners (Task V-56) |

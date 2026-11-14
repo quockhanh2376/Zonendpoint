@@ -2,6 +2,25 @@
 
 All notable changes to Zonendpoint are documented in this file.
 
+## [0.3.0] - 2026-11-13
+
+### Added
+- **Hiển thị số chữ ký bảo vệ (Cover Badge)**: Hiển thị huy hiệu "Cover: <số chữ ký>" viền cam dưới slogan, đồng bộ định kỳ chữ ký ClamAV thực tế từ lab server qua SSH tunnel, hỗ trợ phát hiện dữ liệu cũ (>2 giờ) và tương thích cả 2 giao diện sáng/tối (V-52).
+- **Quét thư mục song song thích ứng (Adaptive Concurrency)**: Tự động điều chỉnh số luồng quét theo dung lượng RAM và số CPU (8 GiB $\rightarrow$ 2, 16 GiB $\rightarrow$ 3, tối đa trần 4 luồng); tự giảm luồng về 1 khi clamd quá tải và hồi phục dần sau 50 file ổn định (J-01..J-05).
+- **Tích hợp nguồn cấp mã độc abuse.ch (MalwareBazaar & ThreatFox)**: Đồng bộ danh sách hash độc hại từ MalwareBazaar và ThreatFox lên ClamAV lab, tuân thủ nghiêm ngặt hạn ngạch 3 request/giờ (V-33..V-41).
+- **Bộ lập lịch cập nhật tự động (Hourly Timer Scheduler)**: Tự động tải bản cập nhật hash mỗi 61 phút sau khi lượt trước kết thúc (`OnUnitInactiveSec`), luân phiên slot giữa MalwareBazaar và ThreatFox chống starvation (V-42..V-44).
+- **Cache nội dung SQLite**: Tra cứu kết quả quét dựa trên hash nội dung SHA-256, metadata và engine identity, giải phóng sớm tài nguyên khi cache hit.
+- **Công cụ đo kiểm hiệu năng (Folder Benchmark)**: Bổ sung benchmark nội bộ (`folder_bench`) phục vụ đo đạc tốc độ quét thư mục cục bộ (J-04).
+
+### Changed
+- **Co gọn cửa sổ kết quả quét về chiều cao nội dung (V-55)**: Khi quét xong trả về kết quả "All Good" (hoàn tất, 0 phát hiện mã độc/lỗi/không xác định/hủy bỏ), cửa sổ ứng dụng tự động co gọn về chiều cao chuẩn compact (~240px, loại bỏ hoàn toàn khoảng trống thừa dưới card All Good); khi có mối đe dọa hoặc kết quả lỗi cần xem xét, cửa sổ vẫn tự động nới cao theo nội dung thực tế (được giới hạn an toàn theo vùng làm việc `workArea` của màn hình); hỗ trợ co lại chuẩn xác khi quét lại All Good sau một lần kết quả dài.
+- **Ẩn ô cấu hình Server khi kết nối OK (V-54)**: Ẩn tự động hàng cấu hình Server (ô nhập địa chỉ và nút Save) khi kết nối tới ClamAV daemon thành công hoặc trong trạng thái đang kiểm tra lần đầu; tự động hiển thị khi mất kết nối/lỗi để người dùng cấu hình; hỗ trợ bấm vào biểu tượng trạng thái kết nối để bật/tắt thủ công; giữ hiển thị khi người dùng đang thao tác trong ô nhập.
+
+### Fixed
+- **Sửa lỗi hiển thị ô Cover do UTF-8 BOM & siết chặt xác thực dữ liệu (V-53)**: Xử lý triệt để lỗi app hiện "Cover: —" khi file status có UTF-8 BOM; tunnel chuyển sang ghi UTF-8 không BOM; bổ sung trường `fetched_at_utc` để tính stale chính xác theo lần sync máy trạm (>2h); siết chặt kiểm tra số nguyên signatures JSON và định dạng thời gian ISO-8601 UTC chuẩn xác.
+- **Đóng ứng dụng khi đang quét (Graceful Window Close)**: Hủy quét an toàn và ẩn cửa sổ ngay lập tức khi người dùng đóng app, đợi tối đa 5 giây cho worker hoàn tất, bảo toàn 100% bằng chứng phát hiện mối đe dọa (INFECTED) và không để lại tiến trình mồ côi (V-30, V-30M).
+- **Loại trừ lỗi quyền DriverData**: Loại trừ `%SystemRoot%\System32\drivers\DriverData` trong Quick Scan trên Windows tiêu chuẩn, tránh lỗi `Access is denied` không mong muốn.
+
 ## [0.2.1] - 2026-11-10
 
 ### Added

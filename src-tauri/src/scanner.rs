@@ -805,8 +805,28 @@ pub async fn scan_file_with_engine_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
     use tokio::{net::TcpListener, sync::watch};
+
+    static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn test_temp_dir(label: &str) -> PathBuf {
+        let count = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "zonendpoint-{label}-{}-{count}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
 
     #[tokio::test]
     async fn scan_limiter_backs_off_to_one_on_server_pressure() {
@@ -1095,9 +1115,7 @@ mod tests {
 
     #[tokio::test]
     async fn same_size_same_mtime_content_change_cannot_reuse_clean_cache() {
-        let root =
-            std::env::temp_dir().join(format!("zonendpoint-cache-race-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = test_temp_dir("cache-race");
         let file_path = root.join("fixture.bin");
         let cache_path = root.join("cache.db");
         std::fs::write(&file_path, b"good").unwrap();
@@ -1144,8 +1162,7 @@ mod tests {
 
     #[tokio::test]
     async fn offline_engine_cannot_reuse_cached_clean_verdict() {
-        let root = std::env::temp_dir().join(format!("zonendpoint-offline-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = test_temp_dir("offline");
         let file_path = root.join("fixture.bin");
         let cache_path = root.join("cache.db");
         std::fs::write(&file_path, b"known clean bytes").unwrap();
@@ -1231,11 +1248,7 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_offline_cache_not_reused() {
-        let root = std::env::temp_dir().join(format!(
-            "zonendpoint-preflight-cache-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = test_temp_dir("preflight-cache");
         let file_path = root.join("fixture.bin");
         let cache_path = root.join("cache.db");
         std::fs::write(&file_path, b"known clean data").unwrap();
@@ -1328,9 +1341,7 @@ mod tests {
     async fn max_file_bytes_is_25_mib_and_oversize_file_is_skipped() {
         assert_eq!(MAX_FILE_BYTES, 25 * 1024 * 1024);
 
-        let temp_dir =
-            std::env::temp_dir().join(format!("zonendpoint-oversize-{}", std::process::id()));
-        std::fs::create_dir_all(&temp_dir).unwrap();
+        let temp_dir = test_temp_dir("oversize");
         let file_path = temp_dir.join("oversize.bin");
 
         let file = std::fs::File::create(&file_path).unwrap();

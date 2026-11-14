@@ -309,3 +309,109 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
 - Detailed method, machine/tunnel identity, per-file percentiles, top-10 slow-file comparisons, limitations and UTC run intervals are in [J-06 baseline](qa/perf-baseline-0.3.0.md); raw JSON per run and `run.meta` in `E:\Zonendpoint-tools\artifacts\j06\runs`. Brief report: `E:\Zonendpoint-tools\artifacts\j06\jacky-report.md`.
 - Gates PASS: `cargo fmt --check`, `cargo test` 70/70, `cargo clippy --all-targets -- -D warnings`, `cargo build --release --example folder_bench`. Original `%LOCALAPPDATA%\ZonEndpoint\cache.db` hash unchanged. App + WebView2 process-tree RAM NOT RUN; Qeen acceptance NOT RUN. No causal attribution for the two slow outliers without lab journal/timer evidence.
 - Next acceptance: Qeen independently reviews the exact handoff snapshot; Loki owns push. Qeen must measure full installed-app/WebView2 RAM.
+## V-51 / P0 — Release Candidate NSIS Build (2026-11-13)
+- Checkout `E:\Zonendpoint-worktrees\v51-release`, branch `vic/release-candidate` from `origin/main` (`f3e959d`). Clean tree verified before build.
+- Toolchain: rustc 1.99.1, cargo 1.99.1, node v26.13.0, npm 11.20.0, NSIS v3.13 (`C:\Users\admzon\AppData\Local\tauri\NSIS\makensis.exe`).
+- Version bumped to `0.3.0` per Zon approval (commit `80d2a7a`: package.json, package-lock.json, tauri.conf.json, Cargo.toml, Cargo.lock, CHANGELOG.md).
+- Hashes: `package-lock.json` `EC08DA44135F6A693C0A7A57A4A9400D65B6BE624FC83BC48A0C130CE6E27029`, `src-tauri/Cargo.lock` `122243C0C54C2EECD61164FA56924FBBD25759AFE47C06346163F745F39D97E5`.
+- Pre-build gates: `cargo fmt -- --check` PASS (0 diffs), `cargo test` **70/70 PASS** (51 lib, 1 bin, 18 resilience), `cargo clippy --all-targets -- -D warnings` PASS, `npm.cmd run build` PASS, `node tests/native/run.mjs` **20/20 PASS** (UI verified displaying `v0.3.0`; V-30 window close tests; 0 orphan processes).
+- Release build: `npm.cmd ci` then `npm.cmd run build:windows` (`tauri build --target x86_64-pc-windows-msvc --bundles nsis`). No `native-ui-tests` feature, no test overrides.
+- Artifacts:
+  - Installer: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,709,078 bytes)
+  - Installer SHA256: `5BC97E93158D7A546F3EC79D26D2EFE5AB6ECE3062153403E780374EB006D55B`
+  - App executable: `zonendpoint.exe` (PE x64, SHA256: `600AE667D077B02CF387CAFF563E6813AF353F32131593316B97F753EA45C10A`)
+  - NSIS version: `v3.13`, Version: `0.3.0`. Unsigned.
+- No install/overwrite on user system. Ready for Qeen testing (steps 3–5 of `V/Q-RELEASE-CURRENT`).
+- Handoff doc: [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Branch `vic/release-candidate` pushed; no merge to main.
+
+## V-52 — Cover Signature Badge & Server Integration in 0.3.0 (2026-11-14)
+- Phê duyệt: Anh Zon duyệt 2026-11-14 ("Vào 0.3.0"), tích hợp ô "Cover: <số chữ ký>" dưới logo/slogan bên trái, khung viền cam bo tròn.
+- Merged `origin/main` (`6e652c3`, SecuriteInfo docs) vào `vic/release-candidate` (commit `e15b864`).
+- Server (Lab):
+  - `scripts/server/zonendpoint-sigcount.py` + `zonendpoint-sigcount.service` + `zonendpoint-sigcount.timer` (10 phút/lần, root).
+  - Đọc dòng reload/load ClamAV mới nhất trong journal (`journalctl -u clamav-daemon.service -r -g signatures -n 10 -o json`).
+  - Ghi nguyên tử `/var/lib/zonendpoint/status/signatures.json` quyền 0644 (`{"signatures": 8616478, "loaded_at_utc": "...", "engine": "ClamAV 1.5.4/28182"}`).
+  - Đã cài đặt, kích hoạt timer và kiểm chứng trực tiếp trên lab server.
+- Client Tunnel Supervisor:
+  - Mở rộng `scripts/windows/zon-tunnel.ps1`: chạy runspace nền đồng bộ `/var/lib/zonendpoint/status/signatures.json` qua SSH mỗi ~15 phút về `%LOCALAPPDATA%\ZonEndpoint\server-status.json`.
+  - Tuân thủ nghiêm ngặt chỉ thị của Loki: cờ SSH non-interactive `-n -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2` cùng watchdog timeout 25s qua .NET Process, đảm bảo không bao giờ bị treo tiến trình hoặc socket rò rỉ.
+  - Kiểm tra tính hợp lệ nghiêm ngặt (JSON, signatures int 0..1e9, ISO UTC timestamp), ghi nguyên tử; không làm gián đoạn vòng lặp `ssh -N`.
+  - Đã test thử nghiệm bằng tiến trình tạm (`-SyncOnce`), ghi log tunnel sạch, không sửa Scheduled Task hiện tại của anh Zon.
+- App Backend & UI:
+  - Rust module `src-tauri/src/server_status.rs` với lệnh `get_server_status`: kiểm tra untrusted data (file <=64KB, signatures 0..1e9, stale nếu >2 giờ).
+  - Frontend UI: badge `.brand-cover` dưới slogan, hiển thị `Cover: 8,616,464`, tooltip chi tiết, stale styling, tương thích 2 theme và layout co giãn.
+- Quality Gates & Packaging:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo test`: **77/77 PASS** (58 lib, 1 bin, 18 resilience).
+  - `cargo clippy --all-targets -- -D warnings`: PASS.
+  - `npm.cmd run build`: PASS.
+  - `node tests/native/run.mjs`: **21/21 PASS** (thêm test Cover badge, 0 tiến trình mồ côi).
+  - Release build NSIS: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3.714.841 bytes, PE x64, NSIS v3.13).
+  - Installer SHA256: `b0f0f6a9e6a6737438aaeee166bc376c077dc53b6d36a0622325ee388ecf669f`.
+  - App executable SHA256: `ae223e2533e5925106c2e36ce5bc881622e6bade4587e03cff6607e7fd1276eb`.
+- Handoff: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy `vic/release-candidate`. Không tag, không ký, không merge main.
+
+## V-53 — Cover Badge UTF-8 BOM Fix, Strict Validation & UTC+7 Timezone Standardization in 0.3.0 (2026-11-14)
+- Triển khai theo yêu cầu Zon test tay 2026-11-14: khắc phục lỗi app hiện "Cover: —" khi file status chứa UTF-8 BOM (`EF BB BF`) và chuẩn hóa toàn bộ ứng dụng sang múi giờ **UTC+7 (Asia/Ho_Chi_Minh)**.
+- Nguyên nhân BOM: PowerShell 5.1/.NET ghi UTF-8 có kèm BOM khi dùng `[System.Text.Encoding]::UTF8`, khiến `serde_json::from_str` lỗi parse.
+- Chuẩn hóa UTC+7:
+  - Lab Server (`100.96.250.245`): đổi múi giờ sang `Asia/Ho_Chi_Minh` (+0700). Ghi nhận các timer `OnCalendar` không có hậu tố UTC bị dịch 7 giờ (`dpkg-db-backup`, `sysstat-rotate`, `sysstat-summary`, `logrotate`, `zonendpoint-yara-update`, `e2scrub`, `xfs_scrub`, `fstrim`), các timer tương đối (`sigcount` 10m, `abusech` 61m, `sysstat-collect` 10m, `clamav-health` 30m) giữ nguyên chu kỳ. Script `zonendpoint-sigcount.py` ghi giờ `+07:00` và đổi trường sang `loaded_at`.
+  - Tunnel (`scripts/windows/zon-tunnel.ps1`): chuyển sang ghi UTF-8 không BOM qua `New-Object System.Text.UTF8Encoding($false)`. Format timestamp trong `tunnel.log` theo `+07:00`. Sinh trường `fetched_at` theo `+07:00` và chuẩn hóa `loaded_at` sang `+07:00`.
+  - Rust Backend (`src-tauri/src/server_status.rs`): loại bỏ BOM đầu file (`trim_start_matches('\u{feff}')`) trước khi parse. Parser nhận dạng `YYYY-MM-DDTHH:MM:SS+07:00`, tương thích ngược chuyển đổi định dạng `...Z` cũ sang `+07:00`. Tính toán `stale` dựa trên epoch seconds tuyệt đối (`local_secs - 7 * 3600`), triệt tiêu hoàn toàn nguy cơ lệch 7 giờ gây stale giả.
+  - Frontend UI: Tooltip hiển thị dạng `DD/MM/YYYY HH:mm (UTC+7)` độc lập 100% với cài đặt múi giờ/locale của hệ điều hành máy client: `"ClamAV signatures on server (loaded 14/11/2026 11:41 (UTC+7)), synced 14/11/2026 11:45 (UTC+7)"`.
+  - Siết chặt validation: signatures bắt buộc là số nguyên JSON (từ chối số thập phân như `8616497.5`, chuỗi, số âm, > 1e9); thời gian bắt buộc đúng chuẩn ISO-8601 `+07:00` (hoặc `Z` cũ), từ chối mọi offset khác (+00:00, +08:00, v.v.), phần thập phân và hậu tố lạ.
+- Phân tích rủi ro gỡ cài đặt (Mục 7):
+  - Phân tích template NSIS của Tauri: lệnh gỡ chỉ xóa `zonendpoint.exe` và `uninstall.exe`, sau đó gọi `RMDir "$INSTDIR"` (không có `/r`, chỉ xóa khi thư mục rỗng).
+  - Checkbox "Delete app data" chỉ xóa `%LOCALAPPDATA%\com.zonendpoint.desktop` (bundle id của WebView2), hoàn toàn không động tới `%LOCALAPPDATA%\ZonEndpoint`.
+  - Kết luận: Gỡ cài đặt hoàn toàn KHÔNG xóa `cache.db`, `config.json`, `server-status.json` hay `tunnel\`.
+  - Đề xuất: Chuyển thư mục cài đặt sang `%LOCALAPPDATA%\Programs\ZonEndpoint` để tách bạch rõ ràng giữa file thực thi và dữ liệu người dùng (chờ Zon quyết).
+- Quality Gates:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo test`: **81/81 PASS** (62 lib, 1 bin, 18 resilience; 11 server_status tests gồm test chống lệch 7 giờ).
+  - `cargo clippy --all-targets -- -D warnings`: PASS.
+  - `npm.cmd run build`: PASS.
+  - `node tests/native/run.mjs`: **21/21 PASS** (mock file có UTF-8 BOM và tooltip `(UTC+7)`).
+  - Đóng gói NSIS: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,715,539 bytes, PE32+ x64, NSIS v3.13).
+  - Installer SHA256: `A6797CA3FAA4DCD4A62D2FD71E225D27F720250B776A724DE2AC0A57405D394F`.
+- Bàn giao: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+## V-54 — Server Configuration Row Visibility When Connected OK in 0.3.0 (2026-11-14)
+- Triển khai theo yêu cầu Zon 2026-11-14: ẩn hàng cấu hình Server (ô nhập `#server-address-input` + nút Save `.server-save-btn`) khi kết nối OK để giao diện gọn gàng.
+- Hành vi chi tiết:
+  1. Kết nối OK (`serverStatus === "connected"`): tự động ẩn hàng Server.
+  2. Đang kiểm tra lần đầu (`serverStatus === "checking"`): không hiện (tránh nhấp nháy giao diện khi khởi động).
+  3. Mất kết nối / lỗi kết nối (`serverStatus === "disconnected"`): tự động hiển thị hàng Server để người dùng sửa địa chỉ và Save; khi kết nối lại OK thì tự ẩn lại (trừ khi đang focus/gõ trong ô).
+  4. Bật/tắt thủ công khi đang OK: bấm vào icon trạng thái server (dấu check xanh) để hiện/ẩn. Hỗ trợ đầy đủ keyboard accessible và cập nhật động `title`/`aria-label` ("Show server settings" / "Hide server settings").
+  5. Bảo toàn focus: không bao giờ ẩn hàng Server khi người dùng đang focus trong ô nhập (`isServerInputFocused`).
+  6. Không đổi logic kết nối/lưu cấu hình backend; bảo toàn bố cục trên 2 theme Light/Dark và cửa sổ hẹp 800x240.
+- Quality Gates:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo test`: **81/81 PASS** (62 lib, 1 bin, 18 resilience).
+  - `cargo clippy --all-targets -- -D warnings`: PASS.
+  - `npm.cmd run build`: PASS.
+  - `node tests/native/run.mjs`: **21/21 PASS** (kiểm thử đầy đủ 3 trạng thái của hàng Server: OK -> ẩn; offline -> hiện; bấm icon -> toggle hiện/ẩn).
+  - Đóng gói NSIS release: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,716,290 bytes, PE32+ x64, NSIS v3.13).
+  - Installer SHA256: `8AF8B82DEC059D138338DA880DB41BA2E2D54950ADDC33E6690430AB3B90F426`.
+- Bàn giao: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+## V-55 — Auto-Compact Scan Results Window to Content Height in 0.3.0 (2026-11-14)
+- Triển khai theo yêu cầu Zon 2026-11-14 sau khi Q-40 phát hiện lỗi cửa sổ release cao ~800px tạo khoảng trống lớn dưới card All Good:
+- Nguyên nhân gốc rễ:
+  1. `src/App.tsx` trước đây sử dụng `Math.max(window.innerHeight, ...)` và điều kiện một chiều `if (height > window.innerHeight)`, khiến cửa sổ chỉ có thể nới rộng mà không bao giờ co lại.
+  2. Việc đo chiều cao bằng `.app-shell.scrollHeight` bị ảnh hưởng bởi CSS `.selection-panel { min-height: max(208px, calc(100vh - 32px)); }`, khiến container luôn bị kéo giãn bằng chiều cao viewport.
+- Giải pháp triển khai:
+  1. Hàm `measureContentHeight()` đo chính xác tọa độ đáy của các phần tử con thực sự (`.brand-heading` và `.selection-panel` descendants kèm margin/padding), loại bỏ ảnh hưởng từ min-height viewport.
+  2. Khi kết quả là "All Good" (`isClean`: hoàn tất, 0 threat/error/unknown/cancelled): đặt chiều cao mục tiêu chuẩn compact 240px.
+  3. Khi kết quả có threat/error/cancelled: tự động nới cao theo `measureContentHeight()` (giới hạn an toàn theo `workArea` của màn hình).
+  4. Hỗ trợ quét lần 2 All Good sau một lần kết quả dài: tự động co lại chuẩn xác về 240px.
+  5. Bảo toàn tương tác kéo chỉnh kích cỡ cửa sổ thủ công của người dùng, không giật màn hình khi chưa có kết quả mới.
+- Đính chính phân loại timer trong handoff: `zonendpoint-yara-update.timer` có `OnCalendar=*-*-* 20:00:00 UTC` (chỉ định rõ UTC, chạy ~03:00–05:00 +07 do randomize delay), do đó không bị dịch giờ khi đổi múi giờ sang `Asia/Ho_Chi_Minh`.
+- Quality Gates:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo test`: **81/81 PASS** (62 lib, 1 bin, 18 resilience).
+  - `cargo clippy --all-targets -- -D warnings`: PASS.
+  - `npm.cmd run build`: PASS.
+  - `node tests/native/run.mjs`: **21/21 PASS (chạy 2 lần liên tiếp đều PASS 100%)** (xác minh nới cao > 300px khi có threat, co gọn <= 300px và khoảng trống dưới card < 80px khi All Good; khắc phục triệt để race condition V-30 bằng `waitForEnabled`).
+  - Đóng gói NSIS release: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,715,823 bytes, PE32+ x64, NSIS v3.13).
+  - Installer SHA256: `fa0495faf4ae9faea6fc84fe962e6b5eac3be14ea789768490206d3b3c8c3e03`.
+- Bàn giao: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy nhánh `vic/release-candidate`. Không tag, không ký, không merge main.

@@ -144,9 +144,14 @@ async fn spawn_mock_clamd(
     (addr, task)
 }
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 fn create_temp_test_dir(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+    let count = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!(
-        "zonendpoint-resilience-{name}-{}",
+        "zonendpoint-resilience-{name}-{}-{count}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&root);

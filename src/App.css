@@ -33,6 +33,9 @@
   --error-text: #8b1d29;
   --error-bg: #fde8e9;
   --brand-purple: #6b21a8;
+  --cover-border: #ea580c;
+  --cover-text: #9a3412;
+  --cover-bg: rgba(234, 88, 12, 0.08);
 }
 
 :root[data-theme="dark"] {
@@ -67,6 +70,9 @@
   --error-text: #ffb0b4;
   --error-bg: #4a252c;
   --brand-purple: #c084fc;
+  --cover-border: #f97316;
+  --cover-text: #ffffff;
+  --cover-bg: rgba(249, 115, 22, 0.14);
 }
 
 :root {
@@ -89,6 +95,11 @@ progress { accent-color: var(--primary-bg); }
 .brand-identity { display: flex; align-items: flex-start; gap: 8px; }
 .brand-logo { display: block; width: 168px; max-width: 100%; height: 162px; object-fit: fill; clip-path: inset(0 0 7% 0); }
 .brand-slogan { width: 168px; max-width: 100%; margin: -8px 0 0; color: var(--slogan-color); font-size: 13px; font-weight: 600; line-height: 1.4; text-align: right; }
+.brand-cover-row { display: flex; justify-content: flex-end; width: 168px; max-width: 100%; margin-top: 6px; }
+.brand-cover { display: inline-flex; align-items: center; gap: 4px; padding: 2.5px 10px; border: 1.5px solid var(--cover-border); border-radius: 9999px; font-size: 11px; font-weight: 600; line-height: 1.3; color: var(--cover-text); background: var(--cover-bg); white-space: nowrap; letter-spacing: 0.2px; user-select: none; cursor: default; transition: opacity 0.2s ease, border-color 0.2s ease; }
+.brand-cover-label { opacity: 0.9; }
+.brand-cover-count { font-variant-numeric: tabular-nums; }
+.brand-cover.stale { opacity: 0.65; filter: grayscale(0.3); }
 .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .panel-header h1 { margin: 0; font-size: clamp(13px, 2vw, 18px); line-height: 1.2; }
 .scan-feedback { margin-top: 12px; }

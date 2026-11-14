@@ -18,6 +18,30 @@ writeFileSync(path.join(systemRoot, 'drivers', 'DriverData', 'ignored.bin'), 'ex
 const coreNames = ['ntoskrnl.exe', 'ntdll.dll', 'kernel32.dll', 'kernelbase.dll', 'ci.dll', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe', 'lsass.exe', 'svchost.exe', 'winlogon.exe', 'winload.efi'];
 for (const name of coreNames) writeFileSync(path.join(systemRoot, name), `Benign system fixture ${name}`);
 writeFileSync(path.join(systemRoot, 'drivers', 'fixture.sys'), 'Benign driver fixture');
+const testAppdataZon = path.join(run, 'appdata', 'Zonendpoint');
+mkdirSync(testAppdataZon, { recursive: true });
+function formatIsoVn(date) {
+  const vnTime = new Date(date.getTime() + 7 * 3600 * 1000);
+  const yyyy = vnTime.getUTCFullYear();
+  const mm = String(vnTime.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(vnTime.getUTCDate()).padStart(2, '0');
+  const hh = String(vnTime.getUTCHours()).padStart(2, '0');
+  const min = String(vnTime.getUTCMinutes()).padStart(2, '0');
+  const ss = String(vnTime.getUTCSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}+07:00`;
+}
+const mockServerStatus = {
+  signatures: 8616464,
+  loaded_at: formatIsoVn(new Date(Date.now() - 30 * 60 * 1000)),
+  fetched_at: formatIsoVn(new Date(Date.now() - 5 * 60 * 1000)),
+  engine: "ClamAV 1.5.4/28182"
+};
+const mockStatusJson = JSON.stringify(mockServerStatus, null, 2);
+const mockStatusWithBom = Buffer.concat([
+  Buffer.from([0xEF, 0xBB, 0xBF]),
+  Buffer.from(mockStatusJson, 'utf8')
+]);
+writeFileSync(path.join(testAppdataZon, 'server-status.json'), mockStatusWithBom);
 const real = process.argv.includes('--real');
 const results = [];
 let browser, driver, server, serverPort, mode = 'clean', versionDelayMs = 0;
@@ -54,6 +78,20 @@ async function check(name, test) {
 
 async function button(label) {
   return label === "Start scan" ? browser.$("button.primary") : browser.$(`button=${label}`);
+}
+
+async function setInputValue(selector, value) {
+  await browser.execute((sel, val) => {
+    const input = document.querySelector(sel);
+    if (!input) throw new Error(`Element ${sel} not found`);
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value'
+    ).set;
+    nativeInputValueSetter.call(input, val);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, selector, value);
 }
 
 async function select(kind = 'file') {
@@ -314,6 +352,25 @@ try {
     assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'light');
   });
 
+  await check('server status Cover badge displays formatted signatures from local file (V-52)', async () => {
+    const coverEl = await browser.$('.brand-cover');
+    assert.equal(await coverEl.isExisting(), true, 'Cover badge element must exist');
+    await browser.waitUntil(async () => {
+      const txt = await coverEl.getText();
+      return txt.includes('Cover:') && txt.includes('8,616,464');
+    }, { timeout: 10000, timeoutMsg: 'Cover badge did not display 8,616,464 within timeout' });
+
+    const title = await coverEl.getAttribute('title');
+    assert.match(title, /ClamAV signatures on server.*loaded.*\(UTC\+7\).*synced.*\(UTC\+7\)/i);
+
+    // Verify in dark theme as well
+    await browser.$('.theme-toggle').click();
+    assert.equal(await coverEl.isExisting(), true);
+    const darkTxt = await coverEl.getText();
+    assert.ok(darkTxt.includes('8,616,464'), 'Cover badge must remain visible and populated in dark theme');
+    await browser.$('.theme-toggle').click(); // switch back to light
+  });
+
   await check('keyboard focus order', async () => {
     await browser.execute(() => {
       document.querySelector('.server-status')?.focus();
@@ -394,6 +451,9 @@ try {
       assert.doesNotMatch(await item.$('.status').getText(), /Clean/);
     }
     assert.match(await browser.$('.results').getText(), /Native-Mock-Signature/);
+    await browser.waitUntil(async () => (await browser.execute(() => window.innerHeight)) > 300, { timeout: 10000 });
+    const heightWithThreats = await browser.execute(() => window.innerHeight);
+    assert.ok(heightWithThreats > 300, `Window innerHeight must expand for non-clean results (got ${heightWithThreats})`);
     mode = 'clean';
     writeFileSync(path.join(systemRoot, 'ci.dll'), 'Restored harmless ci fixture');
   });
@@ -446,7 +506,7 @@ try {
     mkdirSync(statusIconArtifactsDir, { recursive: true });
     const statusBtn = await browser.$('.server-status');
     await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'connected', { timeout: 10000 });
-    assert.equal(await statusBtn.getAttribute('title'), 'Connected to ZonEndpoint server');
+    assert.equal(await statusBtn.getAttribute('title'), 'Show server settings');
     assert.equal(await browser.$('.server-status svg.status-icon-connected').isExisting(), true, 'Connected checkmark SVG must exist');
 
     // 1. Connected screenshots (light & dark)
@@ -498,7 +558,7 @@ try {
     await startMockServer(serverPort);
     await statusBtn.click();
     await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'connected', { timeout: 10000 });
-    assert.equal(await statusBtn.getAttribute('title'), 'Connected to ZonEndpoint server');
+    assert.equal(await statusBtn.getAttribute('title'), 'Show server settings');
   });
 
   if (!real) await check('automatic preflight and background check preserves icon without flashing checking (Q-14)', async () => {
@@ -572,6 +632,16 @@ try {
       assert.match(await browser.$('main').getText(), /clean 0/);
       mode = 'clean';
       await scan('Scan complete');
+      await browser.waitUntil(async () => (await browser.execute(() => window.innerHeight)) <= 300, { timeout: 10000 });
+      const heightAfterAllGood = await browser.execute(() => window.innerHeight);
+      assert.ok(heightAfterAllGood <= 300, `Window innerHeight after All Good must be compact <= 300px (got ${heightAfterAllGood})`);
+
+      // Verify no excessive empty space under card (< 80px gap)
+      const gap = await browser.execute(() => {
+        const card = document.querySelector('.all-good-card');
+        return card ? window.innerHeight - card.getBoundingClientRect().bottom : null;
+      });
+      assert.ok(gap !== null && gap >= 0 && gap < 80, `No large empty space under All Good card (gap: ${gap}px)`);
     });
 
     await check('offline never becomes CLEAN', async () => {
@@ -584,23 +654,57 @@ try {
       await startMockServer(serverPort);
     });
 
-    await check('server settings input and validation', async () => {
+    await check('server settings input, validation, and V-54 row visibility', async () => {
+      // 1. In disconnected state: server row is automatically visible
       const input = await browser.$('#server-address-input');
-      assert.equal(await input.isExisting(), true, 'Server address input exists');
+      assert.equal(await input.isExisting(), true, 'Server address input exists when disconnected');
       const saveBtn = await browser.$('.server-save-btn');
       assert.equal(await saveBtn.isExisting(), true, 'Server save button exists');
 
       // Test rejection of public IP
-      await input.setValue('8.8.8.8:3310');
+      await setInputValue('#server-address-input', '8.8.8.8:3310');
       await saveBtn.click();
       await browser.waitUntil(async () => await browser.$('.server-msg-error').isExisting(), { timeout: 5000 });
       assert.match(await browser.$('.server-msg-error').getText(), /must use loopback, private/);
 
       // Test saving valid loopback address
-      await input.setValue(`127.0.0.1:${serverPort}`);
+      await setInputValue('#server-address-input', `127.0.0.1:${serverPort}`);
       await saveBtn.click();
-      await browser.waitUntil(async () => await browser.$('.server-msg-ok').isExisting(), { timeout: 5000 });
-      assert.match(await browser.$('.server-msg-ok').getText(), /Connected to/);
+      await browser.waitUntil(async () => await browser.$('.server-status').getAttribute('data-status') === 'connected', { timeout: 10000 });
+
+      // State 1: Connected OK -> Server row is HIDDEN
+      await browser.waitUntil(async () => !(await browser.$('.server-config-form').isExisting()), { timeout: 5000 });
+      assert.equal(await browser.$('.server-config-form').isExisting(), false, 'Server row must be hidden when connected OK');
+      assert.equal(await browser.$('#server-address-input').isExisting(), false);
+      assert.equal(await browser.$('.server-status').getAttribute('title'), 'Show server settings');
+      assert.equal(await browser.$('.server-status').getAttribute('aria-label'), 'Show server settings');
+
+      // State 2: Click status icon while connected -> TOGGLE visible / hidden
+      await browser.$('.server-status').click();
+      await browser.waitUntil(async () => await browser.$('.server-config-form').isExisting(), { timeout: 3000 });
+      assert.equal(await browser.$('#server-address-input').isExisting(), true, 'Server row appears after clicking icon');
+      assert.equal(await browser.$('.server-status').getAttribute('title'), 'Hide server settings');
+      assert.equal(await browser.$('.server-status').getAttribute('aria-label'), 'Hide server settings');
+
+      await browser.$('.server-status').click();
+      await browser.waitUntil(async () => !(await browser.$('.server-config-form').isExisting()), { timeout: 3000 });
+      assert.equal(await browser.$('.server-config-form').isExisting(), false, 'Server row hides after clicking icon again');
+      assert.equal(await browser.$('.server-status').getAttribute('title'), 'Show server settings');
+
+      // State 3: Connection failure / server offline -> Server row automatically APPEARS
+      await stopMockServer();
+      await browser.$('.server-status').click();
+      await browser.waitUntil(async () => await browser.$('.server-status').getAttribute('data-status') === 'disconnected', { timeout: 10000 });
+      assert.equal(await browser.$('.server-config-form').isExisting(), true, 'Server row must be visible when connection fails');
+      assert.equal(await browser.$('#server-address-input').isExisting(), true);
+
+      // Restore mock server and verify it automatically hides again when reconnected OK
+      await startMockServer(serverPort);
+      await browser.$('.server-status').click();
+      await browser.waitUntil(async () => await browser.$('.server-status').getAttribute('data-status') === 'connected', { timeout: 10000 });
+      await browser.waitUntil(async () => !(await browser.$('.server-config-form').isExisting()), { timeout: 5000 });
+      assert.equal(await browser.$('.server-config-form').isExisting(), false, 'Server row must automatically hide when reconnected OK');
+      assert.equal(await browser.$('.server-status').getAttribute('title'), 'Show server settings');
     });
 
     await check('window close after scan and during scan terminates cleanly without orphan processes (V-30)', async () => {
@@ -633,7 +737,9 @@ try {
       const appPid2 = parseInt(findRes2.stdout.trim().split(/\s+/)[0], 10);
       assert.ok(appPid2, 'Second test application PID must be found');
 
-      await (await button('Start scan')).click();
+      const startBtn = await button('Start scan');
+      await startBtn.waitForEnabled({ timeout: 10000 });
+      await startBtn.click();
       await browser.waitUntil(async () => {
         const h2 = await browser.$('h2');
         return (await h2.isExisting()) && (await h2.getText()) === 'Scanning';

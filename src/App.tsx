@@ -40,6 +40,20 @@ type SelectedTarget = { id: string; path: string };
 type ScanLifecycle = "scanning" | "cancelling" | "idle";
 type ScanStateEvent = { scan_id: string; state: ScanLifecycle };
 type Theme = "light" | "dark";
+type ServerStatusDto = {
+  signatures: number | null;
+  loaded_at: string | null;
+  fetched_at: string | null;
+  stale: boolean;
+};
+
+function formatVnTime(isoStr: string | null | undefined): string {
+  if (!isoStr) return "unknown time";
+  const m = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return "unknown time";
+  const [, yyyy, mm, dd, hh, min] = m;
+  return `${dd}/${mm}/${yyyy} ${hh}:${min} (UTC+7)`;
+}
 
 const THEME_KEY = "zonendpoint-theme";
 
@@ -62,6 +76,42 @@ const labels: Record<Status, string> = {
   SKIPPED: "Skipped",
   CANCELLED: "Cancelled",
 };
+
+function measureContentHeight(): number {
+  const brand = document.querySelector<HTMLElement>(".brand-heading");
+  const panel = document.querySelector<HTMLElement>(".selection-panel");
+  const shell = document.querySelector<HTMLElement>(".app-shell");
+
+  const brandHeight = brand ? brand.getBoundingClientRect().height : 200;
+
+  let panelHeight = 208;
+  if (panel) {
+    const panelTop = panel.getBoundingClientRect().top;
+    let maxBottom = panelTop;
+    const descendants = panel.querySelectorAll<HTMLElement>("*");
+    for (const el of Array.from(descendants)) {
+      const rect = el.getBoundingClientRect();
+      if (rect.height > 0 || rect.width > 0) {
+        const style = window.getComputedStyle(el);
+        const marginBottom = parseFloat(style.marginBottom) || 0;
+        const bottom = rect.bottom + marginBottom;
+        if (bottom > maxBottom) {
+          maxBottom = bottom;
+        }
+      }
+    }
+    const panelStyle = window.getComputedStyle(panel);
+    const paddingBottom = parseFloat(panelStyle.paddingBottom) || 18;
+    panelHeight = Math.max(208, Math.ceil(maxBottom - panelTop + paddingBottom));
+  }
+
+  const shellStyle = shell ? window.getComputedStyle(shell) : null;
+  const shellPadding = shellStyle
+    ? (parseFloat(shellStyle.paddingTop) || 16) + (parseFloat(shellStyle.paddingBottom) || 16)
+    : 32;
+
+  return Math.ceil(Math.max(brandHeight, panelHeight) + shellPadding);
+}
 
 function App() {
   const [targetMenuOpen, setTargetMenuOpen] = useState(false);
@@ -90,7 +140,25 @@ function App() {
   const [serverInput, setServerInput] = useState("");
   const [serverSaving, setServerSaving] = useState(false);
   const [serverConfigMsg, setServerConfigMsg] = useState<{ text: string; error: boolean } | null>(null);
+  const [showServerManual, setShowServerManual] = useState(false);
+  const [isServerInputFocused, setIsServerInputFocused] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+  const [signatureStatus, setSignatureStatus] = useState<ServerStatusDto | null>(null);
+
+  const fetchSignatureStatus = () => {
+    void invoke<ServerStatusDto>("get_server_status")
+      .then((data) => setSignatureStatus(data))
+      .catch((err) => {
+        console.error("Failed to load server signature status:", err);
+        setSignatureStatus(null);
+      });
+  };
+
+  useEffect(() => {
+    fetchSignatureStatus();
+    const interval = setInterval(fetchSignatureStatus, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     void getVersion()
@@ -119,6 +187,11 @@ function App() {
       const ok = await checkServer(true);
       if (ok) {
         setServerConfigMsg({ text: `Connected to ${updated.effective_addr}`, error: false });
+        setShowServerManual(false);
+        if (isServerInputFocused) {
+          (document.activeElement as HTMLElement)?.blur();
+          setIsServerInputFocused(false);
+        }
       } else {
         setServerConfigMsg({ text: `Saved, but cannot connect to ${updated.effective_addr}`, error: true });
       }
@@ -130,6 +203,7 @@ function App() {
   }
 
   const checkServer = async (manual = false) => {
+    const prevStatus = serverStatusRef.current;
     if (manual) {
       serverStatusRef.current = "checking";
       setServerStatus("checking");
@@ -140,6 +214,10 @@ function App() {
         serverStatusRef.current = "connected";
         setServerStatus("connected");
       }
+      if (prevStatus === "disconnected" || prevStatus === "checking") {
+        setShowServerManual(false);
+      }
+      fetchSignatureStatus();
       return true;
     } catch {
       if (serverStatusRef.current !== "disconnected") {
@@ -163,7 +241,8 @@ function App() {
     if (!summary) return;
     let disposed = false;
     const frame = requestAnimationFrame(() => {
-      const desired = Math.ceil(document.querySelector<HTMLElement>(".app-shell")?.scrollHeight ?? 240);
+      const isClean = !summary.cancelled && summary.complete && summary.scanned > 0 && summary.clean === summary.scanned;
+      const desired = isClean ? 240 : Math.max(240, measureContentHeight());
       void (async () => {
         const appWindow = getCurrentWindow();
         const monitor = await currentMonitor();
@@ -173,9 +252,9 @@ function App() {
         const available = monitor
           ? (monitor.workArea.position.y + monitor.workArea.size.height - position.y) / monitor.scaleFactor - 48
           : window.screen.availHeight - 80;
-        const height = Math.max(window.innerHeight, Math.min(desired, available));
-        if (!disposed && height > window.innerHeight) {
-          await appWindow.setSize(new LogicalSize(size.width / scale, height));
+        const targetHeight = Math.min(desired, available);
+        if (!disposed && Math.abs(targetHeight - window.innerHeight) > 2) {
+          await appWindow.setSize(new LogicalSize(size.width / scale, targetHeight));
         }
       })().catch((reason) => console.error("Could not resize scan results window", reason));
     });
@@ -349,12 +428,35 @@ function App() {
     || startPending
     || (scanState === "idle" && (!!scanId || !scanEventsReady));
 
+  const isServerRowVisible =
+    isServerInputFocused ||
+    showServerManual ||
+    serverStatus === "disconnected";
+
   const serverTooltip =
     serverStatus === "connected"
-      ? "Connected to ZonEndpoint server"
+      ? (isServerRowVisible ? "Hide server settings" : "Show server settings")
       : serverStatus === "disconnected"
         ? "Cannot connect to ZonEndpoint server. Check your connection."
         : "Checking connection…";
+
+  const coverCount =
+    signatureStatus?.signatures != null
+      ? signatureStatus.signatures.toLocaleString("en-US")
+      : "—";
+
+  const coverTooltip = (() => {
+    if (!signatureStatus || signatureStatus.signatures == null) {
+      return "ClamAV signatures on server: status unavailable";
+    }
+    const loadedStr = formatVnTime(signatureStatus.loaded_at);
+    const syncedStr = formatVnTime(signatureStatus.fetched_at || signatureStatus.loaded_at);
+
+    if (signatureStatus.stale) {
+      return `ClamAV signatures on server (stale, >2h) (loaded ${loadedStr}), synced ${syncedStr}`;
+    }
+    return `ClamAV signatures on server (loaded ${loadedStr}), synced ${syncedStr}`;
+  })();
 
   const displayedResults = summary
     ? isAllClean
@@ -386,14 +488,19 @@ function App() {
             />
             <div className="server-status-col">
               <button
-              type="button"
-              className={`server-status status-${serverStatus}`}
-              data-status={serverStatus}
-              title={serverTooltip}
-              aria-label={serverTooltip}
-              onClick={() => void checkServer(true)}
-              disabled={serverStatus === "checking"}
-            >
+                type="button"
+                className={`server-status status-${serverStatus}`}
+                data-status={serverStatus}
+                title={serverTooltip}
+                aria-label={serverTooltip}
+                onClick={() => {
+                  if (serverStatus === "connected") {
+                    setShowServerManual((prev) => !prev);
+                  }
+                  void checkServer(true);
+                }}
+                disabled={serverStatus === "checking"}
+              >
               {serverStatus === "connected" && (
                 <svg className="server-status-icon status-icon-connected" viewBox="0 0 20 20" aria-hidden="true">
                   <circle cx="10" cy="10" r="10" fill="var(--clean)" />
@@ -447,6 +554,16 @@ function App() {
             </div>
           </div>
           <p className="brand-slogan">Protect your digital life</p>
+          <div className="brand-cover-row">
+            <div
+              className={`brand-cover${signatureStatus?.stale ? " stale" : ""}`}
+              title={coverTooltip}
+              aria-label={coverTooltip}
+            >
+              <span className="brand-cover-label">Cover:</span>
+              <span className="brand-cover-count">{coverCount}</span>
+            </div>
+          </div>
         </div>
 
         <section className="panel selection-panel" aria-label="Scan selection">
@@ -499,39 +616,45 @@ function App() {
           {!scanId && !summary && (
             <>
               <p className="selected-path">{selectedTarget?.path || "Windows core files + drivers"}</p>
-              <form className="server-config-form" onSubmit={(e) => void handleSaveServer(e)}>
-                <label htmlFor="server-address-input" className="server-label">Server</label>
-                <input
-                  id="server-address-input"
-                  className="server-input"
-                  type="text"
-                  value={serverInput}
-                  placeholder="127.0.0.1:13310"
-                  onChange={(e) => {
-                    setServerInput(e.target.value);
-                    setServerConfigMsg(null);
-                  }}
-                  disabled={!!scanId || serverSaving}
-                  spellCheck={false}
-                  autoComplete="off"
-                />
-                <button
-                  type="submit"
-                  className="server-save-btn"
-                  disabled={!!scanId || serverSaving}
-                >
-                  {serverSaving ? "Saving…" : "Save"}
-                </button>
-                {serverConfig?.env_override && (
-                  <span className="server-env-badge" title={`Active: ${serverConfig.effective_addr}`}>
-                    Env active
-                  </span>
-                )}
-              </form>
-              {serverConfigMsg && (
-                <p className={`server-msg ${serverConfigMsg.error ? "server-msg-error" : "server-msg-ok"}`}>
-                  {serverConfigMsg.text}
-                </p>
+              {isServerRowVisible && (
+                <>
+                  <form className="server-config-form" onSubmit={(e) => void handleSaveServer(e)}>
+                    <label htmlFor="server-address-input" className="server-label">Server</label>
+                    <input
+                      id="server-address-input"
+                      className="server-input"
+                      type="text"
+                      value={serverInput}
+                      placeholder="127.0.0.1:13310"
+                      onFocus={() => setIsServerInputFocused(true)}
+                      onBlur={() => setIsServerInputFocused(false)}
+                      onChange={(e) => {
+                        setServerInput(e.target.value);
+                        setServerConfigMsg(null);
+                      }}
+                      disabled={!!scanId || serverSaving}
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                    <button
+                      type="submit"
+                      className="server-save-btn"
+                      disabled={!!scanId || serverSaving}
+                    >
+                      {serverSaving ? "Saving…" : "Save"}
+                    </button>
+                    {serverConfig?.env_override && (
+                      <span className="server-env-badge" title={`Active: ${serverConfig.effective_addr}`}>
+                        Env active
+                      </span>
+                    )}
+                  </form>
+                  {serverConfigMsg && (
+                    <p className={`server-msg ${serverConfigMsg.error ? "server-msg-error" : "server-msg-ok"}`}>
+                      {serverConfigMsg.text}
+                    </p>
+                  )}
+                </>
               )}
             </>
           )}

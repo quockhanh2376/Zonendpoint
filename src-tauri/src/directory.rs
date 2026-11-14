@@ -307,17 +307,23 @@ mod tests {
     use crate::scanner::{ScanResult, ScanStatus};
     use std::{
         path::{Path, PathBuf},
+        sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
     use tokio::sync::watch;
 
+    static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
     fn test_dir() -> PathBuf {
+        let count = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("zonendpoint-folder-{}-{nonce}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "zonendpoint-folder-{}-{count}-{nonce}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&path).unwrap();
         path
     }

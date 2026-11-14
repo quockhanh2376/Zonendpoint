@@ -1,0 +1,11 @@
+[Unit]
+Description=ZonEndpoint ClamAV Signature Count Extractor
+After=clamav-daemon.service
+Wants=clamav-daemon.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/zonendpoint-sigcount.py
+User=root
+StandardOutput=journal
+StandardError=journal
