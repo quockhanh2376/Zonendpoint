@@ -317,3 +317,23 @@
   - `systemd-analyze verify` cho 3 file service: **PASS (exit code 0)**.
   - Dọn dẹp sạch sẽ `/tmp/v58` sau khi kiểm thử. Không chạm vào các file thật trên server.
 - Bàn giao: Tạo `docs/handoffs/feeds-hardening-vic-to-qeen.md` chi tiết từng mục, quy trình triển khai lab đề xuất và kế hoạch rollback.
+
+## 2026-11-14 - V-62 (Script feed đợt 2 + Sửa lỗi Q-43 & optimisse.md §5)
+- Thực hiện theo chỉ đạo của anh Zon ngày 2026-11-14 (Branch `vic/feeds-hardening`, cô lập trong repo, không triển khai lab):
+  - Khắc phục lỗi nghiêm trọng Q-43 (zero real clamd reload invariant): tiêm 100% tham số (port, socket, binary, paths) vào mock/thư mục tạm; thêm Safety Guard (`check_safety_guard` và Shell exit 99) chặn đứng mọi kết nối tới port clamd thật (3310) hoặc binary `clamdscan` khi `ZONENDPOINT_TEST_ENV=1`. Chứng minh thực nghiệm qua `journalctl` không có reload thật nào (`-- No entries --`).
+  - L-3: Tạo file HOLD ngay đầu 3 script rollback (trước khi thay file), mọi nhánh lỗi sau đó giữ nguyên HOLD.
+  - L-6: Lệnh `deploy-hsb` thủ công của MalwareBazaar và ThreatFox cũng lấy khóa chung `/run/lock/zonendpoint-clamd-deploy.lock` (exit 3 khi bị chiếm).
+  - L-8: Khoảng cách reload tối thiểu áp cho MỌI đường nạp lại (abuse.ch, YARA, deploy-hsb thủ công) qua reload-state chung `/opt/zonendpoint/reload-state.json`. Rollback được phép bỏ qua giới hạn (`force_reload=True`) nhưng vẫn ghi nhận state. Ghi rõ freshclam nằm ngoài kiểm soát.
+  - L-12: Thu hẹp `ReadWritePaths` từ `/var/backups` xuống đúng `/var/backups/clamav-malwarebazaar`, `-threatfox`, `-yara` theo từng service.
+  - L-5: Phát hiện log clamd bị xoay vòng (`cur_size < log_pos_before`); không đọc được số chữ ký sau reload = "chưa xác minh" (không rollback chỉ vì thiếu dòng log nếu PING OK), lấy số trước reload từ dòng gần nhất SAU lần khởi động clamd gần nhất (`+++ Started at `).
+  - L-9: Preflight chỉ `clamscan -d` với file `.hsb` mới (như YARA), không nạp main/daily/bytecode vào temporary test DB.
+  - L-10: Ghi `.hsb` trực tiếp từ SQLite ra file theo dòng (streaming cursor line-by-line 64KB buffer, không dựng list trong RAM); ThreatFox dùng SQLite query `NOT EXISTS` thay `set()` Python.
+  - L-13: YARA: `tag_name` kiểm bằng regex chặt `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`, URL tải bắt buộc bắt đầu bằng `https://github.com/YARAHQ/`, giới hạn byte tải (50MB) và giải nén (100MB, chống Zip Slip), kiểm tra checksum bắt buộc nếu upstream release có file checksum.
+  - L-14: File khóa API quyền quá rộng (`mode & 0o077 != 0` hoặc không thuộc root) -> từ chối chạy; bộ lọc `SensitiveKeyFilter` che giấu khóa gắn vào root logger & root handlers; URL bắt buộc HTTPS (`validate_https_url`).
+- Quality Gates & Testing:
+  - Máy chủ lab (`udevlevel73`, Ubuntu 24.04, Python 3.14.4): **108/108 unit tests PASS 100%** trong 31.5s (37 MB, 16 TF, 18 abusech, 12 yara hold, 7 deploy lock, 4 secure temp, 8 rate limit, 6 timer sim).
+  - Chứng minh zero reload thật: `sudo journalctl -u clamav-daemon --since '2026-11-14 21:50:00' --no-pager` trả về `-- No entries --`.
+  - `systemd-analyze verify`: **PASS (exit code 0)**.
+  - `systemd-analyze security --offline=true`: **7.1 MEDIUM** cho cả 2 service unit.
+  - Đã dọn dẹp sạch sẽ thư mục `/tmp/v62` trên lab.
+- Bàn giao: Cập nhật `docs/handoffs/feeds-hardening-vic-to-qeen.md` với quy trình triển khai chuẩn (dừng timer, backup + sha256 vào thư mục có ngày, copy bản mới, daemon-reload, analyze, start timer; rollback = khôi phục đúng thư mục có ngày, tuyệt đối không dùng git checkout trên lab).

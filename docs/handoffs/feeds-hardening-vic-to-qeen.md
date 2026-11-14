@@ -1,207 +1,257 @@
-# Handoff: Task V-58 — Server Feeds Hardening (optimisse.md §5) — Vic to Qeen
+# Handoff: Task V-58 & V-62 — Server Feeds Hardening (optimisse.md §5 & Sửa lỗi Q-43) — Vic to Qeen
 
 **Date**: 2026-11-14  
 **From**: Victor (Vic)  
 **To**: Qeen (Auditor & Lab Ops)  
-**Task**: V-58 (Sửa script feed & service hardening theo `E:\Zonendpoint\optimisse.md` phần 5)  
+**Task**: V-58 (Script feed & service hardening theo `optimisse.md` §5) + V-62 (Sửa dứt điểm lỗi Q-43 & hoàn thiện phần còn lại của optimisse.md §5)  
 **Zon Assignment**: 2026-11-14 (Branch `vic/feeds-hardening`, cô lập repo/test, KHÔNG triển khai lab trong task này)  
 **Branch**: `vic/feeds-hardening`  
 **Base Commit**: `908535eec72d4c89a31b8376c7c40c6e3d345c67` (`origin/main`)  
-**Lab Environment Tested**: Host `udevlevel73` (`100.96.250.245`, Ubuntu 24.04, Python 3.14.4, ClamAV 1.5.4) trong thư mục tạm `/tmp/v58`  
-**Test Status**: 76/76 unit tests PASS (0 network calls thật, mock/fixture đầy đủ), `systemd-analyze verify` 3 service PASS (exit 0)  
+**Lab Environment Tested**: Host `udevlevel73` (`100.96.250.245`, Ubuntu 24.04, Python 3.14.4, ClamAV 1.5.4) trong thư mục tạm `/tmp/v62` (đã dọn dẹp sạch sẽ)  
+**Test Status**: **108/108 unit tests PASS 100%** (0 network calls thật, mock/fixture đầy đủ, 0 real clamd reload — đã chứng minh qua journalctl), `systemd-analyze verify` PASS (exit 0), `systemd-analyze security` đạt mức **7.1 MEDIUM**  
 **Deployment Policy**: CHỈ SỬA CODE VÀ TEST TRONG REPO. Toàn bộ triển khai lên lab cần Zon duyệt trước.  
 
 ---
 
-## 1. Chi tiết các hạng mục đã hoàn thành (Từng commit)
+## 1. Chi tiết các hạng mục đã hoàn thành
 
-### Commit 1 (`e0b659b`): L-1 — Ngắt lượt chạy khi MalwareBazaar gặp 429/401/403/RateLimitError
-- **File sửa**: `scripts/feeds/zonendpoint-abusech-update.py`, `scripts/feeds/test_zonendpoint_abusech_update.py`
-- **Hành vi**:
-  - Khi MalwareBazaar gặp lỗi xác thực hoặc cạn hạn ngạch (`RateLimitError`, HTTP 429 `Too Many Requests`, HTTP 401 `Unauthorized`, HTTP 403 `Forbidden`), updater lập tức dừng toàn bộ lượt chạy hiện tại.
-  - Hủy ngay các slot đã bảo lưu trong `rate_limit.json` cho ThreatFox (`limiter.cancel_reservation(token)`), KHÔNG gửi bất kỳ request nào tới ThreatFox (0 request).
-  - Ghi rõ nguyên nhân lỗi vào `last-run.json` (`error: "MalwareBazaar: HTTP Error 429..."`).
-  - Các lỗi mạng khác hoặc HTTP 503 tạm thời vẫn giữ nguyên cơ chế xử lý cũ.
-- **Kiểm thử**: Các test `test_11_malwarebazaar_429...`, `test_12_malwarebazaar_401...`, `test_13_malwarebazaar_403...` xác nhận số request gửi sang ThreatFox luôn bằng 0.
+### Đợt 1 (Task V-58)
+- **Commit 1 (`e0b659b`) - L-1**: Ngắt lượt chạy khi MalwareBazaar gặp 429/401/403/RateLimitError, 0 request gửi sang ThreatFox, hủy slot bảo lưu trong `rate_limit.json`.
+- **Commit 2 (`3735dc5`) - L-2**: Đặt mặc định `max_retries=0` cho mọi đường gọi abuse.ch.
+- **Commit 3 (`19f0967`) - L-8**: Tham số `--min-reload-interval` hoãn reload clamd khi chưa đủ thời gian.
+- **Commit 4 (`1711522`) - L-3**: File hold (`HOLD-abusech`, `HOLD-yara`) trên rollback, updater bỏ lượt chạy cleanly.
+- **Commit 5 (`2412db6`) - L-4**: YARA updater ghi tag sau khi kiểm tra sức khỏe & xử lý log xoay vòng.
+- **Commit 6 (`1fcbb04`) - L-6**: Khóa `flock` độc quyền dùng chung `/run/lock/zonendpoint-clamd-deploy.lock`, sửa fail-open.
+- **Commit 7 (`c8ea858`) - L-11**: File tạm an toàn chống symlink attack (`safe_atomic_write` với mkstemp/fchmod/fsync/replace).
+- **Commit 8 (`5979ae2`) - L-12**: Sandbox systemd cho 3 file `.service` & sigcount DynamicUser.
+- **Commit 9 (`b17b94b`) - L-7**: Thêm timeout=120 cho tiến trình `clamscan` con & delta chữ ký tính theo thực tế sinh ra.
 
-### Commit 2 (`3735dc5`): L-2 — Mặc định `max_retries=0` cho mọi đường gọi abuse.ch
-- **File sửa**: `scripts/feeds/zonendpoint-malwarebazaar.py`, `scripts/feeds/test_zonendpoint_malwarebazaar.py`
-- **Hành vi**:
-  - Đặt `MAX_TRANSIENT_RETRIES = 0` làm hằng số mặc định.
-  - Các hàm `_post()`, `check_connection()`, `fetch_recent()`, `fetch_full_dump()` đều nhận mặc định `max_retries=0`.
-  - Tuân thủ quy tắc quota nghiêm ngặt: khi gặp lỗi, bỏ lượt ngay, không tự động retry ngầm. Số lượng HTTP request thực tế gửi ra ngoài luôn khớp đúng 1:1 với số lượt ghi nhận trong ledger `rate_limit.json`.
-- **Kiểm thử**: `test_29_default_max_retries_zero_for_all_endpoints_counts_match` kiểm tra cả 4 endpoint.
+---
 
-### Commit 3 (`19f0967`): L-8 — Khoảng cách tối thiểu giữa 2 lần nạp clamd (`--min-reload-interval`)
-- **File sửa**: `scripts/feeds/zonendpoint-abusech-update.py`, `scripts/feeds/test_zonendpoint_abusech_update.py`
-- **Hành vi**:
-  - Thêm tham số CLI `--min-reload-interval` (giờ, float, mặc định 6.0 giờ) và `--reload-state-file` (mặc định `/opt/zonendpoint/abusech/reload-state.json`).
-  - Khi có chữ ký mới nhưng chưa đủ khoảng cách tối thiểu kể từ lần reload trước: script VẪN tải feed và import vào SQLite database như bình thường, nhưng HOÃN (`defer`) bước export file `.hsb` và hoãn gửi lệnh `zRELOAD` sang clamd.
-  - Ghi nhận trạng thái `"reload_deferred": true` vào `last-run.json`.
-  - Khi đủ khoảng cách và reload thành công, thời điểm reload được lưu nguyên tử vào `reload-state.json`.
-- **Kiểm thử**: `test_14_reload_deferred_when_min_interval_not_elapsed`, `test_15_reload_proceeds_when_min_interval_elapsed`, `test_16_state_file_updated_atomically_on_reload`.
+### Đợt 2 (Task V-62) — Sửa lỗi Q-43 & Hoàn thiện optimisse.md §5
 
-### Commit 4 (`1711522`): L-3 — File hold trên rollback và updater bỏ lượt
-- **File sửa**: `scripts/feeds/zonendpoint-malwarebazaar-rollback.sh`, `scripts/feeds/zonendpoint-threatfox-rollback.sh`, `scripts/feeds/zonendpoint-yara-rollback.sh`, `scripts/feeds/zonendpoint-abusech-update.py`, `scripts/feeds/zonendpoint-yara-update.py`, `docs/ops/abusech-timer.md`, `docs/ops/yara-daily-update.md`
-- **Hành vi**:
-  - Khi chạy các script rollback (kể cả revert backup hay `--purge`), script tự động tạo file hold:
-    - Abuse.ch: `/opt/zonendpoint/HOLD-abusech`
-    - YARA: `/opt/zonendpoint/HOLD-yara`
-  - Các updater (`zonendpoint-abusech-update.py` và `zonendpoint-yara-update.py`) khi thức dậy kiểm tra file hold đầu tiên. Nếu file hold tồn tại, log cảnh báo rõ ràng và thoát ngay với exit code 0 mà không thực hiện tải hay can thiệp clamd.
-  - Cập nhật tài liệu vận hành hướng dẫn kiểm tra và gỡ hold (`rm -f /opt/zonendpoint/HOLD-...`).
-- **Kiểm thử**: `test_zonendpoint_yara_hold.py` và `test_17_hold_file_skips_hourly_update`.
+#### 0. Khắc phục lỗi nghiêm trọng từ Q-43: Zero Real Reload Invariant
+- **Bối cảnh & Nguyên nhân gốc rễ**: Trong Q-43, khi chạy test suite trên lab, các bài test gọi script rollback và deploy với cấu hình mặc định (port 3310, binary `clamdscan`), dẫn đến việc gửi lệnh `zRELOAD` thật tới tiến trình `clamd` của server (2 lần reload lúc 20:44 và 20:45).
+- **Giải pháp triệt để**:
+  1. **Tiêm tham số 100%**: Tất cả socket clamd, port clamd, binary `clamdscan`, đường dẫn DB `/var/lib/clamav`, log file, lock file, reload state file, backup dir đều được tham số hóa qua CLI args và tham số hàm, trỏ hoàn toàn vào thư mục tạm/mock trong bài test.
+  2. **Cơ chế Safety Guard bắt buộc**:
+     - Trong Python (`zonendpoint-malwarebazaar.py`, `zonendpoint-threatfox.py`, `zonendpoint-yara-update.py`): Hàm `check_safety_guard(host, port, clamdscan_bin)` kiểm tra nếu biến môi trường `ZONENDPOINT_TEST_ENV=1` mà `port == 3310` hoặc `clamdscan_bin == "clamdscan"`, lập tức raise `AssertionError("SAFETY GUARD TRIGGERED: Test attempted to contact real clamd!")`.
+     - Trong Shell (`*-rollback.sh`): Nếu `ZONENDPOINT_TEST_ENV=1` và `CLAMD_PORT=3310` hoặc `CLAMDSCAN_BIN=clamdscan`, script lập tức log `CRITICAL SAFETY VIOLATION` và thoát với exit code 99.
+  3. **Chứng minh thực nghiệm**: Chạy toàn bộ 108 tests trên máy chủ lab (`udevlevel73`) trong `/tmp/v62`, sau đó truy vấn journal hệ thống:
+     ```bash
+     sudo journalctl -u clamav-daemon --since '2026-11-14 21:50:00' --no-pager
+     # Kết quả: -- No entries --
+     ```
+     Hoàn toàn không có bất kỳ dòng reload nào được kích hoạt tới `clamd` thật trong suốt quá trình chạy test.
 
-### Commit 5 (`2412db6`): L-4 — YARA updater ghi tag sau khi kiểm tra sức khỏe & xử lý log xoay vòng
-- **File sửa**: `scripts/feeds/zonendpoint-yara-update.py`, `scripts/feeds/test_zonendpoint_yara_hold.py`
-- **Hành vi**:
-  - Trong `deploy_and_reload`, tag mới (`latest_tag`) CHỈ được ghi vào `current_tag.txt` sau khi đã nhìn thấy dòng `"Database correctly reloaded (<N> signatures)"` trong log clamd và lệnh `PING` -> `PONG` thành công.
-  - Nếu reload thất bại hoặc sức khỏe không đạt, nhánh emergency rollback được kích hoạt, tag cũ trong `current_tag.txt` được giữ nguyên vẹn.
-  - Thay thế `sleep(8)` cũ bằng vòng lặp kiểm tra log clamd có timeout (`--reload-timeout`, mặc định 120s). Xử lý an toàn trường hợp log file bị xoay vòng (truncation/logrotate khi `cur_size < log_pos_before`).
-- **Kiểm thử**: `TestYaraDeploy` kiểm tra tag không bị đổi khi rollback, tag chỉ ghi sau reload, và xử lý log rotation.
+#### 1. L-3: Tạo HOLD file ngay đầu script rollback
+- Cả 3 script rollback (`zonendpoint-malwarebazaar-rollback.sh`, `zonendpoint-threatfox-rollback.sh`, `zonendpoint-yara-rollback.sh`) đều tạo file HOLD ngay dòng đầu tiên (trước khi sao chép, di chuyển hay thay thế bất kỳ file nào).
+- Mọi nhánh thoát lỗi sau đó (`trap on_err ERR`, khôi phục backup thất bại, v.v.) đều GIỮ NGUYÊN file HOLD để bảo vệ hệ thống không bị updater chạy đè.
 
-### Commit 6 (`1fcbb04`): L-6 — Khóa `flock` chung chống xung đột nạp clamd & sửa fail-open
-- **File sửa**: `scripts/feeds/zonendpoint-abusech-update.py`, `scripts/feeds/zonendpoint-yara-update.py`, `scripts/feeds/zonendpoint-malwarebazaar-rollback.sh`, `scripts/feeds/zonendpoint-threatfox-rollback.sh`, `scripts/feeds/zonendpoint-yara-rollback.sh`, `docs/ops/abusech-timer.md`
-- **Hành vi**:
-  - Thiết lập khóa `flock` độc quyền chung: `/run/lock/zonendpoint-clamd-deploy.lock` (ghi đè được qua biến môi trường `DEPLOY_LOCK_FILE` hoặc tham số `--lock-file`).
-  - Dùng chung cho: `abusech-update`, `yara-update` và cả 3 script rollback (`malwarebazaar-rollback`, `threatfox-rollback`, `yara-rollback`).
-  - Nếu không lấy được khóa (đang có tiến trình deploy/reload khác nắm giữ): lập tức bỏ lượt và thoát với mã lỗi khác 0 (`return 1` trong Python, `exit 3` trong Shell).
-  - Sửa dứt điểm lỗi fail-open ở `zonendpoint-abusech-update.py`: trước đây nếu mở lock file lỗi (ví dụ không tạo được thư mục) thì script vẫn chạy tiếp; nay script log error và thoát mã lỗi khác 0 ngay lập tức.
-- **Kiểm thử**: `test_zonendpoint_deploy_lock.py` (5 test) kiểm tra cả 5 script thoát mã lỗi khác 0 khi lock bị giữ hoặc đường dẫn lock không hợp lệ.
+#### 2. L-6: Khóa `flock` chung cho lệnh `deploy-hsb` thủ công
+- Lệnh `deploy-hsb` thủ công trong cả `zonendpoint-malwarebazaar.py` và `zonendpoint-threatfox.py` đều bắt buộc acquire khóa chung `/run/lock/zonendpoint-clamd-deploy.lock` (sử dụng class `DeployLock`).
+- Nếu khóa đang bị chiếm bởi một tiến trình deploy/rollback khác, lệnh lập tức in thông báo lỗi ra stderr và thoát với exit code 3 (chống xung đột nạp clamd).
 
-### Commit 7 (`c8ea858`): L-11 — File tạm an toàn chống symlink attack trong `/var/lib/clamav` & rollback
-- **File sửa**: `scripts/feeds/zonendpoint-malwarebazaar.py`, `scripts/feeds/zonendpoint-abusech-update.py`, `scripts/feeds/zonendpoint-yara-update.py`, và 3 script rollback `.sh`
-- **Hành vi**:
-  - Loại bỏ hoàn toàn các tên file tạm đoán trước được (như `malwarebazaar.hsb.tmp`, `yara-forge-core.yar.tmp`).
-  - Triển khai hàm `safe_atomic_write` trong Python: sử dụng `tempfile.mkstemp(dir=...)` tạo file ngẫu nhiên bảo mật với `O_CREAT | O_EXCL`, áp dụng `os.fchown(fd, uid, gid)` và `os.fchmod(fd, 0o644)` trực tiếp trên file descriptor mở, gọi `os.fsync(fd)` đảm bảo dữ liệu ghi xuống đĩa trước khi `os.replace` nguyên tử.
-  - Trong cả 3 script shell rollback: dùng `mktemp -p "$TARGET_DIR" ".$(basename "$ACTIVE_FILE").tmp-XXXXXX"`, `chmod 0644`, `sync "$TMP_FILE"`, rồi mới `mv -f`.
-- **Kiểm thử**: `test_zonendpoint_secure_temp.py` (4 test) kiểm tra tính nguyên tử, quyền `0644`, và không để sót bất kỳ file `.tmp` tĩnh nào.
+#### 3. L-8: Khoảng cách reload tối thiểu dùng chung (`reload-state.json`)
+- Mọi đường nạp lại clamd do Zonendpoint quản lý (updater hàng giờ abuse.ch, updater hàng ngày YARA, và lệnh `deploy-hsb` thủ công) đều kiểm tra và chia sẻ chung file trạng thái reload: `/opt/zonendpoint/reload-state.json`.
+- Nếu chưa đủ `--min-reload-interval` (mặc định 6.0 giờ), việc nạp lại clamd bị hoãn lại (`reload_deferred=True`).
+- Riêng lệnh rollback khẩn cấp được phép bỏ qua giới hạn thời gian (`--force-reload` / `forced=True`), nhưng vẫn ghi nhận lại trạng thái reload vào `reload-state.json`.
+- **Lưu ý quan trọng**: `freshclam` là dịch vụ cập nhật chữ ký chính thức của ClamAV, chạy độc lập theo timer/cron của hệ điều hành và nằm ngoài tầm kiểm soát của `reload-state.json`.
 
-### Commit 8 (`5979ae2`): L-12 — Thêm Sandbox Systemd vào 3 file `.service` & sigcount DynamicUser
-- **File sửa**: `scripts/feeds/zonendpoint-abusech-update.service`, `scripts/feeds/zonendpoint-yara-update.service`, `scripts/server/zonendpoint-sigcount.service`, `scripts/server/README.md`, `docs/ops/abusech-timer.md`, `docs/ops/yara-daily-update.md`
-- **Hành vi**:
-  - Bổ sung cấu hình sandbox nghiêm ngặt theo khuyến nghị bảo mật systemd:
-    - `ProtectSystem=strict`
-    - `ReadWritePaths=` chỉ trỏ đến đúng các thư mục runtime thực tế (`/opt/zonendpoint`, `/var/lib/clamav`, `/var/backups`, `/run/lock`)
-    - `PrivateDevices=yes`
-    - `ProtectKernelTunables=yes`
-    - `ProtectKernelModules=yes`
-    - `ProtectControlGroups=yes`
-    - `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`
-    - `NoNewPrivileges=yes`
-    - `PrivateTmp=yes`
-  - Riêng `zonendpoint-sigcount.service`: chuyển sang chạy hoàn toàn không cần root bằng `DynamicUser=yes`, `SupplementaryGroups=systemd-journal` (đảm bảo quyền đọc journal `clamav-daemon`), và `StateDirectory=zonendpoint/status` (quản lý thư mục `/var/lib/zonendpoint/status` cho dynamic user).
-  - Đã kiểm tra cú pháp và tính tương thích trên lab server bằng `systemd-analyze verify /tmp/v58/services/*.service` (kết quả PASS, exit code 0).
-  - Tài liệu hóa quy trình kiểm tra bằng `systemd-analyze security` trong `scripts/server/README.md` và `docs/ops/`.
+#### 4. L-12: Thu hẹp `ReadWritePaths` cho từng service
+- Thu hẹp cấu hình `ReadWritePaths` trong các service unit từ toàn bộ `/var/backups` xuống đúng thư mục con riêng biệt:
+  - `zonendpoint-abusech-update.service`: `/var/backups/clamav-malwarebazaar` và `/var/backups/clamav-threatfox`
+  - `zonendpoint-yara-update.service`: `/var/backups/clamav-yara`
 
-### Commit 9 (`b17b94b`): L-7 — Thêm timeout cho `clamscan` con & delta chữ ký chính xác
-- **File sửa**: `scripts/feeds/filter_yara_clamav.py`, `scripts/feeds/zonendpoint-abusech-update.py`, `scripts/feeds/zonendpoint-malwarebazaar.py`, `scripts/feeds/zonendpoint-yara-update.py`
-- **Hành vi**:
-  - Bổ sung `timeout=120` cho tất cả các lời gọi `subprocess.run(["clamscan", ...])` nhằm chống tình trạng tiến trình con bị treo vĩnh viễn gây kẹt service.
-  - Trong `zonendpoint-abusech-update.py`: tính toán `new_signatures_delta` dựa trên số dòng chữ ký thực tế sinh ra trong staging content (`mb_real_count`, `tf_real_count`) thay vì `COUNT(*)` từ SQLite database, triệt tiêu nguy cơ lệch delta gây rollback oan uổng mỗi giờ nếu có dòng `file_size <= 0`.
+#### 5. L-5: Xử lý log clamd xoay vòng & đánh dấu chưa xác minh (không rollback)
+- Phát hiện log clamd bị xoay vòng (`cur_size < log_pos_before`) -> tự động reset offset về 0.
+- Nếu không đọc được số lượng chữ ký sau reload từ log nhưng kiểm tra `PING` -> `PONG` vẫn thành công: đánh dấu trạng thái là **"chưa xác minh"** (`sig_after is None`), ghi warning log và KHÔNG rollback chỉ vì thiếu dòng log.
+- Hàm `get_last_logged_signature_count` tìm kiếm dòng đếm chữ ký gần nhất SAU mốc khởi động clamd gần nhất (`+++ Started at `) để tránh đọc nhầm dòng log của phiên chạy trước.
+
+#### 6. L-9: Preflight chỉ kiểm tra file `.hsb` mới
+- Hàm `verify_hsb_on_temp_db` và `verify_hsbs_on_temp_db` chỉ chạy `clamscan -d` đối với file `.hsb` mới tạo trong thư mục tạm, không nạp hay symlink các cơ sở dữ liệu gốc (`main`, `daily`, `bytecode`) của ClamAV, giúp kiểm tra cú pháp nhanh và giảm tải RAM.
+
+#### 7. L-10: Streaming `.hsb` trực tiếp từ SQLite & ThreatFox NOT EXISTS
+- `export_hsb_file`: Dùng cursor SQLite đọc và ghi trực tiếp từng dòng vào đĩa thông qua buffer 64KB, không gom danh sách vào bộ nhớ RAM.
+- `zonendpoint-threatfox.py`: Sử dụng `ATTACH DATABASE` và truy vấn SQL `WHERE NOT EXISTS (SELECT 1 FROM mbdb.malware_hashes mb WHERE mb.sha256 = hashes.sha256)` để loại trừ các hash trùng với MalwareBazaar hoàn toàn ở tầng SQLite, triệt tiêu việc nạp `set()` lớn vào RAM Python.
+
+#### 8. L-13: Thắt chặt bảo mật tải & giải nén YARA-Forge
+- Kiểm tra `tag_name` bằng regex nghiêm ngặt: `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`.
+- URL tải về bắt buộc phải bắt đầu bằng tiền tố an toàn: `https://github.com/YARAHQ/`.
+- Áp đặt giới hạn kích thước: Tải về tối đa 50 MB, giải nén tối đa 100 MB, kiểm tra đường dẫn giải nén chống tấn công Zip Slip traversal.
+- Bắt buộc kiểm tra SHA-256 checksum nếu upstream release có phát hành file checksum.
+
+#### 9. L-14: Kiểm soát phân quyền Auth-Key & Bộ lọc che khóa nhạy cảm
+- Kiểm tra phân quyền file khóa: Nếu file có quyền mở quá rộng (`mode & 0o077 != 0`) hoặc không thuộc sở hữu của root (`st_uid != 0` ngoài môi trường test), script từ chối chạy và raise `AuthKeyError`.
+- Bộ lọc `SensitiveKeyFilter`: Được đăng ký vào root logger và tất cả các handler của root logger, tự động che giấu Auth-Key thành `<AUTH-KEY>` trên mọi luồng xuất log.
+- Kiểm tra URL: Hàm `validate_https_url` bắt buộc mọi URL gọi API / tải export phải sử dụng giao thức HTTPS.
 
 ---
 
 ## 2. Kết quả Kiểm thử Toàn diện trên Lab Server
 
-Tất cả các bài kiểm thử được chạy trực tiếp trên môi trường máy chủ lab trong thư mục tạm `/tmp/v58` (đã dọn dẹp sạch sẽ sau khi test xong):
+Tất cả các bài kiểm thử được chạy trực tiếp trên máy chủ lab trong thư mục tạm `/tmp/v62` (đã dọn dẹp sạch sẽ):
 
 ```text
-Ran 76 tests in 42.941s
+Ran 108 tests in 31.467s
 OK (failures=0, errors=0)
 ```
 
 Chi tiết các suite:
-1. `test_zonendpoint_malwarebazaar.py`: 29/29 tests PASS (max_retries=0, sliding window, error handling, atomic write).
-2. `test_zonendpoint_threatfox.py`: 10/10 tests PASS (import, dump validation, rate limiting).
-3. `test_zonendpoint_abusech_update.py`: 18/18 tests PASS (L-1 429/401/403, L-8 min-reload-interval, L-3 hold file, L-6 lock non-zero).
-4. `test_zonendpoint_yara_hold.py`: 5/5 tests PASS (L-3 hold file, L-4 tag timing, rollback tag preservation, log rotation).
-5. `test_zonendpoint_deploy_lock.py`: 5/5 tests PASS (L-6 shared flock across 5 scripts, uncreatable lock fail-safe).
-6. `test_zonendpoint_secure_temp.py`: 4/4 tests PASS (L-11 mkstemp, fchmod 0644, fsync, atomic replace).
+1. `test_zonendpoint_malwarebazaar.py`: **37/37 tests PASS** (L-2, L-5, L-8, L-9, L-10, L-14, safety guard, streaming, log banner, key mask).
+2. `test_zonendpoint_threatfox.py`: **16/16 tests PASS** (import, SQLite NOT EXISTS dedup, dump validation, rate limiting, deploy-hsb lock).
+3. `test_zonendpoint_abusech_update.py`: **18/18 tests PASS** (L-1 429/401/403, L-8 min-reload-interval, L-3 hold file, L-6 lock non-zero).
+4. `test_zonendpoint_yara_hold.py`: **12/12 tests PASS** (L-3 hold file early creation, L-4 tag timing, L-8 defer reload, L-13 URL/size/ZipSlip/tag regex, safety guard).
+5. `test_zonendpoint_deploy_lock.py`: **7/7 tests PASS** (L-6 shared flock across Python & Shell rollback scripts, manual deploy-hsb lock, fail-safe).
+6. `test_zonendpoint_secure_temp.py`: **4/4 tests PASS** (L-11 mkstemp, fchmod 0644, fsync, atomic replace).
+7. `test_abusech_rate_limit.py`: **8/8 tests PASS** (shared ledger, sliding window, reservation token cancellation).
+8. `test_abusech_timer_simulation.py`: **6/6 tests PASS** (OnUnitInactiveSec timer simulation, fairness preservation).
 
-Kiểm tra service unit:
-```text
-systemd-analyze verify /tmp/v58/services/*.service -> EXIT 0
+### Đánh giá An ninh & Cú pháp Systemd
+- `systemd-analyze verify /tmp/v62/scripts/feeds/*.service /tmp/v62/scripts/feeds/*.timer`: **PASS (exit code 0)**.
+- `systemd-analyze security --offline=true /tmp/v62/scripts/feeds/*.service`:
+  - `zonendpoint-abusech-update.service`: **7.1 MEDIUM** :-|
+  - `zonendpoint-yara-update.service`: **7.1 MEDIUM** :-|
+
+### Bằng chứng Không Reload clamd Thật
+Truy vấn nhật ký daemon clamd trên lab trong suốt thời gian chạy test:
+```bash
+sudo journalctl -u clamav-daemon --since '2026-11-14 21:50:00' --no-pager
+# Output:
+-- No entries --
 ```
 
 ---
 
-## 3. Danh sách các bước triển khai Lab đề xuất (Cần anh Zon duyệt)
+## 3. Quy trình Triển khai Chuẩn trên Lab (Cần anh Zon duyệt)
 
-Sau khi anh Zon duyệt mã nguồn nhánh `vic/feeds-hardening`, quy trình triển khai lên lab thực tế khuyến nghị như sau:
+Khi anh Zon phê duyệt triển khai, quy trình thực hiện tuần tự như sau (tuân thủ nghiêm ngặt nguyên tắc an toàn, **không dùng git checkout trên lab**):
 
-### Bước 1: Sao chép các script cập nhật vào `/usr/local/bin`
+### Bước 1: Dừng Timer và chờ service dừng hẳn
 ```bash
-# 1.1 Python feed updaters & helpers
+# 1.1 Dừng timer (chỉ stop, TUYỆT ĐỐI KHÔNG disable)
+sudo systemctl stop zonendpoint-abusech-update.timer
+sudo systemctl stop zonendpoint-yara-update.timer
+
+# 1.2 Chờ cho các service hoàn tất lượt chạy (nếu đang chạy)
+sudo systemctl is-active zonendpoint-abusech-update.service
+sudo systemctl is-active zonendpoint-yara-update.service
+```
+
+### Bước 2: Tạo thư mục Backup có gắn ngày và lưu mã băm SHA256
+```bash
+BACKUP_DIR="/var/backups/zonendpoint-install-$(date +%Y%m%d-%H%M%S)"
+sudo mkdir -p "$BACKUP_DIR"
+
+# Sao lưu các file đang cài đặt hiện tại
+sudo cp -a /usr/local/bin/zonendpoint-*.py "$BACKUP_DIR/" 2>/dev/null || true
+sudo cp -a /usr/local/bin/zonendpoint-*.sh "$BACKUP_DIR/" 2>/dev/null || true
+sudo cp -a /opt/zonendpoint/yara/filter_yara_clamav.py "$BACKUP_DIR/" 2>/dev/null || true
+sudo cp -a /etc/systemd/system/zonendpoint-*.service "$BACKUP_DIR/" 2>/dev/null || true
+sudo cp -a /etc/systemd/system/zonendpoint-*.timer "$BACKUP_DIR/" 2>/dev/null || true
+
+# Tạo manifest SHA256 cho toàn bộ file trước khi thay thế
+cd "$BACKUP_DIR" && sudo sha256sum * > manifest-before.sha256
+```
+
+### Bước 3: Cài đặt bản mới vào vị trí đích
+```bash
+# 3.1 Cài đặt Python scripts & Shell scripts
 sudo cp scripts/feeds/zonendpoint-abusech-update.py /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-malwarebazaar.py /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-threatfox.py /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-yara-update.py /usr/local/bin/
+sudo cp scripts/feeds/abusech_rate_limit.py /usr/local/bin/
 sudo cp scripts/feeds/filter_yara_clamav.py /opt/zonendpoint/yara/
 sudo cp scripts/server/zonendpoint-sigcount.py /usr/local/bin/
 
-sudo chmod 0755 /usr/local/bin/zonendpoint-*.py /opt/zonendpoint/yara/filter_yara_clamav.py
-
-# 1.2 Shell rollback scripts
 sudo cp scripts/feeds/zonendpoint-malwarebazaar-rollback.sh /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-threatfox-rollback.sh /usr/local/bin/
 sudo cp scripts/feeds/zonendpoint-yara-rollback.sh /usr/local/bin/
 
-sudo chmod 0755 /usr/local/bin/zonendpoint-*-rollback.sh
-```
+sudo chmod 0755 /usr/local/bin/zonendpoint-*.py /usr/local/bin/zonendpoint-*.sh /opt/zonendpoint/yara/filter_yara_clamav.py
 
-### Bước 2: Triển khai các file systemd service đã sandbox
-```bash
+# 3.2 Tạo các thư mục backup phân quyền theo L-12
+sudo mkdir -p /var/backups/clamav-malwarebazaar /var/backups/clamav-threatfox /var/backups/clamav-yara
+sudo chmod 0750 /var/backups/clamav-*
+
+# 3.3 Cài đặt systemd units đã sandbox
 sudo cp scripts/feeds/zonendpoint-abusech-update.service /etc/systemd/system/
+sudo cp scripts/feeds/zonendpoint-abusech-update.timer /etc/systemd/system/
 sudo cp scripts/feeds/zonendpoint-yara-update.service /etc/systemd/system/
+sudo cp scripts/feeds/zonendpoint-yara-update.timer /etc/systemd/system/
 sudo cp scripts/server/zonendpoint-sigcount.service /etc/systemd/system/
 
-# Phân quyền 0644 root:root cho service units
-sudo chmod 0644 /etc/systemd/system/zonendpoint-*.service
-sudo systemctl daemon-reload
+sudo chmod 0644 /etc/systemd/system/zonendpoint-*.service /etc/systemd/system/zonendpoint-*.timer
 ```
 
-### Bước 3: Nghiệm thu và kiểm tra an ninh (Verification)
+### Bước 4: Nạp lại cấu hình daemon systemd & Nghiệm thu
 ```bash
-# 3.1 Kiểm tra tính hợp lệ cú pháp systemd
-systemd-analyze verify /etc/systemd/system/zonendpoint-abusech-update.service
-systemd-analyze verify /etc/systemd/system/zonendpoint-yara-update.service
-systemd-analyze verify /etc/systemd/system/zonendpoint-sigcount.service
+# 4.1 Reload daemon
+sudo systemctl daemon-reload
 
-# 3.2 Kiểm tra điểm đánh giá an ninh (security exposure)
-systemd-analyze security zonendpoint-abusech-update.service
-systemd-analyze security zonendpoint-yara-update.service
-systemd-analyze security zonendpoint-sigcount.service
+# 4.2 Kiểm tra cú pháp và an ninh systemd
+systemd-analyze verify /etc/systemd/system/zonendpoint-*.service /etc/systemd/system/zonendpoint-*.timer
+systemd-analyze security --offline=true /etc/systemd/system/zonendpoint-abusech-update.service
+systemd-analyze security --offline=true /etc/systemd/system/zonendpoint-yara-update.service
 
-# 3.3 Chạy thử nghiệm sigcount không cần root
+# 4.3 Chạy thử nghiệm sigcount một lần
 sudo systemctl restart zonendpoint-sigcount.service
 cat /var/lib/zonendpoint/status/signatures.json
 ```
 
+### Bước 5: Kích hoạt lại các timer
+```bash
+sudo systemctl start zonendpoint-abusech-update.timer
+sudo systemctl start zonendpoint-yara-update.timer
+
+# Kiểm tra trạng thái timer hoạt động
+systemctl list-timers zonendpoint-*
+```
+
 ---
 
-## 4. Kế hoạch Rollback trên Lab (Khi cần thiết)
+## 4. Quy trình Rollback Chuẩn trên Lab (Khi cần thiết)
 
-Nếu trong quá trình triển khai xảy ra bất kỳ bất thường nào:
+Nếu có bất kỳ sự cố nào xảy ra trong quá trình triển khai hoặc vận hành:
 
-1. **Khôi phục service units về trạng thái cũ**:
+1. **Dừng timer**:
    ```bash
-   sudo git checkout main -- scripts/feeds/*.service scripts/server/*.service
-   sudo cp scripts/feeds/zonendpoint-abusech-update.service /etc/systemd/system/
-   sudo cp scripts/feeds/zonendpoint-yara-update.service /etc/systemd/system/
-   sudo cp scripts/server/zonendpoint-sigcount.service /etc/systemd/system/
+   sudo systemctl stop zonendpoint-abusech-update.timer
+   sudo systemctl stop zonendpoint-yara-update.timer
+   ```
+
+2. **Khôi phục nguyên trạng từ thư mục backup có ngày** (TUYỆT ĐỐI KHÔNG DÙNG `git checkout` TRÊN LAB):
+   ```bash
+   # Giả sử thư mục backup là /var/backups/zonendpoint-install-YYYYMMDD-HHMMSS/
+   RESTORE_DIR="/var/backups/zonendpoint-install-YYYYMMDD-HHMMSS"
+   
+   # Xác minh tính toàn vẹn bản backup
+   cd "$RESTORE_DIR" && sha256sum -c manifest-before.sha256
+   
+   # Khôi phục file nhị phân và script
+   sudo cp -a "$RESTORE_DIR"/zonendpoint-*.py /usr/local/bin/
+   sudo cp -a "$RESTORE_DIR"/zonendpoint-*.sh /usr/local/bin/
+   sudo cp -a "$RESTORE_DIR"/filter_yara_clamav.py /opt/zonendpoint/yara/ 2>/dev/null || true
+   sudo chmod 0755 /usr/local/bin/zonendpoint-*
+   
+   # Khôi phục service units
+   sudo cp -a "$RESTORE_DIR"/zonendpoint-*.service /etc/systemd/system/
+   sudo cp -a "$RESTORE_DIR"/zonendpoint-*.timer /etc/systemd/system/
+   sudo chmod 0644 /etc/systemd/system/zonendpoint-*
+   ```
+
+3. **Nạp lại daemon và khởi động lại timer**:
+   ```bash
    sudo systemctl daemon-reload
+   sudo systemctl start zonendpoint-abusech-update.timer
+   sudo systemctl start zonendpoint-yara-update.timer
    ```
+   *Ghi chú*: Giữ nguyên trạng thái `enabled` của timer (không bị ảnh hưởng bởi quá trình rollback).
 
-2. **Khôi phục script feed về commit gốc `908535e`**:
-   ```bash
-   sudo git checkout 908535eec72d4c89a31b8376c7c40c6e3d345c67 -- scripts/feeds/ scripts/server/
-   sudo cp scripts/feeds/*.py /usr/local/bin/
-   sudo cp scripts/feeds/*.sh /usr/local/bin/
-   sudo cp scripts/server/*.py /usr/local/bin/
-   ```
-
-3. **Gỡ bỏ file hold hoặc lock tồn dư (nếu có)**:
+4. **Dọn dẹp lock hoặc hold file tồn dư (nếu cần gỡ chặn)**:
    ```bash
    sudo rm -f /run/lock/zonendpoint-clamd-deploy.lock
    sudo rm -f /opt/zonendpoint/HOLD-abusech /opt/zonendpoint/HOLD-yara
    ```
+

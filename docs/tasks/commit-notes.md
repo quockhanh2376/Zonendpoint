@@ -129,3 +129,5 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/feeds-hardening | c8ea858 | YES | feat(feeds): L-11 use secure mkstemp, fchown, fchmod, fsync and mktemp for clamav and rollback files |
 | 2026-11-14 | vic/feeds-hardening | 5979ae2 | YES | feat(feeds): L-12 add systemd sandbox hardening and sigcount DynamicUser |
 | 2026-11-14 | vic/feeds-hardening | b17b94b | YES | feat(feeds): L-7 add timeout to clamscan calls and use actual generated signature count for delta |
+| 2026-11-14 | vic/feeds-hardening | 3e69143 | YES | docs(v58): document server feeds hardening handoff, daily log, project status, and commit notes |
+| 2026-11-14 | vic/feeds-hardening | 24762a9 | YES | feat(feeds): V-62 harden feeds and fix Q-43 clamd reload bug |
