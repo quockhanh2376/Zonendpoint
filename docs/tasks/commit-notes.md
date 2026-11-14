@@ -130,3 +130,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/031-client | 0595ac9 | YES | feat(ui): display environment override badge alongside server status icon (X-6) |
 | 2026-11-14 | vic/031-client | e35f4d7 | YES | chore(release): bump version to 0.3.1 and update documentation |
 | 2026-11-14 | vic/031-client | 79f9a52 | YES | fix(client): resolve Q-44 findings for S-1 tiering, test isolation, and harness PID (Task V-65) |
+| 2026-11-14 | vic/031-client | a50355f | YES | fix(client): resolve Q-47 findings for X-5 stale check, P-1 share-mode lock, X-6 env override, and clamd timeout (Task V-69) |
