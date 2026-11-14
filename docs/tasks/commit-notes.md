@@ -121,3 +121,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/release-candidate | d91279d | YES | feat(ui): auto-compact scan results window to content height (Task V-55) |
 | 2026-11-14 | vic/release-candidate | 02cc273 | YES | test(core): eliminate test directory race conditions across parallel runners (Task V-56) |
 | 2026-11-14 | vic/ci | 34eb453 | YES | feat(ci): add GitHub Actions CI workflow, Dependabot, and update documentation (Task V-60) |
+| 2026-11-14 | vic/ci | 1f118fe | YES | docs(ci): add V-60 handoff report, update daily log, project-status, and commit-notes (Task V-60) |
