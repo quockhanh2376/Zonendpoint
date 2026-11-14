@@ -119,3 +119,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/release-candidate | 5a5ea73 | YES | fix(timezone): standardize app and server status to UTC+7 (Task V-53) |
 | 2026-11-14 | vic/release-candidate | d3c33c4 | YES | feat(ui): hide server config row when connected OK and toggle via status icon (Task V-54) |
 | 2026-11-14 | vic/release-candidate | d91279d | YES | feat(ui): auto-compact scan results window to content height (Task V-55) |
+| 2026-11-14 | vic/release-candidate | 02cc273 | YES | test(core): eliminate test directory race conditions across parallel runners (Task V-56) |
