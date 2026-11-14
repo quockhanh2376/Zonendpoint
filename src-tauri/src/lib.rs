@@ -25,6 +25,55 @@ use tauri_plugin_dialog::DialogExt;
 use tokio::sync::watch;
 use watcher::Guard;
 
+struct ThrottleState {
+    last_emitted: Option<Instant>,
+    last_pending: Option<(ScanSummary, scanner::ScanResult)>,
+}
+
+pub(crate) struct ProgressThrottler<F> {
+    throttle_interval: Duration,
+    emit: F,
+    state: Mutex<ThrottleState>,
+}
+
+impl<F: Fn(&ScanSummary, &scanner::ScanResult) + Send + Sync + 'static> ProgressThrottler<F> {
+    pub(crate) fn new(throttle_interval: Duration, emit: F) -> Self {
+        Self {
+            throttle_interval,
+            emit,
+            state: Mutex::new(ThrottleState {
+                last_emitted: None,
+                last_pending: None,
+            }),
+        }
+    }
+
+    pub(crate) fn handle(&self, summary: &ScanSummary, latest: &scanner::ScanResult) {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let is_non_clean = latest.status != scanner::ScanStatus::Clean;
+        let elapsed_ok = match guard.last_emitted {
+            Some(instant) => instant.elapsed() >= self.throttle_interval,
+            None => true,
+        };
+
+        if is_non_clean || elapsed_ok {
+            (self.emit)(summary, latest);
+            guard.last_emitted = Some(Instant::now());
+            guard.last_pending = None;
+        } else {
+            guard.last_pending = Some((summary.clone(), latest.clone()));
+        }
+    }
+
+    pub(crate) fn flush(&self) {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((summary, latest)) = guard.last_pending.take() {
+            (self.emit)(&summary, &latest);
+            guard.last_emitted = Some(Instant::now());
+        }
+    }
+}
+
 pub struct ScanManager {
     active: Mutex<Option<ActiveScan>>,
     selected: Mutex<HashMap<String, (Instant, PathBuf)>>,
@@ -330,32 +379,45 @@ async fn run_scan(
         });
         let progress_app = app.clone();
         let progress_id = scan_id.clone();
+        let throttler = Arc::new(ProgressThrottler::new(
+            Duration::from_millis(100),
+            move |summary, latest| {
+                let _ = progress_app.emit(
+                    "scan-progress",
+                    ScanProgress::new(progress_id.clone(), summary, latest.clone()),
+                );
+            },
+        ));
+        let throttler_for_progress = throttler.clone();
         let progress: ProgressFn = Box::new(move |summary, latest| {
-            let _ = progress_app.emit(
-                "scan-progress",
-                ScanProgress::new(progress_id.clone(), summary, latest.clone()),
-            );
+            throttler_for_progress.handle(summary, latest);
         });
 
         if multiple {
-            return Ok(directory::scan_roots_with_exclusions(
+            let summary = directory::scan_roots_with_exclusions(
                 targets,
                 exclusions,
                 cancel_rx.clone(),
                 scan,
                 progress,
             )
-            .await);
+            .await;
+            throttler.flush();
+            return Ok(summary);
         }
         match tokio::fs::symlink_metadata(&target).await {
-            Ok(metadata) if metadata.is_dir() => Ok(directory::scan_roots_with_exclusions(
-                vec![target],
-                exclusions,
-                cancel_rx.clone(),
-                scan,
-                progress,
-            )
-            .await),
+            Ok(metadata) if metadata.is_dir() => {
+                let summary = directory::scan_roots_with_exclusions(
+                    vec![target],
+                    exclusions,
+                    cancel_rx.clone(),
+                    scan,
+                    progress,
+                )
+                .await;
+                throttler.flush();
+                Ok(summary)
+            }
             _ => {
                 let result = scanner::scan_file_with_engine_override(
                     target,
@@ -676,5 +738,103 @@ mod tests {
 
         assert_eq!(manager.selected_path("target").unwrap(), path);
         assert_eq!(manager.selected_path("target").unwrap(), path);
+    }
+
+    #[test]
+    fn throttles_rapid_clean_progress_and_flushes_tail() {
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let emitted_clone = emitted.clone();
+        let throttler = ProgressThrottler::new(Duration::from_millis(100), move |_summary, latest| {
+            emitted_clone
+                .lock()
+                .unwrap()
+                .push(latest.path.clone());
+        });
+
+        let mut summary = ScanSummary::default();
+        for i in 0..50 {
+            let res = scanner::ScanResult::new(
+                format!("clean_{}.txt", i),
+                ScanStatus::Clean,
+                Some("h".into()),
+                None,
+                10,
+            );
+            summary.record(res.clone());
+            throttler.handle(&summary, &res);
+        }
+
+        // Trong thời gian cực ngắn (<100ms), chỉ sự kiện clean đầu tiên được emit
+        let count_before_flush = emitted.lock().unwrap().len();
+        assert_eq!(count_before_flush, 1);
+        assert_eq!(emitted.lock().unwrap()[0], "clean_0.txt");
+
+        // Gọi flush để emit kết quả tail
+        throttler.flush();
+        let count_after_flush = emitted.lock().unwrap().len();
+        assert_eq!(count_after_flush, 2);
+        assert_eq!(emitted.lock().unwrap()[1], "clean_49.txt");
+    }
+
+    #[test]
+    fn emits_non_clean_progress_immediately_even_within_throttle_window() {
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let emitted_clone = emitted.clone();
+        let throttler = ProgressThrottler::new(Duration::from_millis(100), move |_summary, latest| {
+            emitted_clone
+                .lock()
+                .unwrap()
+                .push((latest.path.clone(), latest.status));
+        });
+
+        let mut summary = ScanSummary::default();
+
+        // 1. Clean file đầu tiên -> emit ngay
+        let clean1 = scanner::ScanResult::new("clean1.txt", ScanStatus::Clean, None, None, 1);
+        summary.record(clean1.clone());
+        throttler.handle(&summary, &clean1);
+
+        // 2. Infected file ngay lập tức -> phát ngay
+        let infected = scanner::ScanResult::new(
+            "bad.exe",
+            ScanStatus::Infected,
+            None,
+            Some("Win.Trojan".into()),
+            2,
+        );
+        summary.record(infected.clone());
+        throttler.handle(&summary, &infected);
+
+        // 3. Error file ngay lập tức -> phát ngay
+        let error_file = scanner::ScanResult::new(
+            "locked.bin",
+            ScanStatus::Error,
+            None,
+            Some("permission denied".into()),
+            0,
+        );
+        summary.record(error_file.clone());
+        throttler.handle(&summary, &error_file);
+
+        // 4. Clean file ngay sau đó -> bị throttle
+        let clean2 = scanner::ScanResult::new("clean2.txt", ScanStatus::Clean, None, None, 1);
+        summary.record(clean2.clone());
+        throttler.handle(&summary, &clean2);
+
+        {
+            let guard = emitted.lock().unwrap();
+            assert_eq!(guard.len(), 3);
+            assert_eq!(guard[0], ("clean1.txt".into(), ScanStatus::Clean));
+            assert_eq!(guard[1], ("bad.exe".into(), ScanStatus::Infected));
+            assert_eq!(guard[2], ("locked.bin".into(), ScanStatus::Error));
+        }
+
+        // Flush phát tail clean2
+        throttler.flush();
+        {
+            let guard = emitted.lock().unwrap();
+            assert_eq!(guard.len(), 4);
+            assert_eq!(guard[3], ("clean2.txt".into(), ScanStatus::Clean));
+        }
     }
 }
