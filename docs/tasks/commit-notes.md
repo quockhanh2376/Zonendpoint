@@ -121,3 +121,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/release-candidate | d91279d | YES | feat(ui): auto-compact scan results window to content height (Task V-55) |
 | 2026-11-14 | vic/release-candidate | 02cc273 | YES | test(core): eliminate test directory race conditions across parallel runners (Task V-56) |
 | 2026-11-14 | vic/tunnel-restrict | 12437de | YES | feat(tunnel): restrict lab tunnel account and decouple client configuration (Task V-59) |
+| 2026-11-14 | vic/tunnel-restrict | f03bc82 | YES | feat(tunnel): enforce strict configuration validation and safe ssh invocation (Task V-64) |
