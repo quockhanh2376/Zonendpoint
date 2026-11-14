@@ -43,6 +43,14 @@ class MockHttpHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         MockHttpHandler.request_log.append({"path": self.path, "headers": dict(self.headers)})
+        if MockHttpHandler.mode in ("401", "403"):
+            code = int(MockHttpHandler.mode)
+            self.send_response(code)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Unauthorized access: key=" + self.path.encode())
+            return
+
         if MockHttpHandler.mode == "429":
             self.send_response(429)
             self.send_header("Content-Type", "text/plain")
@@ -356,6 +364,58 @@ class TestAbusechUpdate(unittest.TestCase):
             self.assertEqual(last_run["requests"]["total"], 2)
             self.assertTrue(last_run["reloaded"])
             self.assertIsNone(last_run["error"])
+
+    def test_11_malwarebazaar_429_terminates_run_zero_threatfox_requests(self):
+        """L-1: Test that MalwareBazaar 429 ends run immediately without calling ThreatFox."""
+        MockHttpHandler.mode = "429"
+        ret = update_mod.run_hourly_update(self.args)
+        self.assertEqual(ret, 0)
+
+        # MalwareBazaar sent 1 request, ThreatFox sent 0
+        self.assertEqual(len(MockHttpHandler.request_log), 1)
+        self.assertIn("mb", MockHttpHandler.request_log[0]["path"])
+        tf_reqs = [r for r in MockHttpHandler.request_log if "tf" in r["path"] or "threatfox" in r["path"]]
+        self.assertEqual(len(tf_reqs), 0)
+
+        last_run = json.loads(self.last_run_file.read_text(encoding="utf-8"))
+        self.assertFalse(last_run["reloaded"])
+        self.assertIn("MalwareBazaar", last_run["error"])
+        self.assertIn("429", last_run["error"])
+        self.assertEqual(last_run["requests"]["threatfox"], 0)
+
+    def test_12_malwarebazaar_401_terminates_run_zero_threatfox_requests(self):
+        """L-1: Test that MalwareBazaar 401 ends run immediately without calling ThreatFox."""
+        MockHttpHandler.mode = "401"
+        ret = update_mod.run_hourly_update(self.args)
+        self.assertEqual(ret, 0)
+
+        self.assertEqual(len(MockHttpHandler.request_log), 1)
+        self.assertIn("mb", MockHttpHandler.request_log[0]["path"])
+        tf_reqs = [r for r in MockHttpHandler.request_log if "tf" in r["path"] or "threatfox" in r["path"]]
+        self.assertEqual(len(tf_reqs), 0)
+
+        last_run = json.loads(self.last_run_file.read_text(encoding="utf-8"))
+        self.assertFalse(last_run["reloaded"])
+        self.assertIn("MalwareBazaar", last_run["error"])
+        self.assertIn("401", last_run["error"])
+        self.assertEqual(last_run["requests"]["threatfox"], 0)
+
+    def test_13_malwarebazaar_403_terminates_run_zero_threatfox_requests(self):
+        """L-1: Test that MalwareBazaar 403 ends run immediately without calling ThreatFox."""
+        MockHttpHandler.mode = "403"
+        ret = update_mod.run_hourly_update(self.args)
+        self.assertEqual(ret, 0)
+
+        self.assertEqual(len(MockHttpHandler.request_log), 1)
+        self.assertIn("mb", MockHttpHandler.request_log[0]["path"])
+        tf_reqs = [r for r in MockHttpHandler.request_log if "tf" in r["path"] or "threatfox" in r["path"]]
+        self.assertEqual(len(tf_reqs), 0)
+
+        last_run = json.loads(self.last_run_file.read_text(encoding="utf-8"))
+        self.assertFalse(last_run["reloaded"])
+        self.assertIn("MalwareBazaar", last_run["error"])
+        self.assertIn("403", last_run["error"])
+        self.assertEqual(last_run["requests"]["threatfox"], 0)
 
 
 if __name__ == "__main__":

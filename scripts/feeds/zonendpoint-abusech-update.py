@@ -90,6 +90,22 @@ def mask_key(val: str, key: str = None) -> str:
     return mb.mask_auth_key(val, key)
 
 
+def is_rate_limit_or_auth_error(exc: Exception) -> bool:
+    """Returns True if exception indicates rate limiting (429) or authentication error (401, 403)."""
+    if isinstance(exc, RateLimitError) or exc.__class__.__name__ == "RateLimitError":
+        return True
+    if exc.__class__.__name__ in ("AuthKeyError", "AccountBlockedError"):
+        return True
+    code = getattr(exc, "code", None) or getattr(exc, "status", None)
+    if code in (401, 403, 429):
+        return True
+    msg = str(exc)
+    for c in ("401", "403", "429"):
+        if f"HTTP {c}" in msg or f"{c} Unauthorized" in msg or f"{c} Too Many" in msg or f"HTTP error {c}" in msg:
+            return True
+    return False
+
+
 def count_hsb_signatures(path: pathlib.Path) -> int:
     """Counts non-empty, non-comment signature lines in a .hsb file."""
     if not path.is_file():
@@ -500,6 +516,13 @@ def run_hourly_update(args) -> int:
             mb_error = mask_key(exc, auth_key)
             logger.warning("MalwareBazaar update failed: %s. Skipping without retry per Zon policy.", mb_error)
             status_record["error"] = f"MalwareBazaar: {mb_error}"
+            if is_rate_limit_or_auth_error(exc):
+                logger.warning(
+                    "MalwareBazaar encountered rate limit or auth error (401/403/429): %s. Terminating run immediately without calling ThreatFox per Zon policy.",
+                    mb_error,
+                )
+                status_record["reloaded"] = False
+                return 0
         finally:
             if mb_temp_csv and mb_temp_csv.is_file():
                 mb_temp_csv.unlink(missing_ok=True)
