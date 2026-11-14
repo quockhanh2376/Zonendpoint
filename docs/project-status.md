@@ -1,15 +1,15 @@
 # Project status — 2026-11-14
 
-Phase: 0.3.0 released / 0.3.1 client implementation (V-57) & CI + security audit + docs (V-60). Task V-60 implementation on branch `vic/ci`. Base: `origin/main 908535e`.
+Phase: 0.3.0 released / 0.3.1 client implementation (V-57) & CI + security audit + docs (V-60, V-66). Task V-66 implementation on branch `vic/ci`. Base: `origin/main 908535e`.
 
-## Active checkout/snapshot (Task V-60)
-- Implementation: branch `vic/ci` (base `origin/main 908535e`), worktree `E:\Zonendpoint-worktrees\v60-ci`.
+## Active checkout/snapshot (Task V-60 / V-66)
+- Implementation: branch `vic/ci` (base `origin/main 908535e`), worktree `E:\Zonendpoint-worktrees\v66-ci`.
 - CI Workflow: `.github/workflows/ci.yml` (push all branches & PR, permissions: contents: read, actions pinned to commit SHA).
-  - Job 1 (`windows-ci`): Windows x64 runner, Rust stable + cache, Node 22 + cache, cargo fmt, clippy, test, npm ci, build.
-  - Job 2 (`feeds-test`): Ubuntu runner, Python 3.12, unittest discover `scripts/feeds` (mock fixtures, 0 network, PASS).
-  - Job 3 (`audit`): Ubuntu runner, `npm audit --audit-level=high` (0 vulnerabilities, PASS), `cargo audit` in `src-tauri` (1 vulnerability: `libsqlite3-sys` CVE-2026-119375 / RUSTSEC-2026-0459).
+  - Job 1 (`windows-ci`): Windows x64 runner, Rust stable + cache, Node 22 + cache, cargo fmt, clippy, test (elevated runner token check in `directory::tests`), npm ci, build. **ALL PASS**.
+  - Job 2 (`feeds-test`): Ubuntu runner, Python 3.12, unittest discover `scripts/feeds` (mock fixtures, 0 network). **PASS**.
+  - Job 3 (`audit`): Ubuntu runner, `npm audit --audit-level=high` (0 vulnerabilities, PASS), `cargo audit --ignore RUSTSEC-2026-0459` (RUSTSEC-2026-0459 scheduled for upgrade in client 0.3.1, 0 new vulnerabilities). **PASS**.
 - Dependabot: `.github/dependabot.yml` weekly updates for `cargo`, `npm`, `github-actions` (limit 5 PRs).
-- Documentation alignment: `README.md` (25 MiB/file limit, dedicated ClamAV server, 1–2 machine personal scope, no lab IP), `AGENTS.md` (encoding `1–2`, UTF-8 without BOM, worktree checkout paths).
+- Documentation alignment: `README.md` (typography "for 13", "No 32-bit", 25 MiB/file limit, dedicated ClamAV server, 1–2 machine personal scope, no lab IP), `AGENTS.md` (encoding `1–2`, UTF-8 without BOM, worktree checkout paths).
 - Handoff doc: [ci-vic-to-qeen.md](handoffs/ci-vic-to-qeen.md).
 - Merged branches:
   - `origin/vic/close-fix` (tip `0b48da0`, code `e8b249d`, merged in Task V-30M, branch `vic/close-fix-merge`, code snapshot `17bdccf`): graceful window close & scan cancellation on exit (V-30), compatibility with ScanManager, bounded folder workers + adaptive limiter (J-01), and Guard (`stop_guard`), refactored shared event handling (`cancel_and_exit`), quality gates 68/68 cargo tests PASS, 20/20 native tests PASS.

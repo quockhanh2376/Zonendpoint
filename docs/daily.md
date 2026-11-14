@@ -328,3 +328,11 @@
   - `Windows CI (Rust + Node)`: `cargo fmt` PASS, `cargo clippy` PASS (0 warnings), `npm ci` PASS, `npm run build` PASS. `cargo test` FAIL ở 1 test `tdd_folder_scan_of_drivers_reports_denied_subdir` do runner GitHub Actions chạy quyền `runneradmin` (Administrator) nên không bị chặn quyền truy cập `DriverData` (trả về complete thay vì incomplete). Ghi nhận vào handoff, không sửa code app ở task này.
   - `Dependency Security Audit`: `npm audit` PASS (0 lỗ hổng). `cargo audit` phát hiện 1 lỗ hổng trong dependency `libsqlite3-sys` v0.30.1 (`RUSTSEC-2026-0459`, CVE-2026-119375, medium) và 6 cảnh báo thư viện unmaintained/unsound/yanked. Ghi nhận vào handoff, không tự nâng thư viện ở task này.
 - Bàn giao: Handoff `docs/handoffs/ci-vic-to-qeen.md`, commit và push nhánh `vic/ci`. Không merge main.
+- **Task V-66 (Sửa lỗi Q-45 cho V-60 - CI)** (Vic):
+  - Tiếp tục trên nhánh `vic/ci`, worktree `E:\Zonendpoint-worktrees\v66-ci`.
+  - Sửa test `directory::tests::tdd_folder_scan_of_drivers_reports_denied_subdir`: phát hiện tiến trình đang elevated qua Windows Token (`OpenProcessToken` + `GetTokenInformation` `TOKEN_ELEVATION`), nếu elevated (như `runneradmin` trên runner GitHub Actions) thì bỏ qua kỳ vọng access-denied và ghi log lý do. Không thay đổi hành vi code app.
+  - Sửa lỗi chính tả trong `README.md`: sửa lỗi dính chữ "for13" → "for 13" và "No32-bit" → "No 32-bit". Rà soát toàn file sạch sẽ.
+  - Sửa `cargo audit` trong `.github/workflows/ci.yml`: thêm cờ `--ignore RUSTSEC-2026-0459` kèm ghi chú nâng cấp trong nhánh client 0.3.1. Job audit vẫn bắt và báo lỗi với các lỗ hổng mới, cảnh báo unmaintained/unsound không làm đỏ job.
+  - Giữ nguyên mô tả checkout trong `AGENTS.md` theo xác nhận của Zon.
+  - Kiểm chứng GitHub Actions CI (Run ID `43605662941`): Cả 3 job (`Dependency Security Audit`, `Feeds Python Unit Tests`, `Windows CI`) đều **PASS (XANH 100%)**.
+  - Cập nhật handoff `docs/handoffs/ci-vic-to-qeen.md` và `docs/tasks/commit-notes.md`. Xóa worktree sau khi hoàn tất.

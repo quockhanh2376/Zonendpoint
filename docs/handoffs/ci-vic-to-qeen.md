@@ -112,3 +112,43 @@ Per task instructions, **no dependencies were upgraded in Task V-60**. Upgrades 
 - [x] `docs/project-status.md`: Updated current project status.
 - [x] `docs/tasks/commit-notes.md`: Updated commit tracking.
 - [x] Worktree clean and ready for removal after push.
+
+---
+
+## 7. Task V-66: Resolution of Q-45 Findings
+
+- **Date**: 2026-11-14
+- **Author**: Vic
+- **Recipient**: Qeen, Zon
+- **Branch**: `vic/ci`
+- **Run ID**: `43605662941`
+- **Run URL**: https://github.com/quockhanh2376/Zonendpoint/actions/runs/43605662941
+
+### Verification Results (Run 43605662941 — All 3 Jobs GREEN)
+
+| Job | Runner | Result | Details |
+|---|---|---|---|
+| **Dependency Security Audit** | `ubuntu-latest` | **PASS (SUCCESS)** | `npm audit`: 0 vulnerabilities. `cargo audit --ignore RUSTSEC-2026-0459`: exited 0 with no other vulnerabilities. Warnings reported non-fatal. |
+| **Feeds Python Unit Tests** | `ubuntu-latest` | **PASS (SUCCESS)** | 5 test suites in `scripts/feeds/` ran without network calls. 100% pass (48s). |
+| **Windows CI (Rust + Node)** | `windows-latest` | **PASS (SUCCESS)** | • `cargo fmt --check`: PASS<br>• `cargo clippy`: PASS (0 warnings)<br>• `cargo test`: PASS (62 passed, 0 failed; `tdd_folder_scan_of_drivers_reports_denied_subdir` skipped assertion cleanly via token check)<br>• `npm ci`: PASS<br>• `npm run build`: PASS (Vite + TS compilation clean) |
+
+### Resolved Items:
+
+1. **Windows CI Test Elevation (`tdd_folder_scan_of_drivers_reports_denied_subdir`)**:
+   - Implemented `is_process_elevated()` inside `directory::tests` using standard Windows Token Information (`OpenProcessToken`, `GetTokenInformation` with `TOKEN_ELEVATION`).
+   - If the process is running elevated (Administrator, e.g. GitHub Actions `runneradmin`), the test skips the assertion expecting access denied on `DriverData` and logs the reason.
+   - For non-elevated runs (standard Windows desktop), the access-denied assertion runs normally.
+   - Zero modifications to production application code.
+
+2. **README.md Formatting Fixes**:
+   - Fixed merged words: "for13" → "for 13" (13 Windows core files) and "No32-bit" → "No 32-bit".
+   - Full-file audit completed; no other merged word artifacts present.
+
+3. **cargo audit Advisory Handling**:
+   - In `.github/workflows/ci.yml`, added `--ignore RUSTSEC-2026-0459` for known medium vulnerability in `libsqlite3-sys` v0.30.1 (scheduled for library upgrade in client 0.3.1 branch).
+   - The job continues to fail if any new vulnerabilities are introduced.
+   - Warnings (unmaintained/unsound/yanked) remain non-fatal reports.
+
+4. **AGENTS.md Configuration**:
+   - Preserved active checkout paths (`E:\Zonendpoint` repo + `E:\Zonendpoint-worktrees\<task>`) per Zon's instructions.
+
