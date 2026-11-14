@@ -1,15 +1,26 @@
-//! Development-only folder benchmark. It accepts 1-6 worker slots directly
-//! for measurement; the application itself has a hard concurrency ceiling of 4.
-//! Run from PowerShell with LOCALAPPDATA set to an isolated directory for each
-//! cache-cold run.
+//! Development-only scan benchmark. Example binaries are not bundled in releases.
+//! Set LOCALAPPDATA to an isolated directory for every cold-cache run.
 
-use std::{env, path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    env,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 use tokio::sync::watch;
-use zonendpoint_lib::{cache, directory, scanner};
+use zonendpoint_lib::{cache, config, directory, quick, scanner};
+
+#[derive(serde::Serialize)]
+struct FileMetric {
+    path: String,
+    bytes: u64,
+    elapsed_ms: u64,
+}
 
 #[derive(serde::Serialize)]
 struct Report {
-    elapsed_seconds: f64,
+    started_utc_unix_ms: u128,
+    elapsed_ms: u128,
     process_cpu_seconds: f64,
     peak_working_set_bytes: usize,
     scanned: usize,
@@ -20,11 +31,17 @@ struct Report {
     skipped: usize,
     cancelled: usize,
     complete: bool,
-    cache: String,
     cache_entries: i64,
+    concurrency_requested: usize,
     concurrency_final: usize,
     backoffs: usize,
     recoveries: usize,
+    cancel_latency_ms: Option<u128>,
+    file_time_p50_ms: u64,
+    file_time_p95_ms: u64,
+    file_time_p99_ms: u64,
+    file_time_max_ms: u64,
+    slowest_files: Vec<FileMetric>,
 }
 
 #[repr(C)]
@@ -60,7 +77,6 @@ unsafe extern "system" {
         user: *mut FileTime,
     ) -> i32;
 }
-
 #[link(name = "psapi")]
 unsafe extern "system" {
     fn GetProcessMemoryInfo(
@@ -71,8 +87,7 @@ unsafe extern "system" {
 }
 
 fn filetime_seconds(time: &FileTime) -> f64 {
-    let ticks = (u64::from(time.high) << 32) | u64::from(time.low);
-    ticks as f64 / 10_000_000.0
+    (((u64::from(time.high)) << 32) | u64::from(time.low)) as f64 / 10_000_000.0
 }
 
 fn process_metrics() -> (f64, usize) {
@@ -104,15 +119,37 @@ fn process_metrics() -> (f64, usize) {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args_os().skip(1);
-    let root = args
+    let mode = args
         .next()
-        .map(PathBuf::from)
-        .ok_or("usage: cargo run --release --example folder_bench -- <folder> <concurrency>")?;
-    let concurrency: usize = args
-        .next()
-        .ok_or("missing concurrency level (1-6)")?
-        .to_string_lossy()
-        .parse()?;
+        .ok_or("usage: folder_bench <folder|--quick> [--concurrency N] [--cancel-after SECONDS]")?;
+    let quick_mode = mode == "--quick";
+    let root = if quick_mode {
+        quick::system_root()?
+    } else {
+        PathBuf::from(mode)
+    };
+    let mut concurrency = config::scan_concurrency();
+    let mut cancel_after = None;
+    while let Some(arg) = args.next() {
+        match arg.to_string_lossy().as_ref() {
+            "--concurrency" => {
+                concurrency = args
+                    .next()
+                    .ok_or("missing concurrency")?
+                    .to_string_lossy()
+                    .parse()?
+            }
+            "--cancel-after" => {
+                cancel_after = Some(
+                    args.next()
+                        .ok_or("missing cancellation seconds")?
+                        .to_string_lossy()
+                        .parse::<u64>()?,
+                )
+            }
+            _ => return Err("unknown argument".into()),
+        }
+    }
     if !(1..=6).contains(&concurrency) {
         return Err("concurrency must be between 1 and 6".into());
     }
@@ -121,36 +158,99 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (_cancel_tx, cancel) = watch::channel(false);
     let engine = scanner::clamd_preflight(addr, cancel.clone()).await?;
     let limiter = Arc::new(scanner::ScanLimiter::new(concurrency));
+    let file_metrics = Arc::new(Mutex::new(Vec::new()));
     let scan_cache = cache_path.clone();
     let scan_limiter = limiter.clone();
-    let scan_engine = engine.clone();
+    let scan_engine = engine;
     let scan_addr = addr;
+    let scan_times = file_metrics.clone();
     let scan: directory::ScanFn = Box::new(move |path, cancel| {
-        let cache_path = scan_cache.clone();
+        let cache = scan_cache.clone();
         let limiter = scan_limiter.clone();
         let engine = scan_engine.clone();
+        let times = scan_times.clone();
         Box::pin(async move {
-            scanner::scan_file_with_engine_override(
+            let started = Instant::now();
+            let result = scanner::scan_file_with_engine_override(
                 path,
-                cache_path,
+                cache,
                 scan_addr,
                 Some(engine),
                 cancel,
                 limiter,
             )
-            .await
+            .await;
+            times.lock().unwrap().push(FileMetric {
+                path: result.path.clone(),
+                bytes: result.bytes_scanned,
+                elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            });
+            result
         })
     });
+    let targets = if quick_mode {
+        quick::targets_for_root(&root)
+    } else {
+        vec![root.clone()]
+    };
+    let exclusions = if quick_mode {
+        quick::exclusions_for_root(&root)
+    } else {
+        Vec::new()
+    };
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    let started_utc_unix_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
     let started = Instant::now();
-    let summary = directory::scan_roots(vec![root], cancel, scan, Box::new(|_, _| {})).await;
-    let elapsed_seconds = started.elapsed().as_secs_f64();
+    let trigger = cancel_after.map(|seconds| {
+        let cancel_tx = cancel_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(seconds)).await;
+            let cancelled_at = Instant::now();
+            let _ = cancel_tx.send(true);
+            cancelled_at
+        })
+    });
+    let summary = directory::scan_roots_with_exclusions(
+        targets,
+        exclusions,
+        cancel_rx,
+        scan,
+        Box::new(|_, _| {}),
+    )
+    .await;
+    let elapsed_ms = started.elapsed().as_millis();
+    let cancel_latency_ms = if let Some(trigger) = trigger {
+        if trigger.is_finished() {
+            Some(trigger.await?.elapsed().as_millis())
+        } else {
+            trigger.abort();
+            None
+        }
+    } else {
+        None
+    };
     let (process_cpu_seconds, peak_working_set_bytes) = process_metrics();
     let (concurrency_final, backoffs, recoveries) = limiter.telemetry();
-    let cache = cache::stats(&cache_path)?;
+    let stats = cache::stats(&cache_path)?;
+    let mut file_metrics = file_metrics.lock().unwrap().drain(..).collect::<Vec<_>>();
+    file_metrics.sort_by_key(|item| item.elapsed_ms);
+    let percentile = |p: usize| -> u64 {
+        if file_metrics.is_empty() {
+            return 0;
+        }
+        file_metrics[(file_metrics.len() * p).div_ceil(100).saturating_sub(1)].elapsed_ms
+    };
+    let file_time_p50_ms = percentile(50);
+    let file_time_p95_ms = percentile(95);
+    let file_time_p99_ms = percentile(99);
+    let file_time_max_ms = file_metrics.last().map_or(0, |item| item.elapsed_ms);
+    file_metrics.sort_by_key(|item| std::cmp::Reverse(item.elapsed_ms));
+    file_metrics.truncate(10);
     println!(
         "{}",
         serde_json::to_string(&Report {
-            elapsed_seconds,
+            started_utc_unix_ms,
+            elapsed_ms,
             process_cpu_seconds,
             peak_working_set_bytes,
             scanned: summary.scanned,
@@ -161,11 +261,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             skipped: summary.skipped,
             cancelled: summary.cancelled_files,
             complete: summary.complete,
-            cache: cache_path.to_string_lossy().into_owned(),
-            cache_entries: cache.entries,
+            cache_entries: stats.entries,
+            concurrency_requested: concurrency,
             concurrency_final,
             backoffs,
             recoveries,
+            cancel_latency_ms,
+            file_time_p50_ms,
+            file_time_p95_ms,
+            file_time_p99_ms,
+            file_time_max_ms,
+            slowest_files: file_metrics,
         })?
     );
     Ok(())

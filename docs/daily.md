@@ -166,3 +166,8 @@
 
 ## 2026-11-12 - J-05
 - Restored app concurrency hard cap to 4 per Zon approval: J-04 found 6 only 8.2% faster than 4 (<10% threshold). Config now only lowers automatic selection; retained 50-result recovery, pressure backoff/telemetry and direct 1–6 dev benchmark control. `cargo test` 70/70, fmt, clippy and release example build PASS. No remeasurement. Code: `bf4f79e`; Qeen acceptance pending.
+
+## 2026-11-13 - J-06
+- Added a dev-only benchmark mode for app-equivalent Quick scan, automatic/forced concurrency, cancel timing, and per-file duration distribution/top 10; no product behavior or dependencies changed. Source commit `ba0e418` on `jacky/perf-baseline`.
+- Completed 15 measurements on 8 GB / 4 CPU over loopback `127.0.0.1:13310`: Quick cold median 8.771 s, warm median 1.718 s; cancellation after 10/60 s returned in <1 ms after signal; Program Files cold median 115.634 s with one 388.106 s outlier. No cause inferred; see [J-06 report](qa/perf-baseline-0.3.0.md) and `E:\Zonendpoint-tools\artifacts\j06\jacky-report.md`.
+- Quality gates PASS: fmt, cargo test (70), clippy `-D warnings`, release example build. Original user cache SHA-256 unchanged. Full app/WebView2 RAM and Qeen acceptance NOT RUN.
