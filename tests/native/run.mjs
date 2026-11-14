@@ -257,6 +257,13 @@ try {
   if (!real) {
     await startMockServer(0);
     env.ZONENDPOINT_CLAMD = `127.0.0.1:${serverPort}`;
+    process.env.ZONENDPOINT_CLAMD = `127.0.0.1:${serverPort}`;
+    process.env.LOCALAPPDATA = env.LOCALAPPDATA;
+    // Pre-populate config.json in test appdata so that even if ZONENDPOINT_CLAMD is not read,
+    // the saved address points to mock server, never falling back to default 127.0.0.1:13310
+    writeFileSync(path.join(testAppdataZon, 'config.json'), JSON.stringify({
+      server_address: `127.0.0.1:${serverPort}`
+    }, null, 2));
   } else {
     if (!process.env.ZONENDPOINT_CLAMD) throw Error('Set ZONENDPOINT_CLAMD to private real lab endpoint');
   }
@@ -409,6 +416,7 @@ try {
   });
 
   await check('keyboard focus order', async () => {
+    await browser.waitUntil(async () => !(await browser.$('.server-status').getAttribute('disabled')), { timeout: 10000 });
     await browser.execute(() => {
       document.querySelector('.server-status')?.focus();
     });
@@ -765,10 +773,12 @@ try {
 
       // 2. Test close during active scan:
       mode = 'delay';
+      writeFileSync(path.join(systemRoot, 'ntoskrnl.exe'), 'changed cancellation fixture ' + Date.now());
       await session();
       const appPid2 = findTestAppPid();
       assert.ok(appPid2, 'Second test application PID must be found');
 
+      await browser.waitUntil(async () => await browser.$('.server-status').getAttribute('data-status') === 'connected', { timeout: 10000 });
       const startBtn = await button('Start scan');
       await startBtn.waitForEnabled({ timeout: 10000 });
       await startBtn.click();
@@ -791,6 +801,7 @@ try {
       assert.equal(orphans2.length, 0, `No orphan child processes should remain after close during scan`);
 
       mode = 'clean';
+      writeFileSync(path.join(systemRoot, 'ntoskrnl.exe'), 'Restored harmless ntoskrnl fixture');
       await browser.deleteSession().catch(() => {});
       await session();
     });

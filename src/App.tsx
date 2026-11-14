@@ -13,6 +13,7 @@ type ServerConfig = {
   source: string;
   saved_addr: string | null;
   env_override: boolean;
+  config_error?: string | null;
 };
 type ScanResult = {
   path: string;
@@ -179,6 +180,10 @@ function App() {
       .then((cfg) => {
         setServerConfig(cfg);
         setServerInput(cfg.saved_addr || (cfg.env_override ? cfg.effective_addr : "127.0.0.1:13310"));
+        if (cfg.config_error) {
+          setServerConfigMsg({ text: `Config error: ${cfg.config_error}`, error: true });
+          setShowServerManual(true);
+        }
       })
       .catch((err) => {
         setServerConfigMsg({ text: `Config error: ${String(err)}`, error: true });

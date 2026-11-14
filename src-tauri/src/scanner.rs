@@ -469,10 +469,10 @@ async fn stream_scan<R: AsyncRead + Unpin>(
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct FileSnapshot {
-    size: u64,
-    modified: SystemTime,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileSnapshot {
+    pub size: u64,
+    pub modified: SystemTime,
 }
 
 fn snapshot(metadata: &std::fs::Metadata) -> Result<FileSnapshot, String> {
@@ -484,10 +484,46 @@ fn snapshot(metadata: &std::fs::Metadata) -> Result<FileSnapshot, String> {
     })
 }
 
-async fn hash_file(path: &Path) -> Result<([u8; 32], u64, FileSnapshot), String> {
+pub struct HeldFileHash {
+    pub file: File,
+    pub hash: [u8; 32],
+    pub size: u64,
+    pub snapshot: FileSnapshot,
+}
+
+#[cfg(windows)]
+pub fn open_file_share_read(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 1;
+    let std_file = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(path)?;
+    Ok(File::from_std(std_file))
+}
+
+#[cfg(not(windows))]
+pub fn open_file_share_read(path: &Path) -> std::io::Result<File> {
+    let std_file = std::fs::File::open(path)?;
+    Ok(File::from_std(std_file))
+}
+
+async fn hash_file_held(path: &Path) -> Result<Option<HeldFileHash>, String> {
+    #[cfg(windows)]
+    let mut file = match open_file_share_read(path) {
+        Ok(f) => f,
+        Err(_) => {
+            // Cannot open with share mode FILE_SHARE_READ (e.g. file is open for writing / locked).
+            // Bypass cache and scan directly.
+            return Ok(None);
+        }
+    };
+
+    #[cfg(not(windows))]
     let mut file = File::open(path)
         .await
         .map_err(|error| format!("open scan target: {error}"))?;
+
     let before = snapshot(
         &file
             .metadata()
@@ -528,7 +564,12 @@ async fn hash_file(path: &Path) -> Result<([u8; 32], u64, FileSnapshot), String>
     if before != after_handle || before != after_path || total != before.size {
         return Err("file changed while hashing".into());
     }
-    Ok((hasher.finalize().into(), total, before))
+    Ok(Some(HeldFileHash {
+        file,
+        hash: hasher.finalize().into(),
+        size: total,
+        snapshot: before,
+    }))
 }
 
 pub async fn scan_file(
@@ -651,200 +692,226 @@ pub async fn scan_file_with_engine_timeout(
     semaphore: Arc<ScanLimiter>,
     total_timeout: Duration,
 ) -> ScanResult {
-    let permit = tokio::select! {
-        _ = wait_cancelled(cancel.clone()) => return ScanResult::new(path, ScanStatus::Cancelled, None, Some("cancelled".into()), 0),
-        permit = semaphore.acquire_owned() => match permit {
-            Ok(permit) => permit,
-            Err(_) => return ScanResult::error(path, "scan worker limit is unavailable"),
-        }
-    };
-    let operation = async {
-        let engine_version = match &engine_override {
-            Some(version) => version.clone(),
-            None => clamd_version(addr, cancel.clone()).await?,
+    let path_clone = path.clone();
+    let scan_task = async {
+        let permit = tokio::select! {
+            _ = wait_cancelled(cancel.clone()) => return ScanResult::new(&path, ScanStatus::Cancelled, None, Some("cancelled".into()), 0),
+            permit = semaphore.acquire_owned() => match permit {
+                Ok(permit) => permit,
+                Err(_) => return ScanResult::error(&path, "scan worker limit is unavailable"),
+            }
         };
-        let (hash, size, file_snapshot) = hash_file(&path).await?;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| error.to_string())?
-            .as_secs() as i64;
-        let server_status = crate::server_status::load_server_status();
-        let sig_generation = server_status.signature_generation();
 
-        let (cached_verdict, cache_read_error) = if let Some(sig_gen) = &sig_generation {
-            match crate::cache::get(
-                &cache_path,
-                &hash,
-                &engine_version,
-                sig_gen,
-                POLICY_VERSION,
-                now,
-                CACHE_TTL_SECONDS,
-            ) {
-                Ok(cached) => (cached, None),
-                Err(error) => (None, Some(format!("cache read error: {error}"))),
-            }
-        } else {
-            (None, None)
-        };
-        if let Some(cached) = cached_verdict {
-            let current_meta = match tokio::fs::metadata(&path).await {
-                Ok(m) => m,
-                Err(error) => {
+        let operation = async {
+            let engine_version = match &engine_override {
+                Some(version) => version.clone(),
+                None => clamd_version(addr, cancel.clone()).await?,
+            };
+            let held_hash = hash_file_held(&path).await?;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|error| error.to_string())?
+                .as_secs() as i64;
+            let server_status = crate::server_status::load_server_status();
+            let sig_generation = server_status.signature_generation();
+
+            let (cached_verdict, cache_read_error) = match (&held_hash, &sig_generation) {
+                (Some(held), Some(sig_gen)) => {
+                    match crate::cache::get(
+                        &cache_path,
+                        &held.hash,
+                        &engine_version,
+                        sig_gen,
+                        POLICY_VERSION,
+                        now,
+                        CACHE_TTL_SECONDS,
+                    ) {
+                        Ok(cached) => (cached, None),
+                        Err(error) => (None, Some(format!("cache read error: {error}"))),
+                    }
+                }
+                _ => (None, None),
+            };
+
+            if let (Some(held), Some(cached)) = (&held_hash, cached_verdict) {
+                let current_meta = match held.file.metadata().await {
+                    Ok(m) => m,
+                    Err(error) => {
+                        return Ok::<ScanResult, String>(ScanResult::new(
+                            &path,
+                            ScanStatus::Unknown,
+                            Some(hex::encode(held.hash)),
+                            Some(format!("read held file metadata: {error}")),
+                            held.size,
+                        ));
+                    }
+                };
+                let current_snapshot = match snapshot(&current_meta) {
+                    Ok(s) => s,
+                    Err(error) => {
+                        return Ok::<ScanResult, String>(ScanResult::new(
+                            &path,
+                            ScanStatus::Unknown,
+                            Some(hex::encode(held.hash)),
+                            Some(format!("validate cached metadata: {error}")),
+                            held.size,
+                        ));
+                    }
+                };
+                if current_snapshot.size != held.size || current_snapshot != held.snapshot {
                     return Ok::<ScanResult, String>(ScanResult::new(
                         &path,
                         ScanStatus::Unknown,
-                        Some(hex::encode(hash)),
-                        Some(format!(
-                            "read file metadata while validating cached verdict: {error}"
-                        )),
-                        size,
+                        Some(hex::encode(held.hash)),
+                        Some("file changed while validating cached verdict".into()),
+                        held.size,
                     ));
                 }
-            };
-            let current_snapshot = match snapshot(&current_meta) {
-                Ok(s) => s,
-                Err(error) => {
-                    return Ok::<ScanResult, String>(ScanResult::new(
-                        &path,
-                        ScanStatus::Unknown,
-                        Some(hex::encode(hash)),
-                        Some(format!("validate cached metadata: {error}")),
-                        size,
-                    ));
-                }
-            };
-            if current_snapshot.size != size || current_snapshot != file_snapshot {
-                return Ok::<ScanResult, String>(ScanResult::new(
+                let reason = match cached.status {
+                    ScanStatus::Infected => cached.threat_name,
+                    _ => Some("verified content cache hit".into()),
+                };
+                let mut result = ScanResult::new(
                     &path,
-                    ScanStatus::Unknown,
-                    Some(hex::encode(hash)),
-                    Some("file changed while validating cached verdict".into()),
-                    size,
-                ));
+                    cached.status,
+                    Some(hex::encode(held.hash)),
+                    reason,
+                    held.size,
+                );
+                result.engine_version = Some(engine_version.clone());
+                return Ok(result);
             }
-            let reason = match cached.status {
-                ScanStatus::Infected => cached.threat_name,
-                _ => Some("verified content cache hit".into()),
-            };
-            let mut result =
-                ScanResult::new(&path, cached.status, Some(hex::encode(hash)), reason, size);
-            result.engine_version = Some(engine_version.clone());
-            return Ok(result);
-        }
-        let mut file = File::open(&path)
-            .await
-            .map_err(|error| format!("open scan target for streaming: {error}"))?;
-        let before = snapshot(
-            &file
-                .metadata()
+
+            let pre_hash = held_hash.as_ref().map(|h| (h.hash, h.size, h.snapshot));
+            drop(held_hash);
+
+            let mut file = File::open(&path)
                 .await
-                .map_err(|error| format!("read scan target metadata: {error}"))?,
-        )?;
-        let outcome = stream_scan(
-            &mut file,
-            addr,
-            MAX_FILE_BYTES,
-            cancel.clone(),
-            total_timeout,
-        )
-        .await;
-        if outcome.status == ScanStatus::Clean || outcome.status == ScanStatus::Infected {
-            let after_handle = snapshot(
+                .map_err(|error| format!("open scan target for streaming: {error}"))?;
+            let before = snapshot(
                 &file
                     .metadata()
                     .await
-                    .map_err(|error| format!("recheck scan target: {error}"))?,
+                    .map_err(|error| format!("read scan target metadata: {error}"))?,
             )?;
-            let after_path = snapshot(
-                &tokio::fs::metadata(&path)
-                    .await
-                    .map_err(|error| format!("recheck scan path: {error}"))?,
-            )?;
-            let stream_hash = outcome
-                .sha256
-                .as_deref()
-                .and_then(|value| hex::decode(value).ok())
-                .and_then(|value| <[u8; 32]>::try_from(value).ok());
-            if before != file_snapshot
-                || before != after_handle
-                || before != after_path
-                || outcome.bytes_scanned != size
-                || stream_hash != Some(hash)
-            {
-                return Ok(ScanResult::new(
+            let outcome = stream_scan(
+                &mut file,
+                addr,
+                MAX_FILE_BYTES,
+                cancel.clone(),
+                total_timeout,
+            )
+            .await;
+            if outcome.status == ScanStatus::Clean || outcome.status == ScanStatus::Infected {
+                let after_handle = snapshot(
+                    &file
+                        .metadata()
+                        .await
+                        .map_err(|error| format!("recheck scan target: {error}"))?,
+                )?;
+                let after_path = snapshot(
+                    &tokio::fs::metadata(&path)
+                        .await
+                        .map_err(|error| format!("recheck scan path: {error}"))?,
+                )?;
+                let stream_hash = outcome
+                    .sha256
+                    .as_deref()
+                    .and_then(|value| hex::decode(value).ok())
+                    .and_then(|value| <[u8; 32]>::try_from(value).ok());
+
+                let (expected_size, expected_hash, expected_snapshot) = match &pre_hash {
+                    Some((h, sz, snap)) => (*sz, Some(*h), Some(*snap)),
+                    None => (before.size, stream_hash, None),
+                };
+
+                if (expected_snapshot.is_some() && Some(before) != expected_snapshot)
+                    || before != after_handle
+                    || before != after_path
+                    || outcome.bytes_scanned != expected_size
+                    || stream_hash != expected_hash
+                    || stream_hash.is_none()
+                {
+                    return Ok(ScanResult::new(
+                        &path,
+                        ScanStatus::Unknown,
+                        stream_hash.map(hex::encode),
+                        Some("file changed during scan; verdict not accepted".into()),
+                        outcome.bytes_scanned,
+                    ));
+                }
+                let mut result = ScanResult::new(
                     &path,
-                    ScanStatus::Unknown,
-                    Some(hex::encode(hash)),
-                    Some("file changed during scan; verdict not accepted".into()),
+                    outcome.status,
+                    outcome.sha256,
+                    outcome.reason.clone(),
                     outcome.bytes_scanned,
-                ));
+                );
+                if let Some(cache_err) = cache_read_error {
+                    result.reason = Some(match result.reason.take() {
+                        Some(prev) => format!("{prev}; {cache_err}"),
+                        None => cache_err,
+                    });
+                }
+                result.engine_version = Some(engine_version.clone());
+                if let (Some(sig_gen), Some(hash_to_cache)) = (&sig_generation, stream_hash) {
+                    let put_result = crate::cache::put(
+                        &cache_path,
+                        &hash_to_cache,
+                        &engine_version,
+                        sig_gen,
+                        POLICY_VERSION,
+                        outcome.status,
+                        outcome.reason.as_deref(),
+                        now,
+                    );
+                    if let Err(error) = put_result {
+                        result.reason = Some(format!(
+                            "{}; cache write failed: {error}",
+                            result
+                                .reason
+                                .take()
+                                .unwrap_or_else(|| "scan completed".into())
+                        ));
+                    }
+                }
+                return Ok(result);
             }
             let mut result = ScanResult::new(
                 &path,
                 outcome.status,
                 outcome.sha256,
-                outcome.reason.clone(),
+                outcome.reason,
                 outcome.bytes_scanned,
             );
-            if let Some(cache_err) = cache_read_error {
-                result.reason = Some(match result.reason.take() {
-                    Some(prev) => format!("{prev}; {cache_err}"),
-                    None => cache_err,
-                });
-            }
             result.engine_version = Some(engine_version.clone());
-            if let Some(sig_gen) = &sig_generation {
-                let put_result = crate::cache::put(
-                    &cache_path,
-                    &hash,
-                    &engine_version,
-                    sig_gen,
-                    POLICY_VERSION,
-                    outcome.status,
-                    outcome.reason.as_deref(),
-                    now,
-                );
-                if let Err(error) = put_result {
-                    result.reason = Some(format!(
-                        "{}; cache write failed: {error}",
-                        result
-                            .reason
-                            .take()
-                            .unwrap_or_else(|| "scan completed".into())
-                    ));
-                }
-            }
-            return Ok(result);
+            Ok(result)
+        };
+
+        let result = match operation.await {
+            Ok(result) => result,
+            Err(reason) => ScanResult::error(&path, reason),
+        };
+
+        if is_server_pressure(&result) {
+            let mut permit = permit;
+            permit.back_off();
+        } else if matches!(result.status, ScanStatus::Clean | ScanStatus::Infected) {
+            permit.limiter.record_success();
+        } else {
+            permit.limiter.reset_success_streak();
         }
-        let mut result = ScanResult::new(
-            &path,
-            outcome.status,
-            outcome.sha256,
-            outcome.reason,
-            outcome.bytes_scanned,
-        );
-        result.engine_version = Some(engine_version.clone());
-        Ok(result)
+        result
     };
+
     let result_cancel = cancel.clone();
-    let result = tokio::select! {
-        _ = wait_cancelled(result_cancel) => ScanResult::new(&path, ScanStatus::Cancelled, None, Some("cancelled".into()), 0),
-        result = timeout(total_timeout, operation) => match result {
-            Ok(Ok(result)) => result,
-            Ok(Err(reason)) => ScanResult::error(&path, reason),
-            Err(_) => ScanResult::new(&path, ScanStatus::Error, None, Some("scan timed out".into()), 0),
+    tokio::select! {
+        _ = wait_cancelled(result_cancel) => ScanResult::new(&path_clone, ScanStatus::Cancelled, None, Some("cancelled".into()), 0),
+        result = timeout(total_timeout, scan_task) => match result {
+            Ok(result) => result,
+            Err(_) => ScanResult::new(&path_clone, ScanStatus::Error, None, Some("scan timed out".into()), 0),
         }
-    };
-    if is_server_pressure(&result) {
-        let mut permit = permit;
-        permit.back_off();
-    } else if matches!(result.status, ScanStatus::Clean | ScanStatus::Infected) {
-        permit.limiter.record_success();
-    } else {
-        permit.limiter.reset_success_streak();
     }
-    result
 }
 
 #[cfg(test)]
@@ -871,6 +938,18 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    fn fresh_server_status_json(signatures: u64) -> String {
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let loaded_str = crate::server_status::format_iso8601_vn(now_secs.saturating_sub(600));
+        let fetched_str = crate::server_status::format_iso8601_vn(now_secs.saturating_sub(60));
+        format!(
+            r#"{{"signatures": {signatures}, "loaded_at": "{loaded_str}", "fetched_at": "{fetched_str}"}}"#
+        )
     }
 
     #[tokio::test]
@@ -1420,11 +1499,7 @@ mod tests {
         std::fs::write(&file_path, b"hello safe clean content").unwrap();
 
         let status_file = temp_dir.join("server-status.json");
-        std::fs::write(
-            &status_file,
-            r#"{"signatures": 8616464, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
-        )
-        .unwrap();
+        std::fs::write(&status_file, fresh_server_status_json(8616464)).unwrap();
         unsafe {
             std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_file);
         }
@@ -1519,11 +1594,7 @@ mod tests {
         let status_file = temp_dir.join("server-status.json");
 
         // Write initial status with 8616464 signatures
-        std::fs::write(
-            &status_file,
-            r#"{"signatures": 8616464, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
-        )
-        .unwrap();
+        std::fs::write(&status_file, fresh_server_status_json(8616464)).unwrap();
 
         unsafe {
             std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_file);
@@ -1571,11 +1642,7 @@ mod tests {
         );
 
         // Update server-status.json to new signature count 8616497
-        std::fs::write(
-            &status_file,
-            r#"{"signatures": 8616497, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
-        )
-        .unwrap();
+        std::fs::write(&status_file, fresh_server_status_json(8616497)).unwrap();
 
         // Third scan with updated signatures -> cache miss! Must try live connection
         // (which fails because offline_addr is offline)
@@ -1610,12 +1677,7 @@ mod tests {
         std::fs::write(&file_path, b"safe original content").unwrap();
         let cache_path = temp_dir.join("cache.db");
         let status_file = temp_dir.join("server-status.json");
-
-        std::fs::write(
-            &status_file,
-            r#"{"signatures": 8616464, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
-        )
-        .unwrap();
+        std::fs::write(&status_file, fresh_server_status_json(8616464)).unwrap();
 
         unsafe {
             std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &status_file);
@@ -1683,6 +1745,103 @@ mod tests {
             std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
         }
 
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn test_windows_share_mode_rejects_concurrent_write_and_preserves_integrity() {
+        let _env_guard = crate::lock_test_env();
+        let temp_dir = test_temp_dir("p1-share-mode-test");
+        let file_path = temp_dir.join("exclusive-test.bin");
+        std::fs::write(&file_path, b"initial payload for share mode").unwrap();
+
+        // 1. Open with exclusive FILE_SHARE_READ
+        let held_file = open_file_share_read(&file_path).unwrap();
+
+        // 2. Attempt to open for writing while held
+        #[cfg(windows)]
+        {
+            let write_res = std::fs::OpenOptions::new().write(true).open(&file_path);
+            assert!(
+                write_res.is_err(),
+                "Windows must reject concurrent write while FILE_SHARE_READ handle is held"
+            );
+            let os_err = write_res.unwrap_err().raw_os_error();
+            // Sharing violation (ERROR_SHARING_VIOLATION = 32)
+            assert_eq!(os_err, Some(32), "expected ERROR_SHARING_VIOLATION (32)");
+        }
+
+        // 3. Drop held handle -> now write succeeds
+        drop(held_file);
+        let write_after = std::fs::OpenOptions::new().write(true).open(&file_path);
+        assert!(
+            write_after.is_ok(),
+            "write must succeed once handle is released"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn test_clamd_unresponsive_or_repeated_midstream_disconnect_terminates_with_error() {
+        let _env_guard = crate::lock_test_env();
+        let temp_dir = test_temp_dir("unresponsive-clamd-test");
+        let cache_path = temp_dir.join("cache.db");
+
+        // Create 3 test files
+        let mut files = Vec::new();
+        for i in 0..3 {
+            let p = temp_dir.join(format!("test-hang-{i}.bin"));
+            std::fs::write(&p, vec![0x55; 100 * 1024]).unwrap();
+            files.push(p);
+        }
+
+        // Listener that either drops connections or sleeps indefinitely
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let daemon = tokio::spawn(async move {
+            let mut conn_count = 0;
+            while let Ok((mut socket, _)) = listener.accept().await {
+                conn_count += 1;
+                if conn_count % 2 == 1 {
+                    // Mode 1: drop connection immediately
+                    drop(socket);
+                } else {
+                    // Mode 2: read a few bytes then close or hang
+                    let mut buf = [0u8; 16];
+                    let _ = socket.read(&mut buf).await;
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    drop(socket);
+                }
+            }
+        });
+
+        let semaphore = Arc::new(ScanLimiter::new(2));
+        let (_tx, cancel) = watch::channel(false);
+        let timeout_dur = Duration::from_millis(300);
+
+        // Run scans with short timeout
+        for file in files {
+            let result = scan_file_with_timeout(
+                file,
+                cache_path.clone(),
+                addr,
+                cancel.clone(),
+                semaphore.clone(),
+                timeout_dur,
+            )
+            .await;
+            assert_eq!(
+                result.status,
+                ScanStatus::Error,
+                "unresponsive or dropped clamd connection must result in Error status, got: {:?}",
+                result.status
+            );
+        }
+
+        daemon.abort();
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 }

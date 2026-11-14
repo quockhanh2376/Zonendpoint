@@ -151,9 +151,19 @@ static RESILIENCE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn write_valid_server_status(root: &std::path::Path) -> PathBuf {
     let status_file = root.join("server-status.json");
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let loaded_str =
+        zonendpoint_lib::server_status::format_iso8601_vn(now_secs.saturating_sub(600));
+    let fetched_str =
+        zonendpoint_lib::server_status::format_iso8601_vn(now_secs.saturating_sub(60));
     std::fs::write(
         &status_file,
-        r#"{"signatures": 8616464, "loaded_at": "2026-11-14T11:41:49+07:00", "fetched_at": "2026-11-14T11:45:00+07:00"}"#,
+        format!(
+            r#"{{"signatures": 8616464, "loaded_at": "{loaded_str}", "fetched_at": "{fetched_str}"}}"#
+        ),
     )
     .unwrap();
     status_file
@@ -957,6 +967,72 @@ async fn test_missing_server_status_bypasses_cache() {
         result2.status,
         ScanStatus::Error,
         "Missing server status must bypass cache lookup and fail when daemon is offline"
+    );
+
+    unsafe {
+        std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_stale_server_status_bypasses_cache() {
+    let _env_lock = RESILIENCE_ENV_LOCK.lock().unwrap();
+    let (root, target, cache_db) = create_temp_test_dir("stale-status-bypass");
+    std::fs::write(&target, b"content with stale server status").unwrap();
+
+    let stale_status_file = root.join("stale-status.json");
+    // fetched_at in 2020 -> guaranteed stale (>2 hours)
+    std::fs::write(
+        &stale_status_file,
+        r#"{"signatures": 8616497, "loaded_at": "2020-01-01T00:00:00+07:00", "fetched_at": "2020-01-01T00:00:00+07:00"}"#,
+    )
+    .unwrap();
+    unsafe {
+        std::env::set_var("ZONENDPOINT_SERVER_STATUS_FILE", &stale_status_file);
+    }
+
+    let (addr, handle) = spawn_mock_clamd(STANDARD_VERSION, FaultMode::Clean).await;
+    let (_tx, cancel) = watch::channel(false);
+
+    // Scan 1: Live scan succeeds under clean engine
+    let result1 = scan_file_with_timeout(
+        target.clone(),
+        cache_db.clone(),
+        addr,
+        cancel,
+        Arc::new(ScanLimiter::new(1)),
+        Duration::from_secs(2),
+    )
+    .await;
+    assert_eq!(result1.status, ScanStatus::Clean);
+
+    // Verify cache insertion was bypassed due to stale status (X-5)
+    let stats = cache::stats(&cache_db).unwrap();
+    assert_eq!(
+        stats.entries, 0,
+        "Stale server status must bypass cache insertion"
+    );
+
+    // Stop mock daemon so live scan would fail
+    handle.abort();
+
+    // Scan 2: Must NOT return cached clean verdict; must fail with Error because daemon is offline
+    let (_tx2, cancel2) = watch::channel(false);
+    let result2 = scan_file_with_timeout(
+        target.clone(),
+        cache_db.clone(),
+        addr,
+        cancel2,
+        Arc::new(ScanLimiter::new(1)),
+        Duration::from_secs(2),
+    )
+    .await;
+    assert_eq!(
+        result2.status,
+        ScanStatus::Error,
+        "Stale server status must bypass cache lookup and fail when daemon is offline"
     );
 
     unsafe {

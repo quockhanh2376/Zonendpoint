@@ -96,6 +96,8 @@ pub struct ServerConfigDto {
     pub source: String, // "env" | "saved" | "default"
     pub saved_addr: Option<String>,
     pub env_override: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_error: Option<String>,
 }
 
 pub fn config_dir() -> Result<PathBuf, String> {
@@ -195,19 +197,33 @@ pub fn save_server_address(addr: &str) -> Result<(), String> {
 }
 
 pub fn get_server_config() -> Result<ServerConfigDto, String> {
-    let saved = load_saved_server_address()?;
+    let env_override_val = std::env::var("ZONENDPOINT_CLAMD").ok().and_then(|v| {
+        let trimmed = v.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+
+    let (saved, config_error) = match load_saved_server_address() {
+        Ok(s) => (s, None),
+        Err(e) => (None, Some(e)),
+    };
 
     // Priority: 1) ZONENDPOINT_CLAMD > 2) saved config > 3) default 127.0.0.1:13310
-    if let Ok(env_val) = std::env::var("ZONENDPOINT_CLAMD") {
-        let trimmed = env_val.trim();
-        if !trimmed.is_empty() {
-            return Ok(ServerConfigDto {
-                effective_addr: trimmed.to_string(),
-                source: "env".to_string(),
-                saved_addr: saved,
-                env_override: true,
-            });
-        }
+    if let Some(env_val) = env_override_val {
+        return Ok(ServerConfigDto {
+            effective_addr: env_val,
+            source: "env".to_string(),
+            saved_addr: saved,
+            env_override: true,
+            config_error,
+        });
+    }
+
+    if let Some(err) = config_error {
+        return Err(err);
     }
 
     if let Some(ref saved_addr) = saved {
@@ -218,6 +234,7 @@ pub fn get_server_config() -> Result<ServerConfigDto, String> {
                 source: "saved".to_string(),
                 saved_addr: saved,
                 env_override: false,
+                config_error: None,
             });
         }
     }
@@ -227,6 +244,7 @@ pub fn get_server_config() -> Result<ServerConfigDto, String> {
         source: "default".to_string(),
         saved_addr: saved,
         env_override: false,
+        config_error: None,
     })
 }
 
@@ -346,6 +364,45 @@ mod tests {
 
         unsafe {
             std::env::remove_var("ZONENDPOINT_CONFIG_FILE");
+        }
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn corrupted_config_with_env_override_retains_env_active_and_reports_config_error() {
+        let _env_guard = crate::lock_test_env();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "zonendpoint-cfg-corrupt-env-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let cfg_file = temp_dir.join("config.json");
+        if let Some(parent) = cfg_file.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&cfg_file, b"{ corrupted invalid json").unwrap();
+        unsafe {
+            std::env::set_var("ZONENDPOINT_CONFIG_FILE", &cfg_file);
+            std::env::set_var("ZONENDPOINT_CLAMD", "127.0.0.1:13311");
+        }
+
+        let result =
+            get_server_config().expect("env override must succeed even if config is corrupt");
+        assert_eq!(result.effective_addr, "127.0.0.1:13311");
+        assert_eq!(result.source, "env");
+        assert!(result.env_override, "env_override must be true");
+        assert!(
+            result
+                .config_error
+                .as_deref()
+                .unwrap_or("")
+                .contains("failed to parse config file"),
+            "must report config parse error in config_error: {:?}",
+            result.config_error
+        );
+
+        unsafe {
+            std::env::remove_var("ZONENDPOINT_CONFIG_FILE");
+            std::env::remove_var("ZONENDPOINT_CLAMD");
         }
         let _ = std::fs::remove_dir_all(temp_dir);
     }

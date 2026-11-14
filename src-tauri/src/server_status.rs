@@ -16,6 +16,9 @@ pub struct ServerStatusDto {
 
 impl ServerStatusDto {
     pub fn signature_generation(&self) -> Option<String> {
+        if self.stale {
+            return None;
+        }
         match (self.signatures, &self.loaded_at) {
             (Some(sigs), Some(loaded)) if sigs > 0 && !loaded.trim().is_empty() => {
                 Some(format!("{sigs}:{loaded}"))
@@ -611,6 +614,47 @@ mod tests {
         assert_eq!(
             parse_server_status_content(json_bad_fetch, json_bad_fetch.len() as u64, now, None),
             ServerStatusDto::default()
+        );
+    }
+
+    #[test]
+    fn test_signature_generation_stale_and_future_skew() {
+        let (loaded_epoch, _) =
+            parse_iso8601_timestamp("2026-11-14T10:00:00+07:00").expect("valid iso");
+        let fetched_epoch = loaded_epoch + 3600; // 11:00:00+07:00
+        let fetched_str = format_iso8601_vn(fetched_epoch);
+        let json = format!(
+            r#"{{"signatures": 8616497, "loaded_at": "2026-11-14T10:00:00+07:00", "fetched_at": "{}"}}"#,
+            fetched_str
+        );
+
+        // Fresh: now is 11:30:00+07:00 (30 mins after fetch)
+        let now_fresh = time_from_secs(fetched_epoch + 1800);
+        let dto_fresh = parse_server_status_content(&json, json.len() as u64, now_fresh, None);
+        assert!(!dto_fresh.stale);
+        assert_eq!(
+            dto_fresh.signature_generation(),
+            Some("8616497:2026-11-14T10:00:00+07:00".to_string())
+        );
+
+        // Stale: now is 13:00:01+07:00 (2 hours and 1 second after fetch) -> generation MUST be None
+        let now_stale = time_from_secs(fetched_epoch + 7201);
+        let dto_stale = parse_server_status_content(&json, json.len() as u64, now_stale, None);
+        assert!(dto_stale.stale);
+        assert_eq!(
+            dto_stale.signature_generation(),
+            None,
+            "Stale server status (>2h) must produce None signature_generation"
+        );
+
+        // Future skew: fetched_at is > 300 seconds in the future relative to now -> generation MUST be None
+        let now_behind = time_from_secs(fetched_epoch.saturating_sub(301));
+        let dto_skewed = parse_server_status_content(&json, json.len() as u64, now_behind, None);
+        assert!(dto_skewed.stale);
+        assert_eq!(
+            dto_skewed.signature_generation(),
+            None,
+            "Future-skewed server status (>300s) must produce None signature_generation"
         );
     }
 }

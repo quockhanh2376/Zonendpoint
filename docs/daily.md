@@ -335,3 +335,20 @@
 - Build lại release installer NSIS 0.3.1 và binary release:
   - `Zonendpoint_0.3.1_x64-setup.exe` (SHA256: `a3cac9eca8b472b2a00b7b2e304ac07c463dec5e25fe3df6b237e10ae2242a33`).
   - `zonendpoint.exe` (SHA256: `915b1baa61a89feb408705e9809176d632face3d58a93a1e13d28aef0de72318`).
+
+## 2026-11-14 - V-69 (Sửa lỗi Q-47 cho V-57/0.3.1: X-5 stale check, P-1 Windows share-mode lock, X-6 env override priority, timeout clamd, fix native V-30)
+- Xử lý các điểm nghiệm thu Q-47 của Qeen trên nhánh `vic/031-client`, worktree `E:\Zonendpoint-worktrees\v69-client-fix`:
+  1. **X-5**: `ServerStatusDto::signature_generation(&self)` kiểm tra `if self.stale { return None; }`. Khi status quá hạn >2 giờ hoặc thời gian lệch tương lai >300s, signature_generation trả về None, tắt hoàn toàn việc đọc và ghi cache. Thêm unit test `test_signature_generation_stale_and_future_skew` và resilience test `test_stale_server_status_bypasses_cache`.
+  2. **P-1**: Khắc phục race condition giữa băm và trả verdict cache bằng cách mở file trên Windows với share mode `FILE_SHARE_READ` (`share_mode(1)`) không cho ghi/xóa đồng thời và giữ handle đó trong suốt quá trình băm, kiểm tra cache và đối soát metadata trên chính handle đó. Mọi tiến trình khác cố ghi vào file trong lúc giữ handle sẽ nhận lỗi `ERROR_SHARING_VIOLATION`. Nếu file đang bị tiến trình khác ghi không mở được share read, app bỏ qua cache và quét trực tiếp qua daemon. Thêm test `test_windows_share_mode_rejects_concurrent_write_and_preserves_integrity`.
+  3. **X-6**: Sửa `get_server_config` kiểm tra biến môi trường `ZONENDPOINT_CLAMD` trước tiên. Khi config.json bị hỏng nhưng `ZONENDPOINT_CLAMD` tồn tại, trả về `env_override = true` kèm `config_error: Some(...)`. UI hiển thị huy hiệu "Env active" đồng thời cảnh báo lỗi cấu hình màu đỏ và mở hàng Server. Thêm test `corrupted_config_with_env_override_retains_env_active_and_reports_config_error`.
+  4. **Watchdog Timeout cho Clamd**: Bọc việc lấy permit và scan task trong `tokio::time::timeout(total_timeout, scan_task)` (120s). Khi daemon không phản hồi hoặc liên tục ngắt kết nối giữa chừng, quét kết thúc với `ScanStatus::Error`, không bao giờ treo app. Thêm test `test_clamd_unresponsive_or_repeated_midstream_disconnect_terminates_with_error`.
+  5. **Harness Native V-30 & Mock Clamd**: Cấu hình `run.mjs` ghi sẵn `config.json` tạm trỏ mock server; trong V-30 step 2 vô hiệu hóa cache của fixture `ntoskrnl.exe` và đợi `.server-status` chuyển `connected` trước khi bấm scan; đợi `.server-status` không bị disabled trước khi focus trong keyboard test.
+- Đã chạy đầy đủ và chứng minh chất lượng trên môi trường LOCALAPPDATA cô lập:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo clippy --all-targets -- -D warnings`: PASS (0 warnings).
+  - `cargo test`: PASS 3 lần liên tiếp (102/102 tests: 81 lib, 1 bin, 20 resilience).
+  - `npm.cmd run build`: PASS (tsc 0 lỗi, vite 0 lỗi).
+  - `node tests/native/run.mjs`: PASS 3 lần liên tiếp (21/21 checks, gồm V-30 window close & 0 orphan processes).
+- Build lại release installer NSIS 0.3.1 và binary release:
+  - `Zonendpoint_0.3.1_x64-setup.exe` (SHA256: `AB3E0AFB19CCFB3BA94D21CF8B3354F42FCBF0CDA9D29F57CFAFF319EE018ACE`).
+  - `zonendpoint.exe` (SHA256: `F296F72F810AD30E164ACFFD51BA6BD3CBE42664FD7F30C7C8A81C90F9FDB8A7`).

@@ -116,9 +116,9 @@ Phiên bản đã được nâng cấp đồng bộ từ `0.3.0` lên `0.3.1` t�
 
 ---
 
-## 4. Quality Gates & Verification Evidence (Cập nhật sau V-65)
+## 4. Quality Gates & Verification Evidence (Cập nhật sau V-69)
 
-Thực hiện kiểm thử độc lập trong worktree `E:\Zonendpoint-worktrees\v65-client-fix` với `$env:LOCALAPPDATA` trỏ thư mục tạm cô lập (chứng minh không đọc/ghi dữ liệu thật):
+Thực hiện kiểm thử độc lập trong worktree `E:\Zonendpoint-worktrees\v69-client-fix` với `$env:LOCALAPPDATA` trỏ thư mục tạm cô lập (chứng minh không đọc/ghi dữ liệu thật):
 
 1. **Rust Code Formatting**:
    ```powershell
@@ -136,10 +136,10 @@ Thực hiện kiểm thử độc lập trong worktree `E:\Zonendpoint-worktrees
    ```powershell
    cargo test
    ```
-   - **Lần 1**: **97/97 tests PASS** (77 lib, 1 bin, 19 resilience).
-   - **Lần 2**: **97/97 tests PASS** (77 lib, 1 bin, 19 resilience).
-   - **Lần 3**: **97/97 tests PASS** (77 lib, 1 bin, 19 resilience).
-   *(Đã cập nhật fixture `write_valid_server_status` + `RESILIENCE_ENV_LOCK` cho resilience integration tests và bổ sung test `test_missing_server_status_bypasses_cache`)*.
+   - **Lần 1**: **102/102 tests PASS** (81 lib, 1 bin, 20 resilience).
+   - **Lần 2**: **102/102 tests PASS** (81 lib, 1 bin, 20 resilience).
+   - **Lần 3**: **102/102 tests PASS** (81 lib, 1 bin, 20 resilience).
+   *(Đã cập nhật X-5 stale signature generation, P-1 Windows share-mode lock chống race ghi/xóa, X-6 env override với config hỏng, và clamd timeout watchdog)*.
 
 4. **Frontend TypeScript & Vite Build**:
    ```powershell
@@ -147,25 +147,56 @@ Thực hiện kiểm thử độc lập trong worktree `E:\Zonendpoint-worktrees
    ```
    $\rightarrow$ **PASS** (tsc 0 lỗi, vite bundle 0 lỗi).
 
-5. **Native End-to-End Test Suite (Chạy 2 lần liên tiếp với LOCALAPPDATA tạm cô lập)**:
+5. **Native End-to-End Test Suite (Chạy 3 lần liên tiếp với LOCALAPPDATA tạm cô lập)**:
    ```powershell
    node tests/native/run.mjs
    ```
    - **Lần 1 (Full build)**: **21/21 checks PASS** (gồm V-30 window close & clean termination 0 orphan processes).
-   - **Lần 2 (`--skip-build`)**: **21/21 checks PASS** (gồm V-30 window close & clean termination 0 orphan processes).
-   *(Đã sửa hàm `findTestAppPid()` trong harness tìm PID chính xác qua `path.resolve(binary)`, hỗ trợ cả trường hợp `CARGO_TARGET_DIR` tùy biến)*.
+   - **Lần 2 (`--skip-build`)**: **21/21 checks PASS**.
+   - **Lần 3 (`--skip-build`)**: **21/21 checks PASS**.
+   *(Đã cấu hình config.json trỏ mock server, vô hiệu hóa cache cho V-30 step 2, và đồng bộ trạng thái nút server trước khi tương tác)*.
 
 ---
 
-## 5. Artifacts & Checksums (Bản build lại V-65)
+## 5. Artifacts & Checksums (Bản build lại V-69)
 
 - **Thư mục lưu trữ**: `E:\Zonendpoint-tools\artifacts\v57-release\`
 
 | Artifact | File Size | SHA256 Checksum | Description |
 |---|---|---|---|
-| `Zonendpoint_0.3.1_x64-setup.exe` | 3,650,792 bytes | `a3cac9eca8b472b2a00b7b2e304ac07c463dec5e25fe3df6b237e10ae2242a33` | Bản cài đặt NSIS x64 chính thức 0.3.1 (build lại sau V-65) |
-| `zonendpoint.exe` | 7,934,464 bytes | `915b1baa61a89feb408705e9809176d632face3d58a93a1e13d28aef0de72318` | Tệp thực thi standalone release x64 PE32+ (build lại sau V-65) |
+| `Zonendpoint_0.3.1_x64-setup.exe` | 3,650,792 bytes | `AB3E0AFB19CCFB3BA94D21CF8B3354F42FCBF0CDA9D29F57CFAFF319EE018ACE` | Bản cài đặt NSIS x64 chính thức 0.3.1 (build lại sau V-69) |
+| `zonendpoint.exe` | 7,934,464 bytes | `F296F72F810AD30E164ACFFD51BA6BD3CBE42664FD7F30C7C8A81C90F9FDB8A7` | Tệp thực thi standalone release x64 PE32+ (build lại sau V-69) |
 | `Zonendpoint_0.3.1_x64-setup.exe.sha256` | 98 bytes | N/A | Tệp đối soát SHA256 cho NSIS setup |
+
+---
+
+## 6. Chi tiết các bản sửa lỗi trong V-69 (Theo báo cáo Q-47)
+
+1. **X-5: Signature generation stale check**:
+   - `ServerStatusDto::signature_generation(&self)` trong `src-tauri/src/server_status.rs` kiểm tra rõ ràng `if self.stale { return None; }`.
+   - Nếu status stale (>2 giờ) hoặc thời gian lệch tương lai (>300s): `signature_generation()` trả về `None`, hoàn toàn vô hiệu hóa cache lookup và cache insert (buộc quét trực tiếp qua daemon).
+   - Unit test: `server_status::tests::test_signature_generation_stale_and_future_skew` và resilience test `test_stale_server_status_bypasses_cache`.
+
+2. **P-1: Windows share-mode lock chống race giữa hash và verdict cache**:
+   - Mở tệp để băm với share mode `FILE_SHARE_READ` (`std::os::windows::fs::OpenOptionsExt::share_mode(1)`) trên Windows và giữ handle (`HeldFileHash`) mở xuyên suốt quá trình băm, kiểm tra cache và đối soát metadata (`snapshot == held_file.snapshot`).
+   - Mọi tiến trình khác cố tình ghi/xóa tệp trong lúc handle đang mở sẽ bị Windows từ chối với lỗi sharing violation (`ERROR_SHARING_VIOLATION` 32).
+   - Nếu không thể mở với `FILE_SHARE_READ` do tệp đang bị tiến trình khác ghi: bỏ qua cache, quét trực tiếp bình thường.
+   - Unit test: `scanner::tests::test_windows_share_mode_rejects_concurrent_write_and_preserves_integrity`.
+
+3. **X-6: Ưu tiên ZONENDPOINT_CLAMD khi config.json bị hỏng**:
+   - `get_server_config()` trong `src-tauri/src/config.rs` kiểm tra biến môi trường `ZONENDPOINT_CLAMD` trước.
+   - Nếu biến môi trường tồn tại và `config.json` bị hỏng: trả về `Ok(ServerConfigDto { env_override: true, config_error: Some(...), ... })`.
+   - Giao diện `App.tsx` hiển thị đồng thời cả huy hiệu `ENV ACTIVE` và dòng thông báo lỗi cấu hình màu đỏ, mở hàng Server để người dùng cấu hình lại.
+   - Unit test: `config::tests::corrupted_config_with_env_override_retains_env_active_and_reports_config_error`.
+
+4. **Watchdog timeout cho file scan & Clamd midstream disconnect**:
+   - Bọc toàn bộ quá trình xin permit và scan task trong `tokio::time::timeout(total_timeout, scan_task)` với tổng thời gian tối đa 120s.
+   - Khi clamd bị treo hoặc ngắt kết nối lặp đi lặp lại giữa chừng: quét lập tức kết thúc với `ScanStatus::Error`, không bao giờ treo app.
+   - Unit test: `scanner::tests::test_clamd_unresponsive_or_repeated_midstream_disconnect_terminates_with_error`.
+
+5. **Native Test V-30 & Harness Mock clamd**:
+   - `tests/native/run.mjs` ghi sẵn `config.json` trong thư mục appdata tạm trỏ về `127.0.0.1:${serverPort}` của mock server, tránh kết nối tới cổng 13310 thật.
+   - Trong V-30 bước 2, vô hiệu hóa cache của fixture `ntoskrnl.exe` để đảm bảo app chuyển qua trạng thái "Scanning" trước khi hoàn thành, đợi trạng thái `.server-status` kết nối thành công trước khi bấm Start scan.
 
 ---
 
