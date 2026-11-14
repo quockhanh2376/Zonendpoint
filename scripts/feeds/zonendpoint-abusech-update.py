@@ -58,7 +58,7 @@ DEFAULT_KEY_FILE = "/etc/zonendpoint/abusech.key"
 DEFAULT_MB_DB = "/opt/zonendpoint/malwarebazaar/malwarebazaar.db"
 DEFAULT_TF_DB = "/opt/zonendpoint/threatfox/threatfox.db"
 DEFAULT_RATE_LIMIT_FILE = DEFAULT_STATE
-DEFAULT_LOCK_FILE = "/opt/zonendpoint/abusech/update.lock"
+DEFAULT_LOCK_FILE = os.environ.get("DEPLOY_LOCK_FILE", "/run/lock/zonendpoint-clamd-deploy.lock")
 DEFAULT_LAST_RUN_FILE = "/opt/zonendpoint/abusech/last-run.json"
 DEFAULT_HOLD_FILE = "/opt/zonendpoint/HOLD-abusech"
 DEFAULT_RELOAD_STATE_FILE = "/opt/zonendpoint/abusech/reload-state.json"
@@ -486,20 +486,37 @@ def run_hourly_update(args) -> int:
         return 0
 
     lock_p = pathlib.Path(args.lock_file)
-    lock_p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        lock_p.parent.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error("Could not create parent directory for lock file '%s': %s. Aborting.", lock_p, e)
+        return 1
 
-    # 1. File lock to prevent concurrent executions
+    # 1. File lock to prevent concurrent executions (L-6: shared clamd deploy lock)
     lock_fd = None
     try:
         lock_fd = open(str(lock_p), "a+")
         try:
             import fcntl
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except (BlockingIOError, IOError):
-            logger.info("Another update process is currently running (lock '%s' held). Exiting without overlapping.", lock_p)
-            return 0
+        except (BlockingIOError, OSError) as e:
+            logger.warning(
+                "Another clamd deploy/update process is currently running (lock '%s' held: %s). Exiting.",
+                lock_p, e
+            )
+            try:
+                lock_fd.close()
+            except Exception:
+                pass
+            return 1
     except Exception as e:
-        logger.warning("Could not establish lock on '%s': %s", lock_p, e)
+        logger.error("Could not establish lock on '%s': %s. Aborting.", lock_p, e)
+        if lock_fd:
+            try:
+                lock_fd.close()
+            except Exception:
+                pass
+        return 1
 
     auth_key = None
     limiter = None

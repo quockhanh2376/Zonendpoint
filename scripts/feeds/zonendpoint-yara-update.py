@@ -27,6 +27,7 @@ import urllib.error
 
 CURRENT_TAG_FILE = "/opt/zonendpoint/yara/current_tag.txt"
 DEFAULT_HOLD_FILE = "/opt/zonendpoint/HOLD-yara"
+DEFAULT_LOCK_FILE = os.environ.get("DEPLOY_LOCK_FILE", "/run/lock/zonendpoint-clamd-deploy.lock")
 FILTER_SCRIPT_PATH = "/opt/zonendpoint/yara/filter_yara_clamav.py"
 QA_CONTROL_RULE_PATH = "/opt/zonendpoint/qa/zonqa-control.yar"
 ACTIVE_YARA_PATH = "/var/lib/clamav/yara-forge-core.yar"
@@ -340,22 +341,7 @@ def deploy_and_reload(
     log("=" * 60)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Zonendpoint YARA-Forge Core Automated Daily Updater")
-    parser.add_argument("--force", action="store_true", help="Force update even if tag matches current")
-    parser.add_argument("--check-only", action="store_true", help="Check for updates without downloading")
-    parser.add_argument("--dry-run", action="store_true", help="Download and test, but do not replace active DB or reload clamd")
-    parser.add_argument("--hold-file", default=DEFAULT_HOLD_FILE, help=f"Hold file path to skip update when rollback active (default: {DEFAULT_HOLD_FILE})")
-    parser.add_argument("--log-file", default=CLAMD_LOG_FILE, help=f"Path to clamd log file (default: {CLAMD_LOG_FILE})")
-    parser.add_argument("--reload-timeout", type=float, default=120.0, help="Timeout in seconds for clamd reload (default: 120.0)")
-    args = parser.parse_args()
-
-    # L-3: Check for hold file created by rollback
-    hold_file = getattr(args, "hold_file", DEFAULT_HOLD_FILE)
-    if os.path.isfile(hold_file):
-        log(f"Hold file '{hold_file}' exists (created by rollback). Skipping YARA update per Zon policy. Remove file to resume automatic updates.")
-        return 0
-
+def run_update(args):
     log("Starting Zonendpoint YARA-Forge Core updater...")
     current_tag = get_current_tag()
     log(f"Current installed release tag: '{current_tag}'")
@@ -470,11 +456,76 @@ def main():
         log("Cleaned up temporary work files.")
     except Exception as e:
         log(f"Warning: error cleaning work files: {e}")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Zonendpoint YARA-Forge Core Automated Daily Updater")
+    parser.add_argument("--force", action="store_true", help="Force update even if tag matches current")
+    parser.add_argument("--check-only", action="store_true", help="Check for updates without downloading")
+    parser.add_argument("--dry-run", action="store_true", help="Download and test, but do not replace active DB or reload clamd")
+    parser.add_argument("--hold-file", default=DEFAULT_HOLD_FILE, help=f"Hold file path to skip update when rollback active (default: {DEFAULT_HOLD_FILE})")
+    parser.add_argument("--log-file", default=CLAMD_LOG_FILE, help=f"Path to clamd log file (default: {CLAMD_LOG_FILE})")
+    parser.add_argument("--reload-timeout", type=float, default=120.0, help="Timeout in seconds for clamd reload (default: 120.0)")
+    parser.add_argument("--lock-file", default=DEFAULT_LOCK_FILE, help=f"Shared deploy lock file path (default: {DEFAULT_LOCK_FILE})")
+    args = parser.parse_args()
+
+    # L-3: Check for hold file created by rollback
+    hold_file = getattr(args, "hold_file", DEFAULT_HOLD_FILE)
+    if os.path.isfile(hold_file):
+        log(f"Hold file '{hold_file}' exists (created by rollback). Skipping YARA update per Zon policy. Remove file to resume automatic updates.")
+        return 0
+
+    # L-6: Shared flock to prevent concurrent executions with abusech/rollback/clamd deploy
+    lock_file = getattr(args, "lock_file", DEFAULT_LOCK_FILE)
+    try:
+        os.makedirs(os.path.dirname(lock_file), exist_ok=True)
+    except Exception as e:
+        log(f"Could not create parent directory for lock file '{lock_file}': {e}. Aborting.")
+        return 1
+
+    lock_fd = None
+    try:
+        lock_fd = open(lock_file, "a+")
+        try:
+            import fcntl
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError) as e:
+            log(f"Another clamd deploy/update process is currently running (lock '{lock_file}' held: {e}). Skipping turn.")
+            try:
+                lock_fd.close()
+            except Exception:
+                pass
+            return 1
+    except Exception as e:
+        log(f"Could not establish lock on '{lock_file}': {e}. Aborting.")
+        if lock_fd:
+            try:
+                lock_fd.close()
+            except Exception:
+                pass
+        return 1
+
+    try:
+        return run_update(args)
+    finally:
+        if lock_fd:
+            try:
+                import fcntl
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                lock_fd.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
     try:
-        main()
+        ret = main()
+        if ret is not None and ret != 0:
+            sys.exit(ret)
     except Exception as err:
         log(f"FATAL ERROR: {err}")
         sys.exit(1)

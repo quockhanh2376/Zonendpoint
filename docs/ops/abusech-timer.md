@@ -16,8 +16,8 @@ Hệ thống cập nhật hàng giờ được thiết kế theo mô hình **Ser
 flowchart TD
     T["systemd timer: zonendpoint-abusech-update.timer"] -->|Khoảng cách >= 61 phút OnUnitInactiveSec=61min| S["systemd service: zonendpoint-abusech-update.service"]
     S --> U["zonendpoint-abusech-update.py"]
-    U --> L{"Khóa file flock /opt/zonendpoint/abusech/update.lock"}
-    L -->|Đang chạy| E1["Bỏ qua - không chạy chồng"]
+    U --> L{"Khóa file flock chung /run/lock/zonendpoint-clamd-deploy.lock"}
+    L -->|Đang có tiến trình khác giữ khóa| E1["Bỏ qua - thoát mã lỗi (không chạy chồng)"]
     L -->|Lấy khóa| R{"Guard: kiểm tra & bảo lưu ĐỦ 2 slot dưới khóa RateLimiter"}
     R -->|Thiếu < 2 slot| E2["Bỏ trọn lượt - ghi last-run.json - 0 retry"]
     R -->|Bảo lưu đủ 2 slot| MB["Step 1: MalwareBazaar recent export"]
@@ -71,7 +71,7 @@ flowchart TD
 | `/etc/zonendpoint/abusech.key` | `0600 root:root` | Khóa Auth-Key duy nhất |
 | `/opt/zonendpoint/abusech/rate_limit.json` | `0644 root:root` | Ledger lưu lịch sử các request |
 | `/opt/zonendpoint/abusech/last-run.json` | `0644 root:root` | Trạng thái chi tiết của lần chạy gần nhất |
-| `/opt/zonendpoint/abusech/update.lock` | `0644 root:root` | File lock chống chạy chồng |
+| `/run/lock/zonendpoint-clamd-deploy.lock` | `0644 root:root` | File lock chung chống chạy chồng / reload clamd giữa các updater và rollback |
 | `/var/backups/clamav-malwarebazaar/malwarebazaar.hsb.bak` | `0644 root:root` | Bản sao lưu chữ ký MB trước reload |
 | `/var/backups/clamav-threatfox/threatfox.hsb.bak` | `0644 root:root` | Bản sao lưu chữ ký TF trước reload |
 

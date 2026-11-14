@@ -160,7 +160,7 @@ class TestAbusechUpdate(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_01_concurrent_run_blocked_by_lock(self):
-        """Test that another running process holding lock file halts new run immediately."""
+        """L-6: Test that another running process holding lock file halts new run immediately and exits non-zero."""
         lock_fd = open(str(self.lock_file), "a+")
         try:
             import fcntl
@@ -170,10 +170,17 @@ class TestAbusechUpdate(unittest.TestCase):
 
         # Second process attempts to run
         ret = update_mod.run_hourly_update(self.args)
-        self.assertEqual(ret, 0)
+        self.assertNotEqual(ret, 0)
         # No requests should have been made
         self.assertEqual(len(MockHttpHandler.request_log), 0)
         lock_fd.close()
+
+    def test_01b_lock_uncreatable_fails_non_zero_no_fail_open(self):
+        """L-6: Test that failure to create/open lock file aborts with non-zero exit code (no fail-open)."""
+        self.args.lock_file = "/proc/zonendpoint_nonexistent/invalid.lock"
+        ret = update_mod.run_hourly_update(self.args)
+        self.assertNotEqual(ret, 0)
+        self.assertEqual(len(MockHttpHandler.request_log), 0)
 
     def test_02_rate_limit_exhausted_skips_turn_without_retry(self):
         """Test that if 3 requests used in sliding hour, turn is skipped without retry."""
