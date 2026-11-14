@@ -347,18 +347,13 @@ def deploy_combined_hsbs(
     try:
         for feed, item in deploy_items.items():
             active_p = item["active_path"]
-            tmp_active = active_p.with_suffix(".tmp")
-            tmp_active.write_text(item["staged_content"], encoding="utf-8")
-            if os.name == "posix":
-                try:
-                    shutil.chown(str(tmp_active), user="clamav", group="clamav")
-                except Exception as e:
-                    logger.warning("Could not chown clamav:clamav on '%s': %s", tmp_active, e)
-            try:
-                os.chmod(str(tmp_active), 0o644)
-            except OSError:
-                pass
-            tmp_active.replace(active_p)
+            mb.safe_atomic_write(
+                active_p,
+                content=item["staged_content"],
+                user="clamav",
+                group="clamav",
+                mode=0o644,
+            )
             replaced_feeds.append(feed)
             logger.info("Atomically replaced active file '%s'.", active_p)
 
@@ -430,7 +425,13 @@ def deploy_combined_hsbs(
             backup_file = backups_created.get(feed)
             if backup_file and backup_file.is_file():
                 logger.info("Restoring '%s' from backup '%s'...", active_p, backup_file)
-                shutil.copy2(str(backup_file), str(active_p))
+                mb.safe_atomic_write(
+                    active_p,
+                    source_file=backup_file,
+                    user="clamav",
+                    group="clamav",
+                    mode=0o644,
+                )
             else:
                 logger.info("Removing '%s' (no prior backup)...", active_p)
                 active_p.unlink(missing_ok=True)

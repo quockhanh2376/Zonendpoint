@@ -60,10 +60,12 @@ if [ ! -f "$BACKUP_FILE" ]; then
 fi
 
 log "Restoring YARA rules from $BACKUP_FILE..."
-TMP_FILE="${ACTIVE_FILE}.tmp"
+TARGET_DIR="$(dirname "$ACTIVE_FILE")"
+TMP_FILE=$(mktemp -p "$TARGET_DIR" ".$(basename "$ACTIVE_FILE").tmp-XXXXXX")
 cp -p "$BACKUP_FILE" "$TMP_FILE"
-chown clamav:clamav "$TMP_FILE"
+chown clamav:clamav "$TMP_FILE" 2>/dev/null || true
 chmod 0644 "$TMP_FILE"
+sync "$TMP_FILE" 2>/dev/null || sync
 mv -f "$TMP_FILE" "$ACTIVE_FILE"
 
 if [ -f "$PREVIOUS_TAG_FILE" ]; then

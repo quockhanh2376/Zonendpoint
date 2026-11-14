@@ -228,6 +228,47 @@ def verify_on_temp_db(staging_yar: str, accepted_count: int):
     log("All temporary DB pre-flight checks PASSED successfully.")
 
 
+def safe_atomic_write(
+    target_path: str,
+    source_file: str,
+    user: str = "clamav",
+    group: str = "clamav",
+    mode: int = 0o644,
+):
+    """
+    Safely copies source_file to target_path using mkstemp, fchown, fchmod, fsync, and replace (Task L-11).
+    """
+    target_dir = os.path.dirname(target_path)
+    os.makedirs(target_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=target_dir,
+        prefix=f".{os.path.basename(target_path)}.tmp-",
+    )
+    try:
+        with open(source_file, "rb") as sf:
+            while True:
+                chunk = sf.read(65536)
+                if not chunk:
+                    break
+                os.write(fd, chunk)
+        if os.name == "posix":
+            try:
+                import pwd, grp
+                uid = pwd.getpwnam(user).pw_uid
+                gid = grp.getgrnam(group).gr_gid
+                os.fchown(fd, uid, gid)
+            except Exception:
+                pass
+        try:
+            os.fchmod(fd, mode)
+        except OSError:
+            pass
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(tmp_path, target_path)
+
+
 def deploy_and_reload(
     staging_yar: str,
     new_tag: str,
@@ -257,15 +298,8 @@ def deploy_and_reload(
         except Exception as e:
             log(f"Warning: could not get initial clamd log size: {e}")
 
-    # 3. Atomic replacement
-    tmp_dest = ACTIVE_YARA_PATH + ".tmp"
-    shutil.copyfile(staging_yar, tmp_dest)
-    try:
-        shutil.chown(tmp_dest, user="clamav", group="clamav")
-    except Exception as e:
-        log(f"Warning: could not chown clamav:clamav (running as non-root?): {e}")
-    os.chmod(tmp_dest, 0o644)
-    os.replace(tmp_dest, ACTIVE_YARA_PATH)
+    # 3. Atomic replacement via secure temp file (Task L-11)
+    safe_atomic_write(ACTIVE_YARA_PATH, source_file=staging_yar, user="clamav", group="clamav", mode=0o644)
     log(f"Atomically updated {ACTIVE_YARA_PATH}.")
 
     # 4. Reload clamd
@@ -318,7 +352,7 @@ def deploy_and_reload(
     if not health_ok:
         log("CRITICAL: Clamd health check failed post-reload! Initiating emergency rollback...")
         if os.path.exists(BACKUP_YARA_PATH):
-            shutil.copyfile(BACKUP_YARA_PATH, ACTIVE_YARA_PATH)
+            safe_atomic_write(ACTIVE_YARA_PATH, source_file=BACKUP_YARA_PATH, user="clamav", group="clamav", mode=0o644)
             subprocess.run(["clamdscan", "--reload"], capture_output=True, text=True)
             log("Restored previous ruleset from backup.")
         # Rollback branch does NOT modify CURRENT_TAG_FILE (remains old verified tag)
