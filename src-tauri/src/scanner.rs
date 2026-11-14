@@ -1341,18 +1341,9 @@ mod tests {
         assert!(validate_clamd_addr("not-an-ip:3310").is_err());
     }
 
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        match ENV_MUTEX.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        }
-    }
-
     #[test]
     fn priority_env_overrides_saved_and_default() {
-        let _env_guard = lock_env();
+        let _env_guard = crate::lock_test_env();
         let temp_dir =
             std::env::temp_dir().join(format!("zonendpoint-cfg-prio-{}", uuid::Uuid::new_v4()));
         let cfg_file = temp_dir.join("config.json");
@@ -1421,7 +1412,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_read_failure_treated_as_miss_and_scans_normally() {
-        let _env_guard = lock_env();
+        let _env_guard = crate::lock_test_env();
         let temp_dir = test_temp_dir("cache-read-err");
         let file_path = temp_dir.join("clean.txt");
         std::fs::write(&file_path, b"hello safe clean content").unwrap();
@@ -1476,7 +1467,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_or_missing_server_status_completely_disables_cache() {
-        let _env_guard = lock_env();
+        let _env_guard = crate::lock_test_env();
         let temp_dir = test_temp_dir("no-status-cache");
         let file_path = temp_dir.join("clean.txt");
         std::fs::write(&file_path, b"safe file without status").unwrap();
@@ -1516,7 +1507,7 @@ mod tests {
 
     #[tokio::test]
     async fn valid_server_status_caches_and_sig_generation_change_bypasses_cache() {
-        let _env_guard = lock_env();
+        let _env_guard = crate::lock_test_env();
         let temp_dir = test_temp_dir("status-cache-bypass");
         let file_path = temp_dir.join("clean.txt");
         std::fs::write(&file_path, b"safe file with status").unwrap();
@@ -1608,7 +1599,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_hit_detects_metadata_mtime_or_size_change() {
-        let _env_guard = lock_env();
+        let _env_guard = crate::lock_test_env();
         let temp_dir = test_temp_dir("p1-metadata-recheck");
         let file_path = temp_dir.join("clean.txt");
         std::fs::write(&file_path, b"safe original content").unwrap();

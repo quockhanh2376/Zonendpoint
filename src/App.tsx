@@ -172,7 +172,10 @@ function App() {
         setServerConfig(cfg);
         setServerInput(cfg.saved_addr || (cfg.env_override ? cfg.effective_addr : "127.0.0.1:13310"));
       })
-      .catch(() => {});
+      .catch((err) => {
+        setServerConfigMsg({ text: `Config error: ${String(err)}`, error: true });
+        setShowServerManual(true);
+      });
   }, []);
 
   async function handleSaveServer(e?: React.FormEvent) {

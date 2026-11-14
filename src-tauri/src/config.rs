@@ -146,20 +146,56 @@ pub fn save_server_address(addr: &str) -> Result<(), String> {
     config.server_address = validated_addr;
 
     let path = config_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create config dir {}: {}", parent.display(), e))?;
-    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "invalid config path".to_string())?;
+    std::fs::create_dir_all(parent)
+        .map_err(|e| format!("failed to create config dir {}: {}", parent.display(), e))?;
+
+    let nonce = uuid::Uuid::new_v4();
+    let tmp_path = parent.join(format!("config.json.tmp.{nonce}"));
 
     let json = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("failed to serialize config: {}", e))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("failed to write config to {}: {}", path.display(), e))?;
+
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::create(&tmp_path).map_err(|e| {
+            format!(
+                "failed to create temp config file {}: {}",
+                tmp_path.display(),
+                e
+            )
+        })?;
+        file.write_all(json.as_bytes()).map_err(|e| {
+            format!(
+                "failed to write temp config file {}: {}",
+                tmp_path.display(),
+                e
+            )
+        })?;
+        file.sync_all().map_err(|e| {
+            format!(
+                "failed to sync temp config file {}: {}",
+                tmp_path.display(),
+                e
+            )
+        })?;
+    }
+
+    if let Err(e) = std::fs::rename(&tmp_path, &path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!(
+            "failed to replace config file {}: {}",
+            path.display(),
+            e
+        ));
+    }
     Ok(())
 }
 
 pub fn get_server_config() -> Result<ServerConfigDto, String> {
-    let saved = load_saved_server_address().ok().flatten();
+    let saved = load_saved_server_address()?;
 
     // Priority: 1) ZONENDPOINT_CLAMD > 2) saved config > 3) default 127.0.0.1:13310
     if let Ok(env_val) = std::env::var("ZONENDPOINT_CLAMD") {
@@ -251,5 +287,63 @@ mod tests {
                 max_scan_concurrency: None
             }
         );
+    }
+
+    #[test]
+    fn save_server_address_writes_atomically_and_recovers_address() {
+        let _env_guard = crate::lock_test_env();
+        let temp_dir =
+            std::env::temp_dir().join(format!("zonendpoint-cfg-atomic-{}", uuid::Uuid::new_v4()));
+        let cfg_file = temp_dir.join("config.json");
+        unsafe {
+            std::env::set_var("ZONENDPOINT_CONFIG_FILE", &cfg_file);
+        }
+
+        save_server_address("127.0.0.1:13310").unwrap();
+        assert!(cfg_file.exists());
+
+        // Verify no leftover .tmp files
+        let parent = cfg_file.parent().unwrap();
+        let tmp_exists = std::fs::read_dir(parent).unwrap().any(|entry| {
+            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+            name.starts_with("config.json.tmp.")
+        });
+        assert!(!tmp_exists, "no temporary config file should remain");
+
+        let loaded = load_saved_server_address().unwrap();
+        assert_eq!(loaded.as_deref(), Some("127.0.0.1:13310"));
+
+        unsafe {
+            std::env::remove_var("ZONENDPOINT_CONFIG_FILE");
+        }
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn corrupted_config_file_returns_explicit_error_and_does_not_silently_fallback() {
+        let _env_guard = crate::lock_test_env();
+        let temp_dir =
+            std::env::temp_dir().join(format!("zonendpoint-cfg-corrupt-{}", uuid::Uuid::new_v4()));
+        let cfg_file = temp_dir.join("config.json");
+        if let Some(parent) = cfg_file.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&cfg_file, b"{ corrupted invalid json").unwrap();
+        unsafe {
+            std::env::set_var("ZONENDPOINT_CONFIG_FILE", &cfg_file);
+        }
+
+        let result = get_server_config();
+        assert!(result.is_err(), "corrupted config must return Err, got: {result:?}");
+        let err_msg = result.unwrap_err();
+        assert!(
+            err_msg.contains("failed to parse config file"),
+            "expected parse error description, got: {err_msg}"
+        );
+
+        unsafe {
+            std::env::remove_var("ZONENDPOINT_CONFIG_FILE");
+        }
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
