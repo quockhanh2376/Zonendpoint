@@ -9,7 +9,7 @@
 ## Worktree and data safety
 
 - Inspect `git status`, branch, and snapshot before editing. The source checkout `E:\Zonendpoint` may contain user-owned uncommitted changes. Never reset, clean, stash, or overwrite unrelated files; stage/commit only files created for the task.
-- Active implementation checkout on this machine is `E:\Zonendpoint-restored\Zonendpoint-vic`, branch `vic/mvp-first-scan`. Product snapshot and evidence belong in `docs/project-status.md`; recheck status/branch/SHA rather than treating a historical path or SHA as current. Repository-relative documentation links must work after cloning elsewhere.
+- Active repository checkout is the primary repository `E:\Zonendpoint`, with task-specific worktrees created under `E:\Zonendpoint-worktrees\<task>`. Product snapshot and evidence belong in `docs/project-status.md`; recheck status/branch/SHA rather than treating a historical path or SHA as current. Repository-relative documentation links must work after cloning elsewhere.
 - Run independent QA in its own worktree and test the exact handoff snapshot, including any supplied patch. Do not modify Vic's running worktree during QA.
 
 ## v1.0.0 safety and product rules

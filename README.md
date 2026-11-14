@@ -1,8 +1,11 @@
 # Zonendpoint
 
-Zonendpoint is a Windows desktop client for **manual ClamAV scanning**. This
-MVP is a supplementary scanner; it does not provide real-time protection,
-quarantine, or replace Microsoft Defender/Sophos.
+Zonendpoint is a Windows desktop client for **manual ClamAV scanning**,
+designed for **personal, non-commercial use on 1–2 machines**. This MVP is a
+supplementary scanner; it does not provide real-time protection, quarantine,
+or replace Microsoft Defender/Sophos. The application requires a **separate,
+dedicated ClamAV server** (on loopback or reached over an encrypted SSH tunnel /
+private VPN).
 
 ## What it does
 
@@ -14,15 +17,19 @@ quarantine, or replace Microsoft Defender/Sophos.
 - Uses a per-user SQLite cache at `%LOCALAPPDATA%\Zonendpoint\cache.db`.
   Every cache lookup hashes file contents and checks current ClamAV
   `VERSION` plus the policy version; entries expire after 12 hours.
-- Limits a file to 100,000,000 bytes, UI scan jobs to one (scanner semaphore capacity two), the folder queue to
+- Limits scanning to **25 MiB per file** (26,214,400 bytes). Files larger than
+  25 MiB are marked `SKIPPED`, and the scan is considered incomplete and is
+  never treated or reported as clean (`CLEAN`).
+- Limits UI scan jobs to one (scanner semaphore capacity two), the folder queue to
   32 paths, and retained result details to 1,000. Oversized and incomplete
   work is reported and never becomes `CLEAN`.
 
-Clamd's TCP protocol has no authentication or encryption. Keep the daemon on
-loopback or a private/VPN address protected by network access controls. The
-client rejects public addresses and hostnames. The default is
-`127.0.0.1:3310`; set `ZONENDPOINT_CLAMD` to a private IP and port for an
-isolated lab or trusted VPN. Files are sent only to that configured daemon.
+Clamd's TCP protocol has no authentication or encryption. The client requires a
+separate, dedicated ClamAV server instance kept on loopback (`127.0.0.1:3310`)
+or accessed through a secure SSH tunnel / private VPN protected by network access
+controls. The client strictly rejects public addresses and hostnames. Set
+`ZONENDPOINT_CLAMD` to a private IP and port or tunnel endpoint when using a
+custom configuration. Files are sent only to that configured daemon.
 
 ## Development
 
