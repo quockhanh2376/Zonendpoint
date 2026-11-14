@@ -210,3 +210,27 @@
   - App executable SHA256: `ae223e2533e5925106c2e36ce5bc881622e6bade4587e03cff6607e7fd1276eb`.
 - Handoff & Đẩy nhánh: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không merge/push main.
 
+## 2026-11-14 - V-53 (Cover Badge UTF-8 BOM Fix, Strict Validation & Uninstall Analysis in 0.3.0)
+- Thực hiện theo chỉ đạo của anh Zon ngày 2026-11-14 sau khi test tay phát hiện app đã cài hiện "Cover: —" dù server-status.json có dữ liệu.
+- Xác định nguyên nhân gốc rễ (Loki đã xác minh): PowerShell 5.1/.NET ghi UTF-8 có kèm BOM (`EF BB BF`) khi dùng `[System.Text.Encoding]::UTF8`. `serde_json::from_str` của Rust gặp BOM báo lỗi cú pháp JSON và trả fallback rỗng khiến UI hiện "—".
+- Triển khai khắc phục toàn diện:
+  - Sửa `scripts/windows/zon-tunnel.ps1`: chuyển sang ghi UTF-8 không BOM bằng `New-Object System.Text.UTF8Encoding($false)`. Bổ sung trường `fetched_at_utc` ghi nhận thời gian máy trạm lấy thành công dạng ISO-8601 UTC. Siết chặt kiểm tra `signatures` phải là số nguyên JSON (không ép kiểu `double -> long`, từ chối `8616497.5`, chuỗi, số âm, số vượt 1e9). Siết chặt `loaded_at_utc` đúng định dạng `YYYY-MM-DDTHH:MM:SSZ` (chiều dài 20 ký tự, không phần thập phân, không timezone offset).
+  - Sửa `src-tauri/src/server_status.rs`: loại bỏ BOM đầu file (`trim_start_matches('\u{feff}')`) trước khi parse JSON để chịu lỗi cho cả file cũ. Siết chặt parser thời gian ISO-8601 UTC chuẩn xác. Tính `stale` theo `fetched_at_utc` > 2 giờ (clamd không reload khi không có chữ ký mới vẫn coi là hợp lệ). File cũ thiếu `fetched_at_utc` tự động fallback sang `metadata.modified()` của file.
+  - Sửa `src/App.tsx`: cập nhật tooltip "ClamAV signatures on server (loaded <loaded_at>), synced <fetched_at>" (kèm chỉ báo stale nếu >2h). Ô Cover luôn hiển thị số lượng trực tiếp.
+- Phân tích rủi ro gỡ cài đặt (Mục 7):
+  - Kiểm tra script NSIS của Tauri v2: quy trình uninstall chỉ xóa đích danh `zonendpoint.exe` và `uninstall.exe`, sau đó chạy `RMDir "$INSTDIR"` (không đệ quy, chỉ xóa nếu thư mục trống). Do `%LOCALAPPDATA%\ZonEndpoint` chứa `cache.db`, `config.json`, `server-status.json` và thư mục `tunnel\`, lệnh `RMDir` sẽ bỏ qua trong im lặng.
+  - Checkbox "Delete app data" của NSIS chỉ xóa `%LOCALAPPDATA%\com.zonendpoint.desktop` (profile WebView2), không đụng chạm tới `%LOCALAPPDATA%\ZonEndpoint`.
+  - Kết luận: Gỡ ứng dụng (dù tích hay không tích xóa dữ liệu) hoàn toàn KHÔNG làm mất cache hay script tunnel. Đề xuất: Trong tương lai nên chuyển install dir sang `%LOCALAPPDATA%\Programs\ZonEndpoint` để tách rời binary và user data (chờ Zon quyết).
+- Quality Gates:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo test`: **79/79 PASS** (60 lib, 1 bin, 18 resilience).
+  - `cargo clippy --all-targets -- -D warnings`: PASS (0 warnings).
+  - `npm.cmd run build`: PASS.
+  - `node tests/native/run.mjs`: **21/21 PASS** (test với file mock status có UTF-8 BOM `EF BB BF`).
+- Đóng gói bản cài NSIS 0.3.0:
+  - Bản cài staged: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,714,811 bytes, PE32+ x64, NSIS v3.13).
+  - Installer SHA256: `4c9b82f507dca4a768a214909f84b218209f6822f656b395ce2c0f52fdd52f54`.
+  - Built Target Exe SHA256: `1cf16d717875a7ef6eaa9999031f1ff9b91dbb3d73684af301f0a5405fc23dea` (marker `UNK`).
+  - Installed Payload Exe SHA256: `9a09f749f81f71eced35a63f4282d33d20385d5a996ef025cb2f104b64edaf49` (marker `NSS`).
+- Bàn giao: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+

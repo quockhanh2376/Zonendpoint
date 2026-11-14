@@ -127,13 +127,12 @@ function Fetch-ServerStatus {
             return $false
         }
 
-        $sigVal = $json.signatures
-        if (-not ($sigVal -is [int] -or $sigVal -is [long] -or $sigVal -is [double])) {
-            & $writeLog "Validation failed: 'signatures' is not a number."
+        if (-not ($json.signatures -is [int] -or $json.signatures -is [long])) {
+            & $writeLog "Validation failed: 'signatures' must be an integer, got $($json.signatures.GetType().FullName)."
             return $false
         }
 
-        $sigLong = [long]$sigVal
+        $sigLong = [long]$json.signatures
         if ($sigLong -lt 0 -or $sigLong -gt 1000000000) {
             & $writeLog "Validation failed: 'signatures' value $sigLong outside valid range 0..1000000000."
             return $false
@@ -144,11 +143,27 @@ function Fetch-ServerStatus {
             return $false
         }
 
-        $parsedDate = [DateTime]::MinValue
-        if (-not [DateTime]::TryParse($json.loaded_at_utc, [ref]$parsedDate)) {
-            & $writeLog "Validation failed: 'loaded_at_utc' ($($json.loaded_at_utc)) is not a valid datetime string."
+        $isoUtcPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
+        if ($json.loaded_at_utc -notmatch $isoUtcPattern) {
+            & $writeLog "Validation failed: 'loaded_at_utc' ($($json.loaded_at_utc)) must strictly match YYYY-MM-DDTHH:MM:SSZ."
             return $false
         }
+
+        $parsedDate = [DateTime]::MinValue
+        $exactFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        if (-not [DateTime]::TryParseExact($json.loaded_at_utc, $exactFormat, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$parsedDate)) {
+            & $writeLog "Validation failed: 'loaded_at_utc' ($($json.loaded_at_utc)) is not a valid UTC calendar date."
+            return $false
+        }
+
+        $fetchedAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $outPayload = [ordered]@{
+            signatures     = $sigLong
+            loaded_at_utc  = $json.loaded_at_utc
+            fetched_at_utc = $fetchedAtUtc
+            engine         = $json.engine
+        }
+        $payloadText = $outPayload | ConvertTo-Json -Compress
 
         $targetDir = Split-Path $TargetFile -Parent
         if (-not (Test-Path $targetDir)) {
@@ -156,9 +171,10 @@ function Fetch-ServerStatus {
         }
 
         $tempFile = "$TargetFile.tmp.$PID"
-        [System.IO.File]::WriteAllText($tempFile, $rawText, [System.Text.Encoding]::UTF8)
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($tempFile, $payloadText, $utf8NoBom)
         Move-Item -Path $tempFile -Destination $TargetFile -Force -ErrorAction Stop
-        & $writeLog "Successfully updated server status: signatures=$sigLong, loaded_at_utc=$($json.loaded_at_utc)"
+        & $writeLog "Successfully updated server status: signatures=$sigLong, loaded_at_utc=$($json.loaded_at_utc), fetched_at_utc=$fetchedAtUtc"
         return $true
     } catch {
         & $writeLog "Exception during server status sync: $($_.Exception.Message)"
@@ -256,22 +272,34 @@ $syncScript = {
             $rawText = $res.Output.Trim()
             $json = $rawText | ConvertFrom-Json -ErrorAction Stop
             if ($null -eq $json.signatures) { return }
-            $sigVal = $json.signatures
-            if (-not ($sigVal -is [int] -or $sigVal -is [long] -or $sigVal -is [double])) { return }
-            $sigLong = [long]$sigVal
+            if (-not ($json.signatures -is [int] -or $json.signatures -is [long])) { return }
+            $sigLong = [long]$json.signatures
             if ($sigLong -lt 0 -or $sigLong -gt 1000000000) { return }
             if ([string]::IsNullOrWhiteSpace($json.loaded_at_utc)) { return }
+            $isoUtcPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
+            if ($json.loaded_at_utc -notmatch $isoUtcPattern) { return }
             $parsedDate = [DateTime]::MinValue
-            if (-not [DateTime]::TryParse($json.loaded_at_utc, [ref]$parsedDate)) { return }
+            $exactFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+            if (-not [DateTime]::TryParseExact($json.loaded_at_utc, $exactFormat, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$parsedDate)) { return }
+
+            $fetchedAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            $outPayload = [ordered]@{
+                signatures     = $sigLong
+                loaded_at_utc  = $json.loaded_at_utc
+                fetched_at_utc = $fetchedAtUtc
+                engine         = $json.engine
+            }
+            $payloadText = $outPayload | ConvertTo-Json -Compress
 
             $targetDir = Split-Path $TargetFile -Parent
             if (-not (Test-Path $targetDir)) {
                 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
             }
             $tempFile = "$TargetFile.tmp.$PID"
-            [System.IO.File]::WriteAllText($tempFile, $rawText, [System.Text.Encoding]::UTF8)
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($tempFile, $payloadText, $utf8NoBom)
             Move-Item -Path $tempFile -Destination $TargetFile -Force -ErrorAction Stop
-            & $writeLog "Successfully updated server status: signatures=$sigLong, loaded_at_utc=$($json.loaded_at_utc)"
+            & $writeLog "Successfully updated server status: signatures=$sigLong, loaded_at_utc=$($json.loaded_at_utc), fetched_at_utc=$fetchedAtUtc"
         } catch {
             & $writeLog "Exception during server status sync: $($_.Exception.Message)"
         }

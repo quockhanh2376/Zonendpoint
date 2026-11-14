@@ -22,10 +22,16 @@ const testAppdataZon = path.join(run, 'appdata', 'Zonendpoint');
 mkdirSync(testAppdataZon, { recursive: true });
 const mockServerStatus = {
   signatures: 8616464,
-  loaded_at_utc: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+  loaded_at_utc: new Date(Date.now() - 30 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  fetched_at_utc: new Date(Date.now() - 5 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
   engine: "ClamAV 1.5.4/28182"
 };
-writeFileSync(path.join(testAppdataZon, 'server-status.json'), JSON.stringify(mockServerStatus, null, 2));
+const mockStatusJson = JSON.stringify(mockServerStatus, null, 2);
+const mockStatusWithBom = Buffer.concat([
+  Buffer.from([0xEF, 0xBB, 0xBF]),
+  Buffer.from(mockStatusJson, 'utf8')
+]);
+writeFileSync(path.join(testAppdataZon, 'server-status.json'), mockStatusWithBom);
 const real = process.argv.includes('--real');
 const results = [];
 let browser, driver, server, serverPort, mode = 'clean', versionDelayMs = 0;
@@ -331,7 +337,7 @@ try {
     }, { timeout: 10000, timeoutMsg: 'Cover badge did not display 8,616,464 within timeout' });
 
     const title = await coverEl.getAttribute('title');
-    assert.match(title, /ClamAV signatures on server, updated/i);
+    assert.match(title, /ClamAV signatures on server.*loaded.*synced/i);
 
     // Verify in dark theme as well
     await browser.$('.theme-toggle').click();

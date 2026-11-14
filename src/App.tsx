@@ -43,6 +43,7 @@ type Theme = "light" | "dark";
 type ServerStatusDto = {
   signatures: number | null;
   loaded_at_utc: string | null;
+  fetched_at_utc: string | null;
   stale: boolean;
 };
 
@@ -387,16 +388,23 @@ function App() {
     if (!signatureStatus || signatureStatus.signatures == null) {
       return "ClamAV signatures on server: status unavailable";
     }
-    const timeStr = signatureStatus.loaded_at_utc
+    const loadedStr = signatureStatus.loaded_at_utc
       ? new Date(signatureStatus.loaded_at_utc).toLocaleString("en-US", {
           dateStyle: "medium",
           timeStyle: "short",
         })
       : "unknown time";
+    const syncedStr = signatureStatus.fetched_at_utc
+      ? new Date(signatureStatus.fetched_at_utc).toLocaleString("en-US", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : loadedStr;
+
     if (signatureStatus.stale) {
-      return `ClamAV signatures on server (stale, >2h), updated ${timeStr}`;
+      return `ClamAV signatures on server (stale, >2h) (loaded ${loadedStr}), synced ${syncedStr}`;
     }
-    return `ClamAV signatures on server, updated ${timeStr}`;
+    return `ClamAV signatures on server (loaded ${loadedStr}), synced ${syncedStr}`;
   })();
 
   const displayedResults = summary

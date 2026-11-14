@@ -13,6 +13,7 @@ All notable changes to Zonendpoint are documented in this file.
 - **Công cụ đo kiểm hiệu năng (Folder Benchmark)**: Bổ sung benchmark nội bộ (`folder_bench`) phục vụ đo đạc tốc độ quét thư mục cục bộ (J-04).
 
 ### Fixed
+- **Sửa lỗi hiển thị ô Cover do UTF-8 BOM & siết chặt xác thực dữ liệu (V-53)**: Xử lý triệt để lỗi app hiện "Cover: —" khi file status có UTF-8 BOM; tunnel chuyển sang ghi UTF-8 không BOM; bổ sung trường `fetched_at_utc` để tính stale chính xác theo lần sync máy trạm (>2h); siết chặt kiểm tra số nguyên signatures JSON và định dạng thời gian ISO-8601 UTC chuẩn xác.
 - **Đóng ứng dụng khi đang quét (Graceful Window Close)**: Hủy quét an toàn và ẩn cửa sổ ngay lập tức khi người dùng đóng app, đợi tối đa 5 giây cho worker hoàn tất, bảo toàn 100% bằng chứng phát hiện mối đe dọa (INFECTED) và không để lại tiến trình mồ côi (V-30, V-30M).
 - **Loại trừ lỗi quyền DriverData**: Loại trừ `%SystemRoot%\System32\drivers\DriverData` trong Quick Scan trên Windows tiêu chuẩn, tránh lỗi `Access is denied` không mong muốn.
 
