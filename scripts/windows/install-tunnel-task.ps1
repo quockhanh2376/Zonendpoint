@@ -7,10 +7,18 @@
     Stores zon-tunnel.ps1, tunnel-config.json, and tunnel.log in %LOCALAPPDATA%\ZonEndpoint\tunnel\.
 #>
 
+param(
+    [string]$AppDataRoot = $env:LOCALAPPDATA
+)
+
 $ErrorActionPreference = 'Stop'
 
+if ([string]::IsNullOrWhiteSpace($AppDataRoot)) {
+    $AppDataRoot = $env:LOCALAPPDATA
+}
+
 $taskName = "ZonEndpointTunnel"
-$rootDir = Join-Path $env:LOCALAPPDATA "ZonEndpoint"
+$rootDir = Join-Path $AppDataRoot "ZonEndpoint"
 $targetDir = Join-Path $rootDir "tunnel"
 if (-not (Test-Path $targetDir)) {
     New-Item -ItemType Directory -Path $targetDir -Force | Out-Null

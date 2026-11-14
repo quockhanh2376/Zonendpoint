@@ -8,17 +8,23 @@
     interrupting the persistent tunnel connection.
     Uses non-interactive SSH flags (-n, BatchMode, ConnectTimeout, ServerAliveInterval)
     and an overall hard execution timeout to prevent process hangs.
-    Reads configuration from %LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel-config.json.
+    Reads configuration from %LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel-config.json (or -AppDataRoot).
     Logs events with rotation to %LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log (no secrets logged).
 #>
 
 param(
-    [switch]$SyncOnce
+    [switch]$SyncOnce,
+    [switch]$ValidateOnly,
+    [string]$AppDataRoot = $env:LOCALAPPDATA
 )
 
 $ErrorActionPreference = 'Continue'
 
-$appDataDir = Join-Path $env:LOCALAPPDATA "ZonEndpoint"
+if ([string]::IsNullOrWhiteSpace($AppDataRoot)) {
+    $AppDataRoot = $env:LOCALAPPDATA
+}
+
+$appDataDir = Join-Path $AppDataRoot "ZonEndpoint"
 $tunnelDir = Join-Path $appDataDir "tunnel"
 if (-not (Test-Path $tunnelDir)) {
     New-Item -ItemType Directory -Path $tunnelDir -Force | Out-Null
@@ -44,7 +50,7 @@ function Write-TunnelLog {
 }
 
 $configFile = Join-Path $tunnelDir "tunnel-config.json"
-if (-not (Test-Path $configFile)) {
+if (-not (Test-Path -Path $configFile -PathType Leaf)) {
     $msg = "ERROR: Configuration file not found: '$configFile'. Copy 'tunnel-config.example.json' to '$configFile' and set host, user, and keys."
     Write-TunnelLog $msg
     [Console]::Error.WriteLine($msg)
@@ -52,7 +58,8 @@ if (-not (Test-Path $configFile)) {
 }
 
 try {
-    $config = Get-Content -Path $configFile -Raw -Encoding utf8 | ConvertFrom-Json -ErrorAction Stop
+    $rawConfig = Get-Content -Path $configFile -Raw -Encoding utf8
+    $config = $rawConfig | ConvertFrom-Json -ErrorAction Stop
 } catch {
     $msg = "ERROR: Failed to parse configuration file '$configFile': $($_.Exception.Message)"
     Write-TunnelLog $msg
@@ -60,11 +67,19 @@ try {
     exit 1
 }
 
+if ($null -eq $config) {
+    $msg = "ERROR: Configuration file '$configFile' is empty or invalid JSON."
+    Write-TunnelLog $msg
+    [Console]::Error.WriteLine($msg)
+    exit 1
+}
+
+# 1. Check missing required fields
 $missing = @()
-if ([string]::IsNullOrWhiteSpace($config.host)) { $missing += "host" }
-if ([string]::IsNullOrWhiteSpace($config.user)) { $missing += "user" }
-if ([string]::IsNullOrWhiteSpace($config.tunnel_key)) { $missing += "tunnel_key" }
-if ([string]::IsNullOrWhiteSpace($config.status_key)) { $missing += "status_key" }
+if ($null -eq $config.host -or [string]::IsNullOrWhiteSpace([string]$config.host)) { $missing += "host" }
+if ($null -eq $config.user -or [string]::IsNullOrWhiteSpace([string]$config.user)) { $missing += "user" }
+if ($null -eq $config.tunnel_key -or [string]::IsNullOrWhiteSpace([string]$config.tunnel_key)) { $missing += "tunnel_key" }
+if ($null -eq $config.status_key -or [string]::IsNullOrWhiteSpace([string]$config.status_key)) { $missing += "status_key" }
 if ($null -eq $config.local_port) { $missing += "local_port" }
 if ($null -eq $config.remote_port) { $missing += "remote_port" }
 
@@ -75,26 +90,193 @@ if ($missing.Count -gt 0) {
     exit 1
 }
 
-$remoteHost = "{0}@{1}" -f $config.user.Trim(), $config.host.Trim()
-$tunnelKey = [System.Environment]::ExpandEnvironmentVariables($config.tunnel_key.Trim())
-$statusKey = [System.Environment]::ExpandEnvironmentVariables($config.status_key.Trim())
-$localPort = [int]$config.local_port
-$remotePort = [int]$config.remote_port
-$statusSyncIntervalSecs = 900 # 15 minutes
-$statusSyncTimeoutSecs = 25   # Hard overall timeout for status ssh call
+# 2. Strict validation helper functions
+function Test-ValidHost {
+    param($HostInput)
+    if ($null -eq $HostInput -or -not ($HostInput -is [string])) {
+        return $false
+    }
+    # Reject whitespace or empty
+    if ([string]::IsNullOrWhiteSpace($HostInput) -or $HostInput -match '\s') {
+        return $false
+    }
+    # Host must not start with a hyphen (prevents flag injection)
+    if ($HostInput -match '^-') {
+        return $false
+    }
+    # Check IPv6 (contains colon)
+    if ($HostInput -match ':') {
+        $ip = $null
+        if ([System.Net.IPAddress]::TryParse($HostInput, [ref]$ip)) {
+            if ($ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6) {
+                return $true
+            }
+        }
+        return $false
+    }
+    # Check IPv4 (numeric dotted-quad)
+    if ($HostInput -match '^\d+(\.\d+)*$') {
+        if ($HostInput -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+            return $false
+        }
+        $ip = $null
+        if ([System.Net.IPAddress]::TryParse($HostInput, [ref]$ip)) {
+            if ($ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
+                return $true
+            }
+        }
+        return $false
+    }
+    # Hostname: regex ^[A-Za-z0-9.-]{1,253}$
+    if ($HostInput -match '^[A-Za-z0-9.-]{1,253}$') {
+        return $true
+    }
+    return $false
+}
 
-if (-not (Test-Path $tunnelKey)) {
-    $msg = "ERROR: Tunnel private key file not found: '$tunnelKey'"
+function Test-ValidUser {
+    param($UserInput)
+    if ($null -eq $UserInput -or -not ($UserInput -is [string])) {
+        return $false
+    }
+    # Case-sensitive match: starts with [a-z_], followed by [a-z0-9_-], total length 1 to 32 chars
+    return ($UserInput -cmatch '^[a-z_][a-z0-9_-]{0,31}$')
+}
+
+function Test-ValidPort {
+    param($PortInput)
+    if ($null -eq $PortInput) {
+        return $false
+    }
+    if (-not ($PortInput -is [int] -or $PortInput -is [long])) {
+        return $false
+    }
+    if ($PortInput -lt 1 -or $PortInput -gt 65535) {
+        return $false
+    }
+    return $true
+}
+
+function Test-ValidKeyPath {
+    param($KeyInput, [ref]$ResolvedPath)
+    if ($null -eq $KeyInput -or -not ($KeyInput -is [string]) -or [string]::IsNullOrWhiteSpace($KeyInput)) {
+        return $false
+    }
+    if ($KeyInput.Contains('"')) {
+        return $false
+    }
+    $expanded = [System.Environment]::ExpandEnvironmentVariables($KeyInput.Trim())
+    if ($expanded.Contains('"')) {
+        return $false
+    }
+    if (-not (Test-Path -Path $expanded -PathType Leaf)) {
+        return $false
+    }
+    $ResolvedPath.Value = $expanded
+    return $true
+}
+
+# 3. Perform strict validation on config values
+if (-not (Test-ValidHost $config.host)) {
+    $msg = "ERROR: Invalid 'host' in '$configFile': '$($config.host)'. Must be a valid IPv4/IPv6 address or hostname matching '^[A-Za-z0-9.-]{1,253}$' without spaces or leading hyphen."
     Write-TunnelLog $msg
     [Console]::Error.WriteLine($msg)
     exit 1
 }
 
-if (-not (Test-Path $statusKey)) {
-    $msg = "ERROR: Status private key file not found: '$statusKey'"
+if (-not (Test-ValidUser $config.user)) {
+    $msg = "ERROR: Invalid 'user' in '$configFile': '$($config.user)'. Must match '^[a-z_][a-z0-9_-]{0,31}$' (lowercase POSIX username)."
     Write-TunnelLog $msg
     [Console]::Error.WriteLine($msg)
     exit 1
+}
+
+if (-not (Test-ValidPort $config.local_port)) {
+    $msg = "ERROR: Invalid 'local_port' in '$configFile': '$($config.local_port)'. Must be an integer between 1 and 65535 (strings and decimals rejected)."
+    Write-TunnelLog $msg
+    [Console]::Error.WriteLine($msg)
+    exit 1
+}
+
+if (-not (Test-ValidPort $config.remote_port)) {
+    $msg = "ERROR: Invalid 'remote_port' in '$configFile': '$($config.remote_port)'. Must be an integer between 1 and 65535 (strings and decimals rejected)."
+    Write-TunnelLog $msg
+    [Console]::Error.WriteLine($msg)
+    exit 1
+}
+
+$expandedTunnelKey = $null
+if (-not (Test-ValidKeyPath $config.tunnel_key ([ref]$expandedTunnelKey))) {
+    $msg = "ERROR: Invalid 'tunnel_key' in '$configFile': '$($config.tunnel_key)'. File must exist and path must not contain double quotes."
+    Write-TunnelLog $msg
+    [Console]::Error.WriteLine($msg)
+    exit 1
+}
+
+$expandedStatusKey = $null
+if (-not (Test-ValidKeyPath $config.status_key ([ref]$expandedStatusKey))) {
+    $msg = "ERROR: Invalid 'status_key' in '$configFile': '$($config.status_key)'. File must exist and path must not contain double quotes."
+    Write-TunnelLog $msg
+    [Console]::Error.WriteLine($msg)
+    exit 1
+}
+
+$remoteUser = $config.user
+$remoteHostName = $config.host
+$remoteHost = "{0}@{1}" -f $remoteUser, $remoteHostName
+$tunnelKey = $expandedTunnelKey
+$statusKey = $expandedStatusKey
+$localPort = [int]$config.local_port
+$remotePort = [int]$config.remote_port
+$statusSyncIntervalSecs = 900 # 15 minutes
+$statusSyncTimeoutSecs = 25   # Hard overall timeout for status ssh call
+
+if ($ValidateOnly) {
+    $msg = "Configuration in '$configFile' is valid: host=$remoteHostName, user=$remoteUser, local_port=$localPort, remote_port=$remotePort."
+    Write-TunnelLog $msg
+    Write-Output $msg
+    return
+}
+
+# 4. Windows CommandLineToArgvW-compliant argument building functions
+function Format-WindowsCommandLineArgument {
+    param([string]$Arg)
+    if ([string]::IsNullOrEmpty($Arg)) {
+        return '""'
+    }
+    if ($Arg -notmatch '[\s"]') {
+        return $Arg
+    }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('"')
+    for ($i = 0; $i -lt $Arg.Length; $i++) {
+        $backslashCount = 0
+        while ($i -lt $Arg.Length -and $Arg[$i] -eq '\') {
+            $backslashCount++
+            $i++
+        }
+        if ($i -ge $Arg.Length) {
+            [void]$sb.Append('\', $backslashCount * 2)
+            break
+        }
+        if ($Arg[$i] -eq '"') {
+            [void]$sb.Append('\', $backslashCount * 2 + 1)
+            [void]$sb.Append('"')
+        } else {
+            [void]$sb.Append('\', $backslashCount)
+            [void]$sb.Append($Arg[$i])
+        }
+    }
+    [void]$sb.Append('"')
+    return $sb.ToString()
+}
+
+function Build-WindowsCommandLine {
+    param([string[]]$Arguments)
+    $formatted = foreach ($arg in $Arguments) {
+        Format-WindowsCommandLineArgument $arg
+    }
+    return ($formatted -join ' ')
 }
 
 function Invoke-NonInteractiveSsh {
@@ -106,8 +288,21 @@ function Invoke-NonInteractiveSsh {
     )
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "ssh"
-    $cmdArg = if ([string]::IsNullOrWhiteSpace($RemoteCommand)) { "" } else { " `"$RemoteCommand`"" }
-    $psi.Arguments = "-n -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -i `"$Key`" $HostTarget$cmdArg"
+
+    $sshArgs = @(
+        "-n",
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=15",
+        "-o", "ServerAliveInterval=15",
+        "-o", "ServerAliveCountMax=2",
+        "-i", $Key,
+        "--",
+        $HostTarget
+    )
+    if (-not [string]::IsNullOrWhiteSpace($RemoteCommand)) {
+        $sshArgs += $RemoteCommand
+    }
+    $psi.Arguments = Build-WindowsCommandLine $sshArgs
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
@@ -261,6 +456,12 @@ $statusPs.Runspace = $runspace
 
 # Pass function definitions to runspace to avoid code duplication (S-9)
 $helperDefinitions = @"
+function Format-WindowsCommandLineArgument {
+${function:Format-WindowsCommandLineArgument}
+}
+function Build-WindowsCommandLine {
+${function:Build-WindowsCommandLine}
+}
 function Invoke-NonInteractiveSsh {
 ${function:Invoke-NonInteractiveSsh}
 }
@@ -296,14 +497,18 @@ try {
         $start = Get-Date
 
         try {
-            & ssh -i $tunnelKey `
-                -o BatchMode=yes `
-                -o ExitOnForwardFailure=yes `
-                -o ServerAliveInterval=15 `
-                -o ServerAliveCountMax=3 `
-                -N `
-                -L "127.0.0.1:${localPort}:127.0.0.1:${remotePort}" `
+            $tunnelArgs = @(
+                "-i", $tunnelKey,
+                "-o", "BatchMode=yes",
+                "-o", "ExitOnForwardFailure=yes",
+                "-o", "ServerAliveInterval=15",
+                "-o", "ServerAliveCountMax=3",
+                "-N",
+                "-L", "127.0.0.1:${localPort}:127.0.0.1:${remotePort}",
+                "--",
                 $remoteHost
+            )
+            & ssh @tunnelArgs
             $exitCode = $LASTEXITCODE
         } catch {
             $exitCode = -1

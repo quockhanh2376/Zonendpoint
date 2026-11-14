@@ -55,7 +55,17 @@ File mẫu có sẵn tại `scripts\windows\tunnel-config.example.json`:
 }
 ```
 
-> **Lưu ý**: Script `zon-tunnel.ps1` sẽ kiểm tra file này lúc khởi động. Nếu thiếu file cấu hình hoặc thiếu bất kỳ trường bắt buộc nào, script sẽ báo lỗi rõ ràng và dừng lại.
+> **Lưu ý bảo mật (V-64 / Q-43)**: Script `zon-tunnel.ps1` thực hiện kiểm tra nghiêm ngặt (strict validation) file cấu hình lúc khởi động:
+> - `host`: chỉ chấp nhận IPv4, IPv6 hợp lệ hoặc hostname chuẩn RFC theo regex `^[A-Za-z0-9.-]{1,253}$`, không chứa khoảng trắng, không bắt đầu bằng dấu gạch ngang `-`.
+> - `user`: tên tài khoản chuẩn POSIX chữ thường theo regex `^[a-z_][a-z0-9_-]{0,31}$`.
+> - `local_port`, `remote_port`: bắt buộc là số nguyên 1–65535 (từ chối chuỗi số, số thập phân, hoặc chuỗi chèn cờ).
+> - `tunnel_key`, `status_key`: đường dẫn file thực sự tồn tại trên đĩa, tuyệt đối không chứa dấu ngoặc kép `"`.
+> - Tham số dòng lệnh SSH được xử lý qua hàm dựng quote đúng chuẩn Windows (`CommandLineToArgvW`) và thêm cờ kết thúc tùy chọn `--` trước host để chống tiêm cờ SSH (option injection).
+> - Nếu sai: script ghi log lỗi chi tiết vào `tunnel.log`, in ra màn hình và thoát ngay lập tức (exit code 1), không fallback.
+> - Có thể kiểm tra nhanh tính hợp lệ của cấu hình offline (không cần mạng) bằng switch `-ValidateOnly`:
+>   ```powershell
+>   powershell -ExecutionPolicy Bypass -File "scripts\windows\zon-tunnel.ps1" -ValidateOnly -AppDataRoot "C:\path\to\appdata"
+>   ```
 
 ---
 
@@ -77,13 +87,23 @@ powershell -ExecutionPolicy Bypass -File "scripts\windows\install-tunnel-task.ps
   - Định kỳ ~15 phút đồng bộ trạng thái chữ ký từ server vào `%LOCALAPPDATA%\ZonEndpoint\server-status.json` chạy nền không làm gián đoạn tunnel chính.
 - **Nhật ký (Log)**: Ghi vào `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log`. Tự động xoay vòng sang `tunnel.log.1` khi vượt quá 256 KB. Không ghi khóa bí mật.
 
-### Kiểm tra thử đồng bộ trạng thái (-SyncOnce)
+### Kiểm tra thử nghiệm an toàn cho QA / Developer (Bài học Q-43)
+> **QUAN TRỌNG (Q-43)**: Khi chạy thử nghiệm, **bắt buộc** truyền tham số `-AppDataRoot <ThưMụcTạm>` tường minh để script ghi log và trạng thái vào thư mục tạm, tuyệt đối không được để mặc định khiến script ghi đè hoặc thêm log lỗi vào `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log` của môi trường production. Ngoài ra, cấu hình thử nghiệm phải dùng cổng thử nghiệm (ví dụ `13314`), không dùng cổng production `13310`.
+
 ```powershell
-powershell -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\ZonEndpoint\tunnel\zon-tunnel.ps1" -SyncOnce
+# 1. Chạy bộ tự kiểm tra validation offline (không cần mạng):
+powershell -ExecutionPolicy Bypass -File "scripts\windows\test-tunnel-validation.ps1"
+
+# 2. Thử nghiệm đồng bộ trạng thái một lần (-SyncOnce) với thư mục tạm:
+powershell -ExecutionPolicy Bypass -File "scripts\windows\zon-tunnel.ps1" -SyncOnce -AppDataRoot "E:\Zonendpoint-tools\artifacts\test\appdata"
+
+# 3. Thử nghiệm giám sát tunnel với thư mục tạm (cổng thử nghiệm 13314):
+powershell -ExecutionPolicy Bypass -File "scripts\windows\zon-tunnel.ps1" -AppDataRoot "E:\Zonendpoint-tools\artifacts\test\appdata"
 ```
 
-### Kiểm tra ping ClamAV qua tunnel
+### Kiểm tra ping ClamAV qua tunnel production (hoặc tunnel thử nghiệm)
 ```powershell
+# Kết nối cổng tunnel (13310 cho production hoặc 13314 cho thử nghiệm)
 $client = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 13310)
 $stream = $client.GetStream()
 $writer = New-Object System.IO.StreamWriter($stream)

@@ -123,3 +123,52 @@ sudo userdel -r zontunnel
 1. Gỡ bỏ task hiện tại:
    `powershell -ExecutionPolicy Bypass -File "scripts\windows\uninstall-tunnel-task.ps1"`
 2. Cài lại script từ commit `908535e` sử dụng `zonendpoint_lab`.
+
+---
+
+## 6. Task V-64 — Khắc phục phát hiện Q-43 (Validate chặt cấu hình & An toàn tham số SSH)
+
+- **Người thực hiện**: Vic (Developer)
+- **Người nhận bàn giao / nghiệm thu**: Qeen (QA / Security Verification)
+- **Ngày**: 2026-11-14 (UTC+7)
+- **Căn cứ**: Đánh giá phần B tại `artifacts/q43/qeen-verify.md` (phát hiện cấu hình thiếu validation chặt chẽ và lệnh SSH ghép chuỗi có nguy cơ tiêm cờ, bài học test không truyền AppDataRoot đã ghi vào log thật).
+
+### 6.1. Các thay đổi kỹ thuật cốt lõi
+
+1. **Validation cấu hình chặt chẽ (`tunnel-config.json`)**:
+   - `host`: Chỉ chấp nhận IPv4 hoặc IPv6 hợp lệ, hoặc hostname theo regex `^[A-Za-z0-9.-]{1,253}$`. Bắt buộc không chứa khoảng trắng, không bắt đầu bằng dấu gạch ngang `-` (chống tiêm cờ SSH như `-oProxyCommand=...`).
+   - `user`: Regex `^[a-z_][a-z0-9_-]{0,31}$` (case-sensitive `-cmatch`, đúng chuẩn tài khoản POSIX chữ thường).
+   - `local_port`, `remote_port`: Bắt buộc là số nguyên 1–65535 (`[int]`/`[long]`). Từ chối chuỗi (kể cả chuỗi số `"13314"`, `"22 -R"`), từ chối số thập phân (`13314.5`).
+   - `tunnel_key`, `status_key`: Bắt buộc là đường dẫn file tồn tại (`Test-Path -PathType Leaf`), không chứa dấu ngoặc kép `"` trước và sau khi expand biến môi trường.
+   - Bất kỳ trường nào sai hoặc thiếu: Ghi log lỗi rõ ràng vào `tunnel.log`, in ra stderr và thoát ngay lập tức (`exit 1`), không fallback.
+   - Thêm switch `-ValidateOnly` cho phép kiểm tra cấu hình offline (không cần mạng, trả về mã 0 khi hợp lệ, mã 1 khi sai).
+
+2. **Khử hoàn toàn ghép chuỗi lệnh SSH (Windows CommandLineToArgvW & `--`)**:
+   - Viết các hàm dựng tham số `Format-WindowsCommandLineArgument` và `Build-WindowsCommandLine` tuân thủ chuẩn quoting `CommandLineToArgvW` của Windows cho từng đối số.
+   - Hàm `Invoke-NonInteractiveSsh` (status sync) dùng `Build-WindowsCommandLine` truyền qua `ProcessStartInfo.Arguments` với mảng đối số có cờ `--` đứng trước `$HostTarget`.
+   - Vòng lặp giám sát tunnel chính dùng toán tử `& ssh @tunnelArgs` với mảng đối số có cờ `--` đứng trước `$remoteHost`.
+   - Truyền đầy đủ các hàm helper vào background runspace để tránh trùng lặp code và đảm bảo runspace cũng sử dụng cơ chế an toàn.
+
+3. **Tham số `-AppDataRoot` tường minh (Bài học Q-43)**:
+   - Thêm tham số `-AppDataRoot` (mặc định `$env:LOCALAPPDATA`) vào `zon-tunnel.ps1` và `install-tunnel-task.ps1`.
+   - Mọi quy trình test và tài liệu hướng dẫn bắt buộc phải truyền `-AppDataRoot` trỏ tới thư mục tạm độc lập. Ngăn chặn hoàn toàn việc test ghi log hoặc làm ô nhiễm `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log` của production.
+
+### 6.2. Kết quả kiểm thử nghiêm ngặt
+
+1. **Bộ test validation offline (`scripts/windows/test-tunnel-validation.ps1`)**:
+   - **32 / 32 test cases PASS (100%)**.
+   - Host có khoảng trắng (`"100.96.250.245 "`, `" host"`, `"host name"`) -> Từ chối (exit 1).
+   - Host chứa tiêm cờ (`"-oProxyCommand=calc.exe"`, `"-h"`) -> Từ chối (exit 1).
+   - Port ngoài dải / lỗi cú pháp (`0`, `70000`, `"22 -R"`, chuỗi `"13314"`, thập phân `13314.5`) -> Từ chối (exit 1).
+   - User không hợp lệ (`"User"`, `"root; rm -rf /"`, `"-user"`, `"1user"`, `"user name"`) -> Từ chối (exit 1).
+   - Key thiếu / key chứa ngoặc kép -> Từ chối (exit 1).
+   - Config thiếu trường bắt buộc -> Từ chối (exit 1).
+   - Chạy supervisor trực tiếp với config lỗi -> Thoát ngay với mã 1 trước khi gọi SSH.
+   - Config hợp lệ (IPv4, IPv6 `::1`, hostname `clamav.lab`) -> Chấp nhận (exit 0).
+
+2. **Chạy thật với `-AppDataRoot E:\Zonendpoint-tools\artifacts\v64\appdata` trên cổng 13314**:
+   - `-SyncOnce`: PASS, lấy dữ liệu chữ ký ClamAV thành công (`signatures: 8616901`, `engine: ClamAV 1.5.4/28183`).
+   - Supervisor ~31 giây: PASS, runspace nền kích hoạt sync thành công, mở listener trên `127.0.0.1:13314`.
+   - Kết nối gửi `zPING` qua cổng `13314` -> Phản hồi đúng `PONG`.
+   - Dọn dẹp tiến trình: Supervisor và tiến trình ssh thử nghiệm đã được dừng hoàn toàn.
+   - An toàn môi trường: Cổng production `13310`, Scheduled Task thật của anh Zon, và file `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log` thật **hoàn toàn không bị tác động** (LastWriteTime và Length giữ nguyên).

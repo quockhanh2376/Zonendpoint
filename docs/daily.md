@@ -322,3 +322,14 @@
   - zontunnel không thể sudo, cấm đăng nhập bằng mật khẩu.
   - Thử nghiệm `zon-tunnel.ps1` với `LOCALAPPDATA` tạm: `-SyncOnce` ghi `server-status.json` thành công; supervisor nền kích hoạt tunnel 13311 và background sync thành công, `zPING` OK. Dọn dẹp tiến trình và cổng 13311 sạch sẽ sau khi thử.
 - Bàn giao: Tạo `docs/handoffs/tunnel-restrict-vic-to-qeen.md`, cập nhật `docs/ops/client-connect.md`, `scripts/server/README.md`. Nhánh `vic/tunnel-restrict`. Không merge main.
+
+## 2026-11-14 - V-64 (Sửa lỗi Q-43: Validate cấu hình chặt chẽ & Khử ghép chuỗi SSH)
+- Thực hiện theo phát hiện Q-43 của Qeen (mục B trong `artifacts/q43/qeen-verify.md`):
+  - `tunnel-config.json` thiếu kiểm tra chặt: bổ sung validation đầy đủ cho `host` (IPv4, IPv6, regex hostname `^[A-Za-z0-9.-]{1,253}$`, không khoảng trắng, không bắt đầu bằng `-`), `user` (regex `^[a-z_][a-z0-9_-]{0,31}$`), `local_port`/`remote_port` (số nguyên 1–65535, từ chối chuỗi/thập phân), `tunnel_key`/`status_key` (đường dẫn file tồn tại, không chứa ngoặc kép). Sai -> ghi log lỗi và thoát ngay với mã 1, không fallback.
+  - Khử ghép chuỗi SSH: Viết hàm format tham số theo chuẩn Windows `CommandLineToArgvW` cho `Invoke-NonInteractiveSsh` và dùng mảng đối số `& ssh @tunnelArgs` cho supervisor, bổ sung cờ `--` trước host cho cả hai luồng.
+  - Khắc phục bài học Q-43 về ô nhiễm log thật: Bổ sung tham số `-AppDataRoot` (mặc định `$env:LOCALAPPDATA`) cho cả `zon-tunnel.ps1` và `install-tunnel-task.ps1`. Mọi tài liệu test quy định bắt buộc truyền `-AppDataRoot` tạm.
+- Kiểm thử:
+  - Viết bộ test offline `scripts/windows/test-tunnel-validation.ps1`: 32/32 test cases PASS 100% (từ chối toàn bộ injection, khoảng trắng, port ngoài dải, kiểu dữ liệu sai, user lạ; chấp nhận config hợp lệ; supervisor thoát ngay mã 1).
+  - Chạy thử thật với `-AppDataRoot E:\Zonendpoint-tools\artifacts\v64\appdata` và cổng `13314`: `-SyncOnce` lấy chữ ký ClamAV thành công; supervisor chạy ~31 giây mở listener 13314, `zPING` -> `PONG`; dừng toàn bộ tiến trình thử nghiệm sạch sẽ.
+  - Bảo đảm an toàn tuyệt đối: không đụng cổng 13310, không đụng task hay `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log` thật.
+- Bàn giao: Cập nhật `docs/handoffs/tunnel-restrict-vic-to-qeen.md` (mục V-64), `docs/ops/client-connect.md`, `docs/tasks/commit-notes.md`. Nhánh `vic/tunnel-restrict`. Không merge main.
