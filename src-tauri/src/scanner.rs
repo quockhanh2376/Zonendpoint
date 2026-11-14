@@ -5,6 +5,7 @@ use anyhow::Result;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
+    io::Read,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::{
@@ -21,7 +22,8 @@ use tokio::{
     time::timeout,
 };
 
-const STREAM_CHUNK_BYTES: usize = 64 * 1024;
+const HASH_BUFFER_BYTES: usize = 1024 * 1024;
+const STREAM_CHUNK_BYTES: usize = 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 1024;
 const RECOVERY_SUCCESS_THRESHOLD: usize = 50;
 pub const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
@@ -541,14 +543,12 @@ fn snapshot(metadata: &std::fs::Metadata) -> Result<FileSnapshot, String> {
     })
 }
 
-async fn hash_file(path: &Path) -> Result<([u8; 32], u64, FileSnapshot), String> {
-    let mut file = File::open(path)
-        .await
-        .map_err(|error| format!("open scan target: {error}"))?;
+fn hash_file_sync(path: &Path) -> Result<([u8; 32], u64, FileSnapshot), String> {
+    let mut file =
+        std::fs::File::open(path).map_err(|error| format!("open scan target: {error}"))?;
     let before = snapshot(
         &file
             .metadata()
-            .await
             .map_err(|error| format!("read scan target metadata: {error}"))?,
     )?;
     if before.size > MAX_FILE_BYTES {
@@ -556,11 +556,10 @@ async fn hash_file(path: &Path) -> Result<([u8; 32], u64, FileSnapshot), String>
     }
     let mut hasher = Sha256::new();
     let mut total = 0u64;
-    let mut buffer = vec![0; STREAM_CHUNK_BYTES];
+    let mut buffer = vec![0u8; HASH_BUFFER_BYTES];
     loop {
         let count = file
             .read(&mut buffer)
-            .await
             .map_err(|error| format!("read scan target: {error}"))?;
         if count == 0 {
             break;
@@ -574,18 +573,21 @@ async fn hash_file(path: &Path) -> Result<([u8; 32], u64, FileSnapshot), String>
     let after_handle = snapshot(
         &file
             .metadata()
-            .await
             .map_err(|error| format!("recheck scan target: {error}"))?,
     )?;
-    let after_path = snapshot(
-        &tokio::fs::metadata(path)
-            .await
-            .map_err(|error| format!("recheck scan path: {error}"))?,
-    )?;
+    let after_path =
+        snapshot(&std::fs::metadata(path).map_err(|error| format!("recheck scan path: {error}"))?)?;
     if before != after_handle || before != after_path || total != before.size {
         return Err("file changed while hashing".into());
     }
     Ok((hasher.finalize().into(), total, before))
+}
+
+async fn hash_file(path: &Path) -> Result<([u8; 32], u64, FileSnapshot), String> {
+    let path = path.to_owned();
+    tokio::task::spawn_blocking(move || hash_file_sync(&path))
+        .await
+        .map_err(|error| format!("hash task join error: {error}"))?
 }
 
 pub async fn scan_file(
