@@ -104,6 +104,8 @@ function App() {
   const [serverInput, setServerInput] = useState("");
   const [serverSaving, setServerSaving] = useState(false);
   const [serverConfigMsg, setServerConfigMsg] = useState<{ text: string; error: boolean } | null>(null);
+  const [showServerManual, setShowServerManual] = useState(false);
+  const [isServerInputFocused, setIsServerInputFocused] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   const [signatureStatus, setSignatureStatus] = useState<ServerStatusDto | null>(null);
 
@@ -149,6 +151,11 @@ function App() {
       const ok = await checkServer(true);
       if (ok) {
         setServerConfigMsg({ text: `Connected to ${updated.effective_addr}`, error: false });
+        setShowServerManual(false);
+        if (isServerInputFocused) {
+          (document.activeElement as HTMLElement)?.blur();
+          setIsServerInputFocused(false);
+        }
       } else {
         setServerConfigMsg({ text: `Saved, but cannot connect to ${updated.effective_addr}`, error: true });
       }
@@ -160,6 +167,7 @@ function App() {
   }
 
   const checkServer = async (manual = false) => {
+    const prevStatus = serverStatusRef.current;
     if (manual) {
       serverStatusRef.current = "checking";
       setServerStatus("checking");
@@ -169,6 +177,9 @@ function App() {
       if (serverStatusRef.current !== "connected") {
         serverStatusRef.current = "connected";
         setServerStatus("connected");
+      }
+      if (prevStatus === "disconnected" || prevStatus === "checking") {
+        setShowServerManual(false);
       }
       fetchSignatureStatus();
       return true;
@@ -380,9 +391,14 @@ function App() {
     || startPending
     || (scanState === "idle" && (!!scanId || !scanEventsReady));
 
+  const isServerRowVisible =
+    isServerInputFocused ||
+    showServerManual ||
+    serverStatus === "disconnected";
+
   const serverTooltip =
     serverStatus === "connected"
-      ? "Connected to ZonEndpoint server"
+      ? (isServerRowVisible ? "Hide server settings" : "Show server settings")
       : serverStatus === "disconnected"
         ? "Cannot connect to ZonEndpoint server. Check your connection."
         : "Checking connection…";
@@ -435,14 +451,19 @@ function App() {
             />
             <div className="server-status-col">
               <button
-              type="button"
-              className={`server-status status-${serverStatus}`}
-              data-status={serverStatus}
-              title={serverTooltip}
-              aria-label={serverTooltip}
-              onClick={() => void checkServer(true)}
-              disabled={serverStatus === "checking"}
-            >
+                type="button"
+                className={`server-status status-${serverStatus}`}
+                data-status={serverStatus}
+                title={serverTooltip}
+                aria-label={serverTooltip}
+                onClick={() => {
+                  if (serverStatus === "connected") {
+                    setShowServerManual((prev) => !prev);
+                  }
+                  void checkServer(true);
+                }}
+                disabled={serverStatus === "checking"}
+              >
               {serverStatus === "connected" && (
                 <svg className="server-status-icon status-icon-connected" viewBox="0 0 20 20" aria-hidden="true">
                   <circle cx="10" cy="10" r="10" fill="var(--clean)" />
@@ -558,39 +579,45 @@ function App() {
           {!scanId && !summary && (
             <>
               <p className="selected-path">{selectedTarget?.path || "Windows core files + drivers"}</p>
-              <form className="server-config-form" onSubmit={(e) => void handleSaveServer(e)}>
-                <label htmlFor="server-address-input" className="server-label">Server</label>
-                <input
-                  id="server-address-input"
-                  className="server-input"
-                  type="text"
-                  value={serverInput}
-                  placeholder="127.0.0.1:13310"
-                  onChange={(e) => {
-                    setServerInput(e.target.value);
-                    setServerConfigMsg(null);
-                  }}
-                  disabled={!!scanId || serverSaving}
-                  spellCheck={false}
-                  autoComplete="off"
-                />
-                <button
-                  type="submit"
-                  className="server-save-btn"
-                  disabled={!!scanId || serverSaving}
-                >
-                  {serverSaving ? "Saving…" : "Save"}
-                </button>
-                {serverConfig?.env_override && (
-                  <span className="server-env-badge" title={`Active: ${serverConfig.effective_addr}`}>
-                    Env active
-                  </span>
-                )}
-              </form>
-              {serverConfigMsg && (
-                <p className={`server-msg ${serverConfigMsg.error ? "server-msg-error" : "server-msg-ok"}`}>
-                  {serverConfigMsg.text}
-                </p>
+              {isServerRowVisible && (
+                <>
+                  <form className="server-config-form" onSubmit={(e) => void handleSaveServer(e)}>
+                    <label htmlFor="server-address-input" className="server-label">Server</label>
+                    <input
+                      id="server-address-input"
+                      className="server-input"
+                      type="text"
+                      value={serverInput}
+                      placeholder="127.0.0.1:13310"
+                      onFocus={() => setIsServerInputFocused(true)}
+                      onBlur={() => setIsServerInputFocused(false)}
+                      onChange={(e) => {
+                        setServerInput(e.target.value);
+                        setServerConfigMsg(null);
+                      }}
+                      disabled={!!scanId || serverSaving}
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                    <button
+                      type="submit"
+                      className="server-save-btn"
+                      disabled={!!scanId || serverSaving}
+                    >
+                      {serverSaving ? "Saving…" : "Save"}
+                    </button>
+                    {serverConfig?.env_override && (
+                      <span className="server-env-badge" title={`Active: ${serverConfig.effective_addr}`}>
+                        Env active
+                      </span>
+                    )}
+                  </form>
+                  {serverConfigMsg && (
+                    <p className={`server-msg ${serverConfigMsg.error ? "server-msg-error" : "server-msg-ok"}`}>
+                      {serverConfigMsg.text}
+                    </p>
+                  )}
+                </>
               )}
             </>
           )}

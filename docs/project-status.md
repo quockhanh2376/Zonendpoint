@@ -369,3 +369,23 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - Installer SHA256: `A6797CA3FAA4DCD4A62D2FD71E225D27F720250B776A724DE2AC0A57405D394F`.
 - Bàn giao: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
 
+## V-54 — Server Configuration Row Visibility When Connected OK in 0.3.0 (2026-11-14)
+- Triển khai theo yêu cầu Zon 2026-11-14: ẩn hàng cấu hình Server (ô nhập `#server-address-input` + nút Save `.server-save-btn`) khi kết nối OK để giao diện gọn gàng.
+- Hành vi chi tiết:
+  1. Kết nối OK (`serverStatus === "connected"`): tự động ẩn hàng Server.
+  2. Đang kiểm tra lần đầu (`serverStatus === "checking"`): không hiện (tránh nhấp nháy giao diện khi khởi động).
+  3. Mất kết nối / lỗi kết nối (`serverStatus === "disconnected"`): tự động hiển thị hàng Server để người dùng sửa địa chỉ và Save; khi kết nối lại OK thì tự ẩn lại (trừ khi đang focus/gõ trong ô).
+  4. Bật/tắt thủ công khi đang OK: bấm vào icon trạng thái server (dấu check xanh) để hiện/ẩn. Hỗ trợ đầy đủ keyboard accessible và cập nhật động `title`/`aria-label` ("Show server settings" / "Hide server settings").
+  5. Bảo toàn focus: không bao giờ ẩn hàng Server khi người dùng đang focus trong ô nhập (`isServerInputFocused`).
+  6. Không đổi logic kết nối/lưu cấu hình backend; bảo toàn bố cục trên 2 theme Light/Dark và cửa sổ hẹp 800x240.
+- Quality Gates:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo test`: **81/81 PASS** (62 lib, 1 bin, 18 resilience).
+  - `cargo clippy --all-targets -- -D warnings`: PASS.
+  - `npm.cmd run build`: PASS.
+  - `node tests/native/run.mjs`: **21/21 PASS** (kiểm thử đầy đủ 3 trạng thái của hàng Server: OK -> ẩn; offline -> hiện; bấm icon -> toggle hiện/ẩn).
+  - Đóng gói NSIS release: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,716,290 bytes, PE32+ x64, NSIS v3.13).
+  - Installer SHA256: `8AF8B82DEC059D138338DA880DB41BA2E2D54950ADDC33E6690430AB3B90F426`.
+- Bàn giao: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+

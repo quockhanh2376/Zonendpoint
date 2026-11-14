@@ -80,6 +80,20 @@ async function button(label) {
   return label === "Start scan" ? browser.$("button.primary") : browser.$(`button=${label}`);
 }
 
+async function setInputValue(selector, value) {
+  await browser.execute((sel, val) => {
+    const input = document.querySelector(sel);
+    if (!input) throw new Error(`Element ${sel} not found`);
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value'
+    ).set;
+    nativeInputValueSetter.call(input, val);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, selector, value);
+}
+
 async function select(kind = 'file') {
   await (await button("Select target ▾")).click();
   await (await button(kind === "file" ? "File" : "Folder")).click();
@@ -489,7 +503,7 @@ try {
     mkdirSync(statusIconArtifactsDir, { recursive: true });
     const statusBtn = await browser.$('.server-status');
     await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'connected', { timeout: 10000 });
-    assert.equal(await statusBtn.getAttribute('title'), 'Connected to ZonEndpoint server');
+    assert.equal(await statusBtn.getAttribute('title'), 'Show server settings');
     assert.equal(await browser.$('.server-status svg.status-icon-connected').isExisting(), true, 'Connected checkmark SVG must exist');
 
     // 1. Connected screenshots (light & dark)
@@ -541,7 +555,7 @@ try {
     await startMockServer(serverPort);
     await statusBtn.click();
     await browser.waitUntil(async () => await statusBtn.getAttribute('data-status') === 'connected', { timeout: 10000 });
-    assert.equal(await statusBtn.getAttribute('title'), 'Connected to ZonEndpoint server');
+    assert.equal(await statusBtn.getAttribute('title'), 'Show server settings');
   });
 
   if (!real) await check('automatic preflight and background check preserves icon without flashing checking (Q-14)', async () => {
@@ -627,23 +641,57 @@ try {
       await startMockServer(serverPort);
     });
 
-    await check('server settings input and validation', async () => {
+    await check('server settings input, validation, and V-54 row visibility', async () => {
+      // 1. In disconnected state: server row is automatically visible
       const input = await browser.$('#server-address-input');
-      assert.equal(await input.isExisting(), true, 'Server address input exists');
+      assert.equal(await input.isExisting(), true, 'Server address input exists when disconnected');
       const saveBtn = await browser.$('.server-save-btn');
       assert.equal(await saveBtn.isExisting(), true, 'Server save button exists');
 
       // Test rejection of public IP
-      await input.setValue('8.8.8.8:3310');
+      await setInputValue('#server-address-input', '8.8.8.8:3310');
       await saveBtn.click();
       await browser.waitUntil(async () => await browser.$('.server-msg-error').isExisting(), { timeout: 5000 });
       assert.match(await browser.$('.server-msg-error').getText(), /must use loopback, private/);
 
       // Test saving valid loopback address
-      await input.setValue(`127.0.0.1:${serverPort}`);
+      await setInputValue('#server-address-input', `127.0.0.1:${serverPort}`);
       await saveBtn.click();
-      await browser.waitUntil(async () => await browser.$('.server-msg-ok').isExisting(), { timeout: 5000 });
-      assert.match(await browser.$('.server-msg-ok').getText(), /Connected to/);
+      await browser.waitUntil(async () => await browser.$('.server-status').getAttribute('data-status') === 'connected', { timeout: 10000 });
+
+      // State 1: Connected OK -> Server row is HIDDEN
+      await browser.waitUntil(async () => !(await browser.$('.server-config-form').isExisting()), { timeout: 5000 });
+      assert.equal(await browser.$('.server-config-form').isExisting(), false, 'Server row must be hidden when connected OK');
+      assert.equal(await browser.$('#server-address-input').isExisting(), false);
+      assert.equal(await browser.$('.server-status').getAttribute('title'), 'Show server settings');
+      assert.equal(await browser.$('.server-status').getAttribute('aria-label'), 'Show server settings');
+
+      // State 2: Click status icon while connected -> TOGGLE visible / hidden
+      await browser.$('.server-status').click();
+      await browser.waitUntil(async () => await browser.$('.server-config-form').isExisting(), { timeout: 3000 });
+      assert.equal(await browser.$('#server-address-input').isExisting(), true, 'Server row appears after clicking icon');
+      assert.equal(await browser.$('.server-status').getAttribute('title'), 'Hide server settings');
+      assert.equal(await browser.$('.server-status').getAttribute('aria-label'), 'Hide server settings');
+
+      await browser.$('.server-status').click();
+      await browser.waitUntil(async () => !(await browser.$('.server-config-form').isExisting()), { timeout: 3000 });
+      assert.equal(await browser.$('.server-config-form').isExisting(), false, 'Server row hides after clicking icon again');
+      assert.equal(await browser.$('.server-status').getAttribute('title'), 'Show server settings');
+
+      // State 3: Connection failure / server offline -> Server row automatically APPEARS
+      await stopMockServer();
+      await browser.$('.server-status').click();
+      await browser.waitUntil(async () => await browser.$('.server-status').getAttribute('data-status') === 'disconnected', { timeout: 10000 });
+      assert.equal(await browser.$('.server-config-form').isExisting(), true, 'Server row must be visible when connection fails');
+      assert.equal(await browser.$('#server-address-input').isExisting(), true);
+
+      // Restore mock server and verify it automatically hides again when reconnected OK
+      await startMockServer(serverPort);
+      await browser.$('.server-status').click();
+      await browser.waitUntil(async () => await browser.$('.server-status').getAttribute('data-status') === 'connected', { timeout: 10000 });
+      await browser.waitUntil(async () => !(await browser.$('.server-config-form').isExisting()), { timeout: 5000 });
+      assert.equal(await browser.$('.server-config-form').isExisting(), false, 'Server row must automatically hide when reconnected OK');
+      assert.equal(await browser.$('.server-status').getAttribute('title'), 'Show server settings');
     });
 
     await check('window close after scan and during scan terminates cleanly without orphan processes (V-30)', async () => {

@@ -233,3 +233,24 @@
   - Installer SHA256: `A6797CA3FAA4DCD4A62D2FD71E225D27F720250B776A724DE2AC0A57405D394F`.
 - Bàn giao: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
 
+## 2026-11-14 - V-54 (Ẩn hàng cấu hình Server khi kết nối OK trong 0.3.0)
+- Thực hiện theo yêu cầu của anh Zon ngày 2026-11-14: ẩn hàng cấu hình Server (ô nhập `#server-address-input` và nút Save `.server-save-btn`) khi kết nối OK để tối ưu không gian hiển thị và giảm rối mắt.
+- Triển khai chi tiết trong `src/App.tsx`:
+  - Trạng thái kết nối OK (`serverStatus === "connected"`): tự động ẩn hàng Server.
+  - Trạng thái kiểm tra lần đầu (`serverStatus === "checking"`): không hiện (tránh nháy giao diện khi vừa mở app).
+  - Trạng thái mất kết nối / lỗi (`serverStatus === "disconnected"`): tự động hiển thị hàng Server để người dùng sửa địa chỉ và bấm Save; khi kết nối lại OK thì tự ẩn lại (trừ khi đang focus trong ô).
+  - Bật/tắt thủ công: khi đang kết nối OK, người dùng bấm vào icon trạng thái server (dấu check xanh) để toggle hiện/ẩn hàng Server. Cập nhật `title` và `aria-label` động tương ứng ("Show server settings" / "Hide server settings"), hỗ trợ đầy đủ phím bấm bàn phím (Enter/Space).
+  - Giữ hiển thị khi đang sửa: nếu người dùng đang focus trong ô nhập (`isServerInputFocused`), hàng Server không bị ẩn giữa chừng dù có re-check ngầm.
+  - Giữ nguyên toàn bộ logic kết nối/lưu cấu hình backend; không vỡ layout trên 2 theme Light/Dark và cửa sổ hẹp 800x240.
+- Quality Gates:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo test`: **81/81 PASS** (62 lib, 1 bin, 18 resilience).
+  - `cargo clippy --all-targets -- -D warnings`: PASS (0 warnings).
+  - `npm.cmd run build`: PASS.
+  - `node tests/native/run.mjs`: **21/21 PASS** (xác minh cả 3 trạng thái: OK -> ẩn; offline -> hiện; click icon -> toggle hiện/ẩn; V-30 đóng app sạch 0 process mồ côi).
+- Đóng gói bản cài NSIS 0.3.0:
+  - Bản cài staged: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,716,290 bytes, PE32+ x64, NSIS v3.13).
+  - Installer SHA256: `8AF8B82DEC059D138338DA880DB41BA2E2D54950ADDC33E6690430AB3B90F426`.
+- Bàn giao: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+

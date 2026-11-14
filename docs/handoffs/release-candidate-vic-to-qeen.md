@@ -1,11 +1,11 @@
-# Handoff: Task V-51 / V-52 / V-53 — Release Candidate 0.3.0 NSIS Build (Vic to Qeen)
+# Handoff: Task V-51 / V-52 / V-53 / V-54 — Release Candidate 0.3.0 NSIS Build (Vic to Qeen)
 
 **Date**: 2026-11-14  
 **From**: Victor (Vic)  
 **To**: Qeen  
-**Task**: V-51 / V-52 / V-53 (Release Candidate 0.3.0 with Cover Badge, V-53 UTF-8 BOM Fix, and UTC+7 Timezone Standardization)  
+**Task**: V-51 / V-52 / V-53 / V-54 (Release Candidate 0.3.0 with Cover Badge, V-53 UTF-8 BOM Fix, UTC+7 Timezone Standardization, and V-54 Server Row Hide When Connected OK)  
 **Execution Context**: Execution of steps 1, 2, 6 of `Current execution handoff — V/Q-RELEASE-CURRENT` in `docs/implementation-plan.md`  
-**Approval**: Zon approved 2026-11-13 (P0 release candidate prioritized; version 0.3.0), 2026-11-14 ("Vào 0.3.0" for Task V-52 Cover badge & server integration), 2026-11-14 (Task V-53 UTF-8 BOM and validation fix), and 2026-11-14 (V-53 UTC+7 Vietnam timezone standardization)  
+**Approval**: Zon approved 2026-11-13 (P0 release candidate prioritized; version 0.3.0), 2026-11-14 ("Vào 0.3.0" for Task V-52 Cover badge & server integration), 2026-11-14 (Task V-53 UTF-8 BOM and validation fix), 2026-11-14 (V-53 UTC+7 Vietnam timezone standardization), and 2026-11-14 (Task V-54 Ẩn ô Server khi kết nối OK)  
 **Branch**: `vic/release-candidate`  
 **Base Commit**: `f3e959d` (origin/main) merged with `6e652c3` (origin/main SecuriteInfo docs)  
 **Status**: READY FOR QEEN TESTING (Pushed branch `vic/release-candidate`; DO NOT push or merge to `main`)  
@@ -14,8 +14,8 @@
 
 ## 1. Source & Build Environment Identity
 
-- **Branch**: `vic/release-candidate` (includes V-51 release candidate, 0.3.0 version bump `80d2a7a`, merge of `origin/main` `6e652c3`, Task V-52 Cover badge, Task V-53 BOM/validation fix, and V-53 UTC+7 standardization)
-- **Worktree**: `E:\Zonendpoint-worktrees\v53-tz`
+- **Branch**: `vic/release-candidate` (includes V-51 release candidate, 0.3.0 version bump `80d2a7a`, merge of `origin/main` `6e652c3`, Task V-52 Cover badge, Task V-53 BOM/validation fix, V-53 UTC+7 standardization, and Task V-54 Server row visibility)
+- **Worktree**: `E:\Zonendpoint-worktrees\v54-server-row`
 - **Toolchain**:
   - `rustc`: 1.99.1 (58cf8f9c3 2026-10-13)
   - `cargo`: 1.99.1 (5f94df478 2026-08-27)
@@ -41,8 +41,8 @@
   - Built Path: `src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\Zonendpoint_0.3.0_x64-setup.exe`
   - Staged Path: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe`
   - Checksum Path: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe.sha256`
-  - Size: 3,715,539 bytes (~3.54 MiB)
-  - SHA256: `A6797CA3FAA4DCD4A62D2FD71E225D27F720250B776A724DE2AC0A57405D394F`
+  - Size: 3,716,290 bytes (~3.54 MiB)
+  - SHA256: `8AF8B82DEC059D138338DA880DB41BA2E2D54950ADDC33E6690430AB3B90F426`
   - Version: `0.3.0`
   - NSIS Generator Version: `v3.13`
   - Code Signing: Unsigned (not code-signed; no release tag / publish performed)
@@ -82,11 +82,24 @@
   - Always displays cover count directly on the badge: `"Cover: 8,616,497"`.
   - Tooltip: `"ClamAV signatures on server (loaded 14/11/2026 11:41 (UTC+7)), synced 14/11/2026 11:45 (UTC+7)"`. Displayed strictly in `DD/MM/YYYY HH:mm (UTC+7)` format regardless of the client machine's Windows locale/timezone settings.
 
+### D. Server Configuration Row Visibility (Task V-54)
+- **Automatic Hide When Connected OK**: When the daemon connection is healthy (`serverStatus === "connected"`), the Server configuration row (`#server-address-input` and `.server-save-btn`) is automatically hidden to keep the interface clean and focused.
+- **Initial Connection Check**: During initial startup and preflight (`serverStatus === "checking"`), the server row is not displayed to prevent visual flicker.
+- **Automatic Show on Connection Failure**: When connection fails or is lost (`serverStatus === "disconnected"` or error notice displayed), the Server configuration row automatically becomes visible so the user can easily reconfigure the address and save.
+- **Manual Toggle via Status Button**:
+  - When connected, clicking the server status button (green checkmark icon) toggles manual visibility (`showServerManual`).
+  - Button `title` and `aria-label` dynamically reflect action: `"Show server settings"` when row is hidden; `"Hide server settings"` when row is visible. Fully accessible via keyboard.
+- **Focus Preservation**:
+  - If the user is actively typing in `#server-address-input` (`isServerInputFocused`), the row remains visible even if background re-checks or state changes occur. It never disappears out from under the user's cursor.
+  - Upon successful save/reconnect, if focused, the input is programmatically blurred and hidden cleanly.
+- **Layout & Responsiveness**:
+  - Compact window geometry (800x240) preserved across both Light and Dark themes.
+
 ---
 
 ## 4. Pre-Build Quality Gates Verification
 
-All tests run against worktree `v53-tz` at version 0.3.0:
+All tests run against worktree `v54-server-row` at version 0.3.0:
 
 | Gate | Command | Result | Notes |
 |---|---|---|---|
@@ -94,7 +107,7 @@ All tests run against worktree `v53-tz` at version 0.3.0:
 | Rust Unit & Resilience | `cargo test` | **PASS** | **81/81 PASS** (62 lib, 1 bin, 18 resilience; 11 server_status tests including anti-skew 7h test) |
 | Rust Clippy | `cargo clippy --all-targets -- -D warnings` | **PASS** | 0 warnings |
 | Frontend Build | `npm.cmd run build` | **PASS** | Vite v8.3.5, 23 modules, 0 TS/CSS errors |
-| Native Test Suite | `node tests/native/run.mjs` | **PASS** | **21/21 checks PASS** (UI verified displaying `v0.3.0` & `Cover: 8,616,464` with UTF-8 BOM mock file and `(UTC+7)` tooltip; V-30 window close idle & active scan, 0 orphan processes) |
+| Native Test Suite | `node tests/native/run.mjs` | **PASS** | **21/21 checks PASS** (Verified: 1) connected OK -> server row hidden, 2) offline/fail -> server row visible, 3) icon click -> toggle show/hide; V-30 window close clean exit with 0 orphans) |
 
 ---
 
@@ -129,15 +142,6 @@ Inspection of the Tauri v2 NSIS uninstaller template (`Section Uninstall`):
 4. Verify actual native File and Folder dialogs (including Cancel/Unicode paths), initial Quick scan scope, Manual Scan return, Stop→Stopping→rescan, theme/icon persistence, and bounded result window.
 5. Verify sandbox install/repair/uninstall and data preservation for artifact `A6797CA3...`.
 6. Record logs and evidence in `docs/qa/` and `E:\Zonendpoint-tools\artifacts\`.
-
----
-
-## 7. Scope & Limitations
-
-- Unsigned NSIS installer; SmartScreen / Defender warning expected on untrusted machine.
-- Microsoft Defender blocks raw EICAR string in transit; use harmless lab-signature procedure for positive detection tests.
-- Guard is explicitly excluded from this release candidate (deferred to v1.1).
-- No tag created, no merge to `main`.
 
 ---
 
