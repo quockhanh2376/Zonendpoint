@@ -1,36 +1,88 @@
-# Hướng dẫn kết nối Client ZonEndpoint & Tunnel Lab
+# Hướng dẫn kết nối Client ZonEndpoint & Tunnel Lab (Bảo mật V-59 / X-2)
 
-Tài liệu vận hành ngắn gọn cho máy trạm Windows của anh Zon: quản lý SSH tunnel tự động và cấu hình địa chỉ server trong ứng dụng.
+Tài liệu vận hành cho máy trạm Windows của anh Zon: quản lý SSH tunnel tự động với tài khoản giới hạn, cấu hình linh hoạt không lộ IP/user trong code (X-3), và cấu hình địa chỉ server trong ứng dụng.
 
 ---
 
-## 1. SSH Tunnel tự động chạy khi đăng nhập
+## 1. Kiến trúc bảo mật khóa SSH Tunnel (Task V-59 / X-2)
 
-Hệ thống cung cấp Scheduled Task chạy dưới quyền người dùng hiện tại (không cần quyền Administrator, không hiển thị cửa sổ console).
+Trước đây (Q-42), tunnel sử dụng khóa quản trị `~/.ssh/zonendpoint_lab` của tài khoản `admzon` (có toàn quyền `sudo NOPASSWD: ALL` và shell đầy đủ).
+
+Từ bản cập nhật V-59:
+- Kết nối tunnel và đồng bộ trạng thái sử dụng tài khoản hệ thống chuyên biệt **`zontunnel`** trên lab server.
+- Sử dụng **hai cặp khóa Ed25519 riêng biệt**, phân quyền tối thiểu theo nguyên tắc least privilege:
+  1. **Khóa Tunnel (`zonendpoint_tunnel`)**: Chỉ được phép chuyển tiếp cổng tới `127.0.0.1:3310` (ClamAV TCP). Mọi yêu cầu mở shell tương tác hoặc chạy lệnh từ xa đều bị từ chối (`command="/usr/bin/false"`).
+  2. **Khóa Trạng thái (`zonendpoint_status`)**: Chỉ được phép đọc file chữ ký (`command="cat /var/lib/zonendpoint/status/signatures.json"`). Bị cấm chuyển tiếp cổng và cấm chạy bất kỳ lệnh nào khác.
+
+---
+
+## 2. Tạo khóa & Phân quyền trên Windows Client
+
+Nếu cài đặt trên máy trạm mới, tạo 2 khóa Ed25519 không passphrase trong PowerShell:
+```powershell
+ssh-keygen -t ed25519 -N '""' -f "$env:USERPROFILE\.ssh\zonendpoint_tunnel" -C "zonendpoint_tunnel"
+ssh-keygen -t ed25519 -N '""' -f "$env:USERPROFILE\.ssh\zonendpoint_status" -C "zonendpoint_status"
+```
+
+Khóa bảo mật ACL chỉ cho phép duy nhất người dùng hiện tại truy cập:
+```powershell
+icacls "$env:USERPROFILE\.ssh\zonendpoint_tunnel" /inheritance:r /grant:r "${env:USERNAME}:F"
+icacls "$env:USERPROFILE\.ssh\zonendpoint_status" /inheritance:r /grant:r "${env:USERNAME}:F"
+```
+
+Đưa public key lên file `~zontunnel/.ssh/authorized_keys` trên server (thực hiện bởi quản trị viên lab):
+```text
+restrict,port-forwarding,permitopen="127.0.0.1:3310",command="/usr/bin/false" <NỘI_DUNG_zonendpoint_tunnel.pub>
+restrict,command="cat /var/lib/zonendpoint/status/signatures.json" <NỘI_DUNG_zonendpoint_status.pub>
+```
+
+---
+
+## 3. Cấu hình Tunnel (`tunnel-config.json` — X-3)
+
+Tất cả thông tin nhạy cảm (địa chỉ IP máy chủ, tên tài khoản, đường dẫn khóa) được đưa ra file cấu hình ngoài:
+`%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel-config.json`
+
+File mẫu có sẵn tại `scripts\windows\tunnel-config.example.json`:
+```json
+{
+  "host": "100.96.250.245",
+  "user": "zontunnel",
+  "tunnel_key": "%USERPROFILE%\\.ssh\\zonendpoint_tunnel",
+  "status_key": "%USERPROFILE%\\.ssh\\zonendpoint_status",
+  "local_port": 13310,
+  "remote_port": 3310
+}
+```
+
+> **Lưu ý**: Script `zon-tunnel.ps1` sẽ kiểm tra file này lúc khởi động. Nếu thiếu file cấu hình hoặc thiếu bất kỳ trường bắt buộc nào, script sẽ báo lỗi rõ ràng và dừng lại.
+
+---
+
+## 4. Cài đặt Scheduled Task tự động
 
 ### Cài đặt Task
 Chạy PowerShell với quyền người dùng thông thường:
 ```powershell
 powershell -ExecutionPolicy Bypass -File "scripts\windows\install-tunnel-task.ps1"
 ```
-- **Hành động**: Sao chép `zon-tunnel.ps1` vào `%LOCALAPPDATA%\ZonEndpoint\tunnel\zon-tunnel.ps1`, tự dọn file cũ ở thư mục gốc và đăng ký Scheduled Task `ZonEndpointTunnel`.
-- **Kích hoạt**: Tự động chạy khi người dùng đăng nhập Windows (`At logon`), khởi chạy ngay lập tức sau khi đăng ký.
-- **Giám sát tự động**: Tự động kết nối lại khi SSH rớt mạng với thuật toán backoff (5s → 10s → 20s → 40s → tối đa 60s). Nếu phiên kết nối ổn định ≥ 30 giây, backoff được đặt lại về 5s.
-- **Lệnh SSH thực thi**:
-  ```powershell
-  ssh -i "$env:USERPROFILE\.ssh\zonendpoint_lab" -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -N -L 127.0.0.1:13310:127.0.0.1:3310 admzon@100.96.250.245
-  ```
-- **Nhật ký (Log)**: Ghi ngắn gọn vào `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log`. Tự động xoay vòng sang `tunnel.log.1` khi vượt quá 256 KB. Tuyệt đối không ghi thông tin nhạy cảm hoặc khóa bí mật.
+- **Hành động**:
+  - Sao chép `zon-tunnel.ps1` vào `%LOCALAPPDATA%\ZonEndpoint\tunnel\zon-tunnel.ps1`.
+  - Sao chép `tunnel-config.example.json` sang thư mục tunnel. Nếu chưa có `tunnel-config.json`, script sẽ tạo bản sao ban đầu để người dùng chỉnh sửa.
+  - Tự dọn các file cũ ở thư mục gốc `%LOCALAPPDATA%\ZonEndpoint\`.
+  - Đăng ký Scheduled Task `ZonEndpointTunnel` chạy ẩn khi đăng nhập (`At logon`).
+  - **Tự động phục hồi (S-9)**: Cấu hình `RestartCount = 3` và `RestartInterval = 1 phút` trong settings của task.
+- **Giám sát tự động**:
+  - Tự động kết nối lại khi SSH rớt mạng với thuật toán exponential backoff (5s → 10s → 20s → 40s → tối đa 60s; reset về 5s nếu kết nối ổn định ≥ 30 giây).
+  - Định kỳ ~15 phút đồng bộ trạng thái chữ ký từ server vào `%LOCALAPPDATA%\ZonEndpoint\server-status.json` chạy nền không làm gián đoạn tunnel chính.
+- **Nhật ký (Log)**: Ghi vào `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log`. Tự động xoay vòng sang `tunnel.log.1` khi vượt quá 256 KB. Không ghi khóa bí mật.
 
-### Gỡ bỏ Task
-Khi cần tạm dừng hoặc gỡ bỏ tunnel tự động:
+### Kiểm tra thử đồng bộ trạng thái (-SyncOnce)
 ```powershell
-powershell -ExecutionPolicy Bypass -File "scripts\windows\uninstall-tunnel-task.ps1"
+powershell -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\ZonEndpoint\tunnel\zon-tunnel.ps1" -SyncOnce
 ```
-Script sẽ hủy đăng ký Scheduled Task và dừng toàn bộ tiến trình giám sát PowerShell cũng như tiến trình SSH liên quan.
 
-### Kiểm tra trạng thái Tunnel
-Kiểm tra ping ClamAV qua tunnel:
+### Kiểm tra ping ClamAV qua tunnel
 ```powershell
 $client = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 13310)
 $stream = $client.GetStream()
@@ -43,31 +95,51 @@ $client.Close()
 ```
 Kết quả mong muốn: `PONG`.
 
+### Gỡ bỏ Task
+```powershell
+powershell -ExecutionPolicy Bypass -File "scripts\windows\uninstall-tunnel-task.ps1"
+```
+
 ---
 
-## 2. Cài đặt địa chỉ Server trong ứng dụng ZonEndpoint
+## 5. Cài đặt địa chỉ Server trong ứng dụng ZonEndpoint
 
 Ứng dụng cho phép thiết lập và lưu trữ địa chỉ máy chủ ClamAV trực tiếp từ giao diện người dùng.
 
-### Vị trí cấu hình & Thứ tự ưu tiên
-Địa chỉ máy chủ kết nối được xác định theo thứ tự ưu tiên giảm dần:
+### Thứ tự ưu tiên cấu hình
 1. **Biến môi trường `ZONENDPOINT_CLAMD`**: Nếu biến này được thiết lập và không rỗng, ứng dụng luôn ưu tiên sử dụng địa chỉ từ biến này (giao diện hiển thị huy hiệu `ENV ACTIVE`).
-2. **Cài đặt đã lưu trong ứng dụng**: Lưu tại file JSON cấu hình `%LOCALAPPDATA%\ZonEndpoint\config.json`.
-3. **Mặc định**: `127.0.0.1:13310` (cổng chuyển tiếp mặc định của tunnel phòng lab).
+2. **Cài đặt trong ứng dụng**: Lưu tại `%LOCALAPPDATA%\ZonEndpoint\config.json`.
+3. **Mặc định**: `127.0.0.1:13310` (cổng tunnel cục bộ).
 
 ### Quy tắc an toàn IP riêng tư (Private IP Rule)
-Để đảm bảo an toàn, ứng dụng chỉ cho phép kết nối tới:
+Ứng dụng chỉ cho phép kết nối tới:
 - Địa chỉ loopback IPv4/IPv6 (`127.0.0.0/8`, `::1`).
 - Mạng nội bộ riêng tư RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
-- Dải mạng VPN / CGNAT Tailscale (`100.64.0.0/10`, ví dụ `100.96.250.245`).
-- Địa chỉ link-local và IPv6 unique local.
+- Dải mạng VPN Tailscale (`100.64.0.0/10`).
+- Từ chối mọi địa chỉ Public IP trên Internet.
 
-Ứng dụng **từ chối mọi địa chỉ IP công cộng (Public IP)** hoặc tên miền công cộng để ngăn ngừa việc rò rỉ dữ liệu hoặc phơi clamd ra Internet.
+---
 
-### Thao tác đổi địa chỉ trên giao diện
-1. Mở ZonEndpoint.
-2. Tại hàng **Server**, nhập địa chỉ IP và cổng (ví dụ: `127.0.0.1:13310` hoặc `100.96.250.245:3310`).
-3. Bấm **Save**.
-4. Ứng dụng kiểm tra tính hợp lệ của IP, ghi vào file cấu hình và **lập tức kiểm tra lại kết nối** với máy chủ.
-   - Nếu kết nối thành công: Icon trạng thái hiển thị dấu tick xanh (✓) và thông báo `Connected to <địa chỉ>`.
-   - Nếu kết nối thất bại: Icon trạng thái chuyển sang dấu chéo đỏ (✕) và thông báo lỗi tương ứng.
+## 6. Quy trình Rollback
+
+Nếu gặp sự cố và cần quay lại cấu hình cũ:
+
+### Rollback phía Client Windows:
+1. Dừng Scheduled Task:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File "scripts\windows\uninstall-tunnel-task.ps1"
+   ```
+2. Khôi phục lại bản `zon-tunnel.ps1` và `install-tunnel-task.ps1` từ commit trước (`908535e`).
+3. Chạy lại `install-tunnel-task.ps1` cũ để tiếp tục dùng khóa `zonendpoint_lab` với user `admzon`.
+
+### Rollback phía Lab Server:
+1. Khôi phục `/etc/ssh/sshd_config` từ bản sao lưu:
+   ```bash
+   sudo cp -p /etc/ssh/sshd_config.bak-20261114-v59 /etc/ssh/sshd_config
+   sudo sshd -t
+   sudo systemctl reload ssh
+   ```
+2. (Tùy chọn) Xóa tài khoản `zontunnel`:
+   ```bash
+   sudo userdel -r zontunnel
+   ```

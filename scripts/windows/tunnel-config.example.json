@@ -1,0 +1,8 @@
+{
+  "host": "10.0.0.1",
+  "user": "zontunnel",
+  "tunnel_key": "%USERPROFILE%\\.ssh\\zonendpoint_tunnel",
+  "status_key": "%USERPROFILE%\\.ssh\\zonendpoint_status",
+  "local_port": 13310,
+  "remote_port": 3310
+}

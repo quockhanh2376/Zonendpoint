@@ -300,3 +300,25 @@
   - `cargo test`: **10 / 10 lượt liên tiếp PASS 100% (810/810 test runs PASS)**.
   - `npm.cmd run build`: PASS (Vite + TS 0 lỗi).
 - Bàn giao: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+## 2026-11-14 - V-59 (Giới hạn tài khoản SSH Tunnel trên Lab - X-2 / X-3 / S-9)
+- Thực hiện theo phê duyệt của anh Zon ngày 2026-11-14 sau khi Q-42 xác thực X-2: khóa tunnel trên client trước đây dùng tài khoản admzon không có hạn chế, có quyền sudo NOPASSWD ALL.
+- Phía Lab Server:
+  - Tạo tài khoản hệ thống chuyên biệt `zontunnel` (`uid=995, gid=983`), shell `/bin/sh`, mật khẩu khóa (`passwd -l`), không thuộc các group `sudo`, `adm`, `clamav`.
+  - Phân quyền `~zontunnel/.ssh` (0700) và `authorized_keys` (0600) với 2 khóa riêng biệt:
+    - Khóa tunnel: `restrict,port-forwarding,permitopen="127.0.0.1:3310",command="/usr/bin/false"`
+    - Khóa status: `restrict,command="cat /var/lib/zonendpoint/status/signatures.json"`
+  - Thêm khối `Match User zontunnel` vào cuối `/etc/ssh/sshd_config` (AuthenticationMethods publickey, PasswordAuthentication no, AllowTcpForwarding local, PermitOpen 127.0.0.1:3310, cấm TTY/X11/AgentForwarding).
+  - Sao lưu tại `/etc/ssh/sshd_config.bak-20261114-v59`, `sudo sshd -t` OK, reload sshd an toàn trong khi giữ phiên SSH hiện tại.
+- Phía Client Windows:
+  - Tạo 2 khóa Ed25519 tại `%USERPROFILE%\.ssh\zonendpoint_tunnel` và `zonendpoint_status`, ACL chỉ cho phép duy nhất người dùng hiện tại (`%USERNAME%:F`).
+  - Đưa thông tin IP, user, keys ra `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel-config.json` (X-3), tạo file mẫu `scripts/windows/tunnel-config.example.json` với dữ liệu giả lập.
+  - Cập nhật `zon-tunnel.ps1`: đọc cấu hình từ JSON; dùng tunnel key với `-N` và status key cho status sync; gộp hai bản sao Fetch-ServerStatus và Sync-Loop thành một hàm duy nhất (S-9).
+  - Cập nhật `install-tunnel-task.ps1`: bổ sung `RestartCount 3` và `RestartInterval 1 phút` (S-9); tự copy `tunnel-config.example.json` nếu chưa có file cấu hình.
+- Kiểm thử nghiệm thu (Bước 4 & 5):
+  - Kiểm thử trên cổng riêng **13311** (tuyệt đối không đụng cổng 13310 và task production của anh Zon).
+  - Tunnel key: -N -L 13311:3310 gửi `zPING` -> `PONG`, `zVERSION` -> `ClamAV 1.5.4/28183...` OK; mở shell và chạy `id` bị từ chối ngay (exit code 1); forward sang cổng 22 bị máy chủ chặn.
+  - Status key: lấy được JSON `signatures.json`; thử chạy lệnh khác (`id`) vẫn chỉ ra JSON; cấm chuyển tiếp cổng.
+  - zontunnel không thể sudo, cấm đăng nhập bằng mật khẩu.
+  - Thử nghiệm `zon-tunnel.ps1` với `LOCALAPPDATA` tạm: `-SyncOnce` ghi `server-status.json` thành công; supervisor nền kích hoạt tunnel 13311 và background sync thành công, `zPING` OK. Dọn dẹp tiến trình và cổng 13311 sạch sẽ sau khi thử.
+- Bàn giao: Tạo `docs/handoffs/tunnel-restrict-vic-to-qeen.md`, cập nhật `docs/ops/client-connect.md`, `scripts/server/README.md`. Nhánh `vic/tunnel-restrict`. Không merge main.

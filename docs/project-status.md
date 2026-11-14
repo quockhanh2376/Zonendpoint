@@ -415,3 +415,24 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - Đóng gói NSIS release: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,715,823 bytes, PE32+ x64, NSIS v3.13).
   - Installer SHA256: `fa0495faf4ae9faea6fc84fe962e6b5eac3be14ea789768490206d3b3c8c3e03`.
 - Bàn giao: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+## V-59 — Giới hạn tài khoản SSH Tunnel trên Lab (X-2 / X-3 / S-9, 2026-11-14)
+- Triển khai theo phê duyệt của anh Zon ngày 2026-11-14 khắc phục các lỗ hổng bảo mật và hoàn thiện cơ chế tunnel:
+  1. **X-2: Tài khoản SSH zontunnel giới hạn quyền tối thiểu trên lab server**:
+     - Tạo user hệ thống `zontunnel` (`uid=995, gid=983`), mật khẩu khóa (`passwd -l`), không thuộc nhóm `sudo`, `adm`, `clamav`.
+     - Cấu hình authorized_keys với 2 khóa riêng biệt:
+       - Tunnel key: `restrict,port-forwarding,permitopen="127.0.0.1:3310",command="/usr/bin/false"` (chỉ mở cổng ClamAV 3310, cấm shell và cấm chạy lệnh).
+       - Status key: `restrict,command="cat /var/lib/zonendpoint/status/signatures.json"` (chỉ đọc status, cấm chuyển tiếp cổng).
+     - Khối `Match User zontunnel` trong `/etc/ssh/sshd_config` (AuthenticationMethods publickey, PasswordAuthentication no, AllowTcpForwarding local, PermitOpen 127.0.0.1:3310, PermitTTY no, cấm TTY/X11/AgentForwarding).
+     - Sao lưu tại `/etc/ssh/sshd_config.bak-20261114-v59`, `sudo sshd -t` OK, reload an toàn.
+  2. **X-3: Tách thông tin nhạy cảm ra cấu hình client**:
+     - `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel-config.json` quản lý host, user, đường dẫn khóa, cổng cục bộ và cổng từ xa.
+     - `zon-tunnel.ps1` kiểm tra tính hợp lệ của file cấu hình lúc khởi động, không còn IP hay tài khoản hardcoded trong code.
+     - Cung cấp `scripts/windows/tunnel-config.example.json` với dữ liệu mẫu giả lập.
+  3. **S-9: Tối ưu script giám sát và tác vụ Scheduled Task**:
+     - Gộp hai khối lặp đồng bộ trạng thái `Fetch-ServerStatus` và `Sync-Loop` trong `zon-tunnel.ps1` thành một hàm duy nhất.
+     - `install-tunnel-task.ps1` thêm cấu hình tự phục hồi `RestartCount 3` và `RestartInterval 1 phút`, tự copy file mẫu cấu hình nếu chưa có.
+  4. **Kiểm thử nghiệm thu đầy đủ trên cổng 13311**:
+     - Toàn bộ 4 phép thử bước 4 và thử nghiệm script bước 5 đều đạt PASS 100%.
+     - Không can thiệp vào tunnel hay Scheduled Task production của anh Zon trên cổng 13310.
+- Bàn giao: Handoff [tunnel-restrict-vic-to-qeen.md](handoffs/tunnel-restrict-vic-to-qeen.md). Đẩy nhánh `vic/tunnel-restrict`. Không tag, không ký, không merge main.
