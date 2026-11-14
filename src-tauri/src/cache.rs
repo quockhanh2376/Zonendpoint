@@ -183,15 +183,21 @@ pub fn put(
 mod tests {
     use super::*;
     use crate::scanner::ScanStatus;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn test_path(label: &str) -> PathBuf {
+        let count = TEST_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "zonendpoint-{label}-{}-{nonce}.db",
+            "zonendpoint-{label}-{}-{count}-{nonce}.db",
             std::process::id()
         ))
     }

@@ -1,11 +1,11 @@
-# Handoff: Task V-51 / V-52 / V-53 / V-54 / V-55 — Release Candidate 0.3.0 NSIS Build (Vic to Qeen)
+# Handoff: Task V-51 / V-52 / V-53 / V-54 / V-55 / V-56 — Release Candidate 0.3.0 NSIS Build (Vic to Qeen)
 
 **Date**: 2026-11-14  
 **From**: Victor (Vic)  
 **To**: Qeen  
-**Task**: V-51 / V-52 / V-53 / V-54 / V-55 (Release Candidate 0.3.0 with Cover Badge, V-53 UTF-8 BOM Fix, UTC+7 Timezone Standardization, V-54 Server Row Hide When Connected OK, and V-55 Auto-Compact Window to Content Height)  
+**Task**: V-51 / V-52 / V-53 / V-54 / V-55 / V-56 (Release Candidate 0.3.0 with Cover Badge, V-53 UTF-8 BOM Fix, UTC+7 Timezone Standardization, V-54 Server Row Hide When Connected OK, V-55 Auto-Compact Window to Content Height, and V-56 Test Flake Elimination)  
 **Execution Context**: Execution of steps 1, 2, 6 of `Current execution handoff — V/Q-RELEASE-CURRENT` in `docs/implementation-plan.md`  
-**Approval**: Zon approved 2026-11-13 (P0 release candidate prioritized; version 0.3.0), 2026-11-14 ("Vào 0.3.0" for Task V-52 Cover badge & server integration), 2026-11-14 (Task V-53 UTF-8 BOM and validation fix), 2026-11-14 (V-53 UTC+7 Vietnam timezone standardization), 2026-11-14 (Task V-54 Ẩn ô Server khi kết nối OK), and 2026-11-14 (Task V-55 Co gọn cửa sổ sau scan All Good)  
+**Approval**: Zon approved 2026-11-13 (P0 release candidate prioritized; version 0.3.0), 2026-11-14 ("Vào 0.3.0" for Task V-52 Cover badge & server integration), 2026-11-14 (Task V-53 UTF-8 BOM and validation fix), 2026-11-14 (V-53 UTC+7 Vietnam timezone standardization), 2026-11-14 (Task V-54 Ẩn ô Server khi kết nối OK), 2026-11-14 (Task V-55 Co gọn cửa sổ sau scan All Good), and 2026-11-14 (Task V-56 Sửa test chập chờn trước khi chốt 0.3.0)  
 **Branch**: `vic/release-candidate`  
 **Base Commit**: `f3e959d` (origin/main) merged with `6e652c3` (origin/main SecuriteInfo docs)  
 **Status**: READY FOR QEEN TESTING (Pushed branch `vic/release-candidate`; DO NOT push or merge to `main`)  
@@ -14,8 +14,8 @@
 
 ## 1. Source & Build Environment Identity
 
-- **Branch**: `vic/release-candidate` (includes V-51 release candidate, 0.3.0 version bump `80d2a7a`, merge of `origin/main` `6e652c3`, Task V-52 Cover badge, Task V-53 BOM/validation fix, V-53 UTC+7 standardization, Task V-54 Server row visibility, and Task V-55 scan results window auto-compact)
-- **Worktree**: `E:\Zonendpoint-worktrees\v55-compact`
+- **Branch**: `vic/release-candidate` (includes V-51 release candidate, 0.3.0 version bump `80d2a7a`, merge of `origin/main` `6e652c3`, Task V-52 Cover badge, Task V-53 BOM/validation fix, V-53 UTC+7 standardization, Task V-54 Server row visibility, Task V-55 scan results window auto-compact, and Task V-56 test race elimination)
+- **Worktree**: `E:\Zonendpoint-worktrees\v56-test-flake`
 - **Toolchain**:
   - `rustc`: 1.99.1 (58cf8f9c3 2026-10-13)
   - `cargo`: 1.99.1 (5f94df478 2026-08-27)
@@ -115,19 +115,37 @@
     - Clean All Good results compact window: `innerHeight <= 300px` and empty space gap beneath the card `< 80px`.
   - Ran native test suite **2 consecutive times** (`node tests/native/run.mjs`): **21/21 PASS** on both runs with 0 flakes.
 
+### F. Elimination of Test Temporary Directory Race Conditions (Task V-56)
+- **Problem Statement (Q-41 Defect)**: In initial full `cargo test` run, `directory::tests::folder_scan_bounds_retained_results` failed once with `clean = 905` instead of `1002`. Reruns and isolated test runs passed.
+- **Root Cause Verified**:
+  - `test_dir()` in `src-tauri/src/directory.rs` previously named temporary directories using `zonendpoint-folder-{pid}-{nanos}` where `nanos` came from `SystemTime::now().as_nanos()`.
+  - When `cargo test` executes the test suite, Tokio runs asynchronous tests concurrently on a thread pool within the single test harness process (`std::process::id()`).
+  - Due to Windows clock resolution, concurrent tests starting at the exact same millisecond obtained the exact same `nanos`, resulting in multiple test threads writing files to the exact same directory on disk.
+  - When an earlier test (`folder_scan_marks_queued_items_cancelled`) finished early, it called `remove_dir_all(&root)`. This wiped files out of the shared directory while `folder_scan_bounds_retained_results` was actively iterating over the folder, prematurely cutting off file scanning at 905 items instead of 1002.
+- **Comprehensive Solution**:
+  - Introduced monotonically increasing `static AtomicU64` counters with `fetch_add(1, Ordering::Relaxed)` into the temporary folder and file path generation across all test modules in `src-tauri`:
+    1. `src-tauri/src/directory.rs`: `test_dir()` uses `static TEST_DIR_COUNTER: AtomicU64` -> `zonendpoint-folder-{pid}-{count}-{nanos}`.
+    2. `src-tauri/src/cache.rs`: `test_path()` uses `static TEST_PATH_COUNTER: AtomicU64` -> `zonendpoint-{label}-{pid}-{count}-{nanos}.db`.
+    3. `src-tauri/src/scanner.rs`: added `test_temp_dir()` helper with `static TEST_DIR_COUNTER: AtomicU64` for all 4 tests (`cache-race`, `offline`, `preflight-cache`, `oversize`).
+    4. `src-tauri/tests/resilience.rs`: `create_temp_test_dir()` uses `static TEST_DIR_COUNTER: AtomicU64` -> `zonendpoint-resilience-{name}-{pid}-{count}`.
+  - **Scope Protection**: 100% of modifications are strictly confined to test code (`#[cfg(test)]` modules and `tests/resilience.rs`). Zero production application code was modified.
+  - **Installer Invariant**: NSIS release candidate installer SHA256 (`FA0495FAF4AE9FAEA6FC84FE962E6B5EAC3BE14EA789768490206D3B3C8C3E03`) remains completely untouched and valid.
+- **Test Verification**:
+  - Ran `cargo test` for **10 consecutive full runs** on `v56-test-flake`: **10 / 10 PASS (810/810 total test runs without a single failure or flake)**.
+
 ---
 
 ## 4. Pre-Build Quality Gates Verification
 
-All tests run against worktree `v55-compact` at version 0.3.0:
+All tests run against worktree `v56-test-flake` at version 0.3.0:
 
 | Gate | Command | Result | Notes |
 |---|---|---|---|
 | Rust Formatting | `cargo fmt -- --check` | **PASS** | 0 diffs |
-| Rust Unit & Resilience | `cargo test` | **PASS** | **81/81 PASS** (62 lib, 1 bin, 18 resilience; 11 server_status tests including anti-skew 7h test) |
+| Rust Unit & Resilience | `cargo test` | **PASS** | **81/81 PASS (10/10 runs PASS consecutive, 810/810 tests executed)** (Verified 0 flakes across all parallel directory, cache, scanner, and resilience tests) |
 | Rust Clippy | `cargo clippy --all-targets -- -D warnings` | **PASS** | 0 warnings |
 | Frontend Build | `npm.cmd run build` | **PASS** | Vite v8.3.5, 23 modules, 0 TS/CSS errors |
-| Native Test Suite | `node tests/native/run.mjs` | **PASS** | **21/21 PASS (Run 1: PASS, Run 2: PASS)** (Verified: 1) connected OK -> server row hidden, 2) offline/fail -> server row visible, 3) icon click -> toggle show/hide; 4) All Good compact <= 300px with gap < 80px; 5) non-clean results expand > 300px; 6) V-30 window close clean exit with 0 orphans) |
+| Native Test Suite | `node tests/native/run.mjs` | **PASS** | **21/21 PASS** (Verified in V-55 / Q-41: 1) connected OK -> server row hidden, 2) offline/fail -> server row visible, 3) icon click -> toggle show/hide; 4) All Good compact <= 300px with gap < 80px; 5) non-clean results expand > 300px; 6) V-30 window close clean exit with 0 orphans) |
 
 ---
 

@@ -276,5 +276,27 @@
   - Installer SHA256: `fa0495faf4ae9faea6fc84fe962e6b5eac3be14ea789768490206d3b3c8c3e03`.
 - Bàn giao: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
 
+## 2026-11-14 - V-56 (Khắc phục race condition thư mục tạm trong unit/integration tests)
+- Thực hiện theo chỉ đạo của anh Zon ngày 2026-11-14 sau khi Q-41 phát hiện lỗi chập chờn: `directory::tests::folder_scan_bounds_retained_results` nhận 905 clean thay vì 1002 ở lượt chạy đầu tiên (chạy riêng và chạy lại đều PASS).
+- Xác minh nguyên nhân gốc rễ:
+  - `test_dir()` trong `directory.rs` trước đây sinh tên thư mục tạm theo `zonendpoint-folder-{pid}-{nanos}` (`SystemTime::now().as_nanos()`).
+  - Khi `cargo test` chạy đa luồng trong cùng tiến trình test runner, độ phân giải đồng hồ Windows khiến hai test khởi động cùng một tick mili-giây nhận được nonce giống hệt nhau, dẫn đến dùng chung thư mục tạm.
+  - Khi test khác (`folder_scan_marks_queued_items_cancelled`) kết thúc sớm và gọi `remove_dir_all(&root)`, các file trong thư mục bị xóa giữa lúc `folder_scan_bounds_retained_results` đang quét dở, làm số file clean dừng ở 905 thay vì 1002.
+- Giải pháp xử lý triệt để:
+  - Rà soát toàn bộ `src-tauri` và chuẩn hóa cơ chế sinh đường dẫn tạm: bổ sung biến đếm nguyên tử `static AtomicU64` với `fetch_add(1, Ordering::Relaxed)` vào tên thư mục/file tạm.
+  - Áp dụng trên 4 module:
+    1. `src-tauri/src/directory.rs`: `test_dir()` thêm `count` nguyên tử.
+    2. `src-tauri/src/cache.rs`: `test_path()` thêm `count` nguyên tử.
+    3. `src-tauri/src/scanner.rs`: bổ sung hàm helper `test_temp_dir()` với `count` nguyên tử cho cả 4 test.
+    4. `src-tauri/tests/resilience.rs`: `create_temp_test_dir()` thêm `count` nguyên tử.
+  - Phạm vi thay đổi: 100% nằm trong code test (`#[cfg(test)]` và file test `resilience.rs`). Tuyệt đối không thay đổi code ứng dụng; giữ nguyên bản cài installer `FA0495FA...3E03`.
+- Quality Gates:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo clippy --all-targets -- -D warnings`: PASS (0 warnings).
+  - `cargo test`: **10 / 10 lượt liên tiếp PASS 100% (810/810 test runs PASS)**.
+  - `npm.cmd run build`: PASS (Vite + TS 0 lỗi).
+- Bàn giao: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+
 
 
