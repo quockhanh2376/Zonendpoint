@@ -328,6 +328,7 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - Đã cài đặt, kích hoạt timer và kiểm chứng trực tiếp trên lab server.
 - Client Tunnel Supervisor:
   - Mở rộng `scripts/windows/zon-tunnel.ps1`: chạy runspace nền đồng bộ `/var/lib/zonendpoint/status/signatures.json` qua SSH mỗi ~15 phút về `%LOCALAPPDATA%\ZonEndpoint\server-status.json`.
+  - Tuân thủ nghiêm ngặt chỉ thị của Loki: cờ SSH non-interactive `-n -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2` cùng watchdog timeout 25s qua .NET Process, đảm bảo không bao giờ bị treo tiến trình hoặc socket rò rỉ.
   - Kiểm tra tính hợp lệ nghiêm ngặt (JSON, signatures int 0..1e9, ISO UTC timestamp), ghi nguyên tử; không làm gián đoạn vòng lặp `ssh -N`.
   - Đã test thử nghiệm bằng tiến trình tạm (`-SyncOnce`), ghi log tunnel sạch, không sửa Scheduled Task hiện tại của anh Zon.
 - App Backend & UI:
@@ -339,8 +340,8 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - `cargo clippy --all-targets -- -D warnings`: PASS.
   - `npm.cmd run build`: PASS.
   - `node tests/native/run.mjs`: **21/21 PASS** (thêm test Cover badge, 0 tiến trình mồ côi).
-  - Release build NSIS: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3.714.887 bytes, PE x64, NSIS v3.13).
-  - Installer SHA256: `117df7f33cc590c5642b51bc7803633f4e841abec5d45df2973938c8e08a0f5f`.
-  - App executable SHA256: `d6d71bc82e821e5e1302b97ca745bf91308e6f6d53ca79b58fdef7ebdfd89950`.
+  - Release build NSIS: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3.714.841 bytes, PE x64, NSIS v3.13).
+  - Installer SHA256: `b0f0f6a9e6a6737438aaeee166bc376c077dc53b6d36a0622325ee388ecf669f`.
+  - App executable SHA256: `ae223e2533e5925106c2e36ce5bc881622e6bade4587e03cff6607e7fd1276eb`.
 - Handoff: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy `vic/release-candidate`. Không tag, không ký, không merge main.
 

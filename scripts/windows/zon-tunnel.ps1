@@ -6,6 +6,8 @@
     Periodically synchronizes /var/lib/zonendpoint/status/signatures.json via SSH
     to %LOCALAPPDATA%\ZonEndpoint\server-status.json every ~15 minutes without
     interrupting the persistent tunnel connection.
+    Uses non-interactive SSH flags (-n, BatchMode, ConnectTimeout, ServerAliveInterval)
+    and an overall hard execution timeout to prevent process hangs.
     Logs events with rotation to %LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log (no secrets logged).
 #>
 
@@ -45,13 +47,53 @@ $remoteHost = "admzon@100.96.250.245"
 $localPort = 13310
 $remotePort = 3310
 $statusSyncIntervalSecs = 900 # 15 minutes
+$statusSyncTimeoutSecs = 25   # Hard overall timeout for status ssh call
+
+function Invoke-NonInteractiveSsh {
+    param(
+        [string]$Key,
+        [string]$HostTarget,
+        [string]$RemoteCommand,
+        [int]$TimeoutSeconds = 25
+    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "ssh"
+    $psi.Arguments = "-n -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -i `"$Key`" $HostTarget `"$RemoteCommand`""
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $outTask = $proc.StandardOutput.ReadToEndAsync()
+    $errTask = $proc.StandardError.ReadToEndAsync()
+
+    if ($proc.WaitForExit($TimeoutSeconds * 1000)) {
+        [System.Threading.Tasks.Task]::WaitAll($outTask, $errTask)
+        return @{
+            ExitCode = $proc.ExitCode
+            Output   = $outTask.Result
+            Error    = $errTask.Result
+            TimedOut = $false
+        }
+    } else {
+        try { $proc.Kill() } catch {}
+        return @{
+            ExitCode = -1
+            Output   = ""
+            Error    = "SSH status fetch exceeded hard timeout (${TimeoutSeconds}s)"
+            TimedOut = $true
+        }
+    }
+}
 
 function Fetch-ServerStatus {
     param(
         [string]$Key,
         [string]$HostTarget,
         [string]$TargetFile,
-        [string]$LogPath
+        [string]$LogPath,
+        [int]$TimeoutSeconds = 25
     )
 
     $writeLog = {
@@ -67,20 +109,17 @@ function Fetch-ServerStatus {
             return $false
         }
 
-        $sshOutput = & ssh -i $Key `
-            -o BatchMode=yes `
-            -o ConnectTimeout=10 `
-            -o ServerAliveInterval=5 `
-            -o ServerAliveCountMax=2 `
-            $HostTarget `
-            "cat /var/lib/zonendpoint/status/signatures.json" 2>$null
-
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sshOutput)) {
-            & $writeLog "Failed to retrieve status file from server (exit code $LASTEXITCODE)."
+        $res = Invoke-NonInteractiveSsh -Key $Key -HostTarget $HostTarget -RemoteCommand "cat /var/lib/zonendpoint/status/signatures.json" -TimeoutSeconds $TimeoutSeconds
+        if ($res.TimedOut) {
+            & $writeLog "SSH status fetch timed out after ${TimeoutSeconds}s."
+            return $false
+        }
+        if ($res.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($res.Output)) {
+            & $writeLog ("Failed to retrieve status file from server (exit code {0}): {1}" -f $res.ExitCode, $res.Error)
             return $false
         }
 
-        $rawText = ($sshOutput -join "`n").Trim()
+        $rawText = $res.Output.Trim()
         $json = $rawText | ConvertFrom-Json -ErrorAction Stop
 
         if ($null -eq $json.signatures) {
@@ -129,7 +168,7 @@ function Fetch-ServerStatus {
 
 if ($SyncOnce) {
     Write-TunnelLog "=== ZonEndpoint manual status fetch invoked ==="
-    $ok = Fetch-ServerStatus -Key $keyPath -HostTarget $remoteHost -TargetFile $statusFile -LogPath $logFile
+    $ok = Fetch-ServerStatus -Key $keyPath -HostTarget $remoteHost -TargetFile $statusFile -LogPath $logFile -TimeoutSeconds $statusSyncTimeoutSecs
     if ($ok) {
         Write-Output "Status fetch succeeded. Target: $statusFile"
         Get-Content $statusFile
@@ -153,10 +192,48 @@ $statusPs = [powershell]::Create()
 $statusPs.Runspace = $runspace
 
 $syncScript = {
-    param($keyPath, $remoteHost, $statusFile, $logFile, $intervalSecs)
+    param($keyPath, $remoteHost, $statusFile, $logFile, $intervalSecs, $timeoutSecs)
+
+    function Invoke-NonInteractiveSsh {
+        param(
+            [string]$Key,
+            [string]$HostTarget,
+            [string]$RemoteCommand,
+            [int]$TimeoutSeconds = 25
+        )
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "ssh"
+        $psi.Arguments = "-n -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -i `"$Key`" $HostTarget `"$RemoteCommand`""
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $outTask = $proc.StandardOutput.ReadToEndAsync()
+        $errTask = $proc.StandardError.ReadToEndAsync()
+
+        if ($proc.WaitForExit($TimeoutSeconds * 1000)) {
+            [System.Threading.Tasks.Task]::WaitAll($outTask, $errTask)
+            return @{
+                ExitCode = $proc.ExitCode
+                Output   = $outTask.Result
+                Error    = $errTask.Result
+                TimedOut = $false
+            }
+        } else {
+            try { $proc.Kill() } catch {}
+            return @{
+                ExitCode = -1
+                Output   = ""
+                Error    = "SSH status fetch exceeded hard timeout (${TimeoutSeconds}s)"
+                TimedOut = $true
+            }
+        }
+    }
 
     function Sync-Loop {
-        param($Key, $HostTarget, $TargetFile, $LogPath)
+        param($Key, $HostTarget, $TargetFile, $LogPath, $TimeoutSeconds)
         $writeLog = {
             param([string]$msg)
             $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
@@ -166,20 +243,17 @@ $syncScript = {
 
         try {
             if (-not (Test-Path $Key)) { return }
-            $sshOutput = & ssh -i $Key `
-                -o BatchMode=yes `
-                -o ConnectTimeout=10 `
-                -o ServerAliveInterval=5 `
-                -o ServerAliveCountMax=2 `
-                $HostTarget `
-                "cat /var/lib/zonendpoint/status/signatures.json" 2>$null
-
-            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sshOutput)) {
-                & $writeLog "Failed to retrieve status file from server (exit code $LASTEXITCODE)."
+            $res = Invoke-NonInteractiveSsh -Key $Key -HostTarget $HostTarget -RemoteCommand "cat /var/lib/zonendpoint/status/signatures.json" -TimeoutSeconds $TimeoutSeconds
+            if ($res.TimedOut) {
+                & $writeLog "SSH status fetch timed out after ${TimeoutSeconds}s."
+                return
+            }
+            if ($res.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($res.Output)) {
+                & $writeLog ("Failed to retrieve status file from server (exit code {0}): {1}" -f $res.ExitCode, $res.Error)
                 return
             }
 
-            $rawText = ($sshOutput -join "`n").Trim()
+            $rawText = $res.Output.Trim()
             $json = $rawText | ConvertFrom-Json -ErrorAction Stop
             if ($null -eq $json.signatures) { return }
             $sigVal = $json.signatures
@@ -204,17 +278,17 @@ $syncScript = {
     }
 
     # Initial sync on launch
-    Sync-Loop -Key $keyPath -HostTarget $remoteHost -TargetFile $statusFile -LogPath $logFile
+    Sync-Loop -Key $keyPath -HostTarget $remoteHost -TargetFile $statusFile -LogPath $logFile -TimeoutSeconds $timeoutSecs
 
     while ($true) {
         Start-Sleep -Seconds $intervalSecs
-        Sync-Loop -Key $keyPath -HostTarget $remoteHost -TargetFile $statusFile -LogPath $logFile
+        Sync-Loop -Key $keyPath -HostTarget $remoteHost -TargetFile $statusFile -LogPath $logFile -TimeoutSeconds $timeoutSecs
     }
 }
 
-[void]$statusPs.AddScript($syncScript).AddArgument($keyPath).AddArgument($remoteHost).AddArgument($statusFile).AddArgument($logFile).AddArgument($statusSyncIntervalSecs)
+[void]$statusPs.AddScript($syncScript).AddArgument($keyPath).AddArgument($remoteHost).AddArgument($statusFile).AddArgument($logFile).AddArgument($statusSyncIntervalSecs).AddArgument($statusSyncTimeoutSecs)
 $statusAsyncHandle = $statusPs.BeginInvoke()
-Write-TunnelLog "Started background server-status sync runspace (interval: ${statusSyncIntervalSecs}s)."
+Write-TunnelLog "Started background server-status sync runspace (interval: ${statusSyncIntervalSecs}s, timeout: ${statusSyncTimeoutSecs}s)."
 
 $backoff = 5
 $maxBackoff = 60

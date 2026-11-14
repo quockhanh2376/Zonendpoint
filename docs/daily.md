@@ -198,15 +198,15 @@
 - Merge nhánh `origin/main` (`6e652c3`) vào `vic/release-candidate` tại worktree `v52-cover`.
 - Triển khai thành công 3 tầng kiến trúc:
   - Server (lab): Viết script `zonendpoint-sigcount.py` + systemd timer `zonendpoint-sigcount.timer` (10 phút/lần, root). Đọc journal clamd dòng reload/load mới nhất, ghi nguyên tử `/var/lib/zonendpoint/status/signatures.json` quyền 0644. Đã cài đặt, kích hoạt timer và kiểm chứng thành công trên lab (`8,616,478 signatures`).
-  - Client supervisor: Mở rộng `scripts/windows/zon-tunnel.ps1` với background runspace định kỳ sync status qua SSH (~15 phút/lần) về `%LOCALAPPDATA%\ZonEndpoint\server-status.json`. Đảm bảo không làm gián đoạn tunnel chính. Đã thử nghiệm bằng tiến trình tạm `-SyncOnce` độc lập, không đụng tới Scheduled Task đang chạy của anh Zon.
+  - Client supervisor: Mở rộng `scripts/windows/zon-tunnel.ps1` với background runspace định kỳ sync status qua SSH (~15 phút/lần) về `%LOCALAPPDATA%\ZonEndpoint\server-status.json`. Áp dụng nghiêm ngặt cờ non-interactive SSH theo chỉ thị của Loki (`-n -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2`) cùng timeout cứng 25s qua .NET Process để chống treo tiến trình và triệt tiêu socket rò rỉ. Đảm bảo không làm gián đoạn tunnel chính. Đã thử nghiệm bằng tiến trình tạm `-SyncOnce` độc lập, không đụng tới Scheduled Task đang chạy của anh Zon.
   - App backend & UI: Module Rust `server_status.rs` đọc và kiểm tra nghiêm ngặt file status (kích thước <=64KB, signatures 0..1e9, stale nếu >2h). Giao diện frontend bổ sung badge `.brand-cover` ("Cover: 8,616,464", tooltip cập nhật, xử lý stale, hỗ trợ 2 theme và co giãn cửa sổ hẹp).
 - Kiểm thử & Chất lượng:
   - Rust tests: **77/77 PASS** (58 lib, 1 bin, 18 resilience).
   - Native tests: **21/21 PASS** (bổ sung test hiển thị Cover badge với file giả, xác nhận không rò rỉ tiến trình con khi đóng app V-30).
   - Clippy: 0 warnings; Fmt: PASS; Build frontend: PASS.
 - Đóng gói bản cài NSIS 0.3.0:
-  - `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3.714.887 bytes, PE32+ x64, NSIS v3.13).
-  - Installer SHA256: `117df7f33cc590c5642b51bc7803633f4e841abec5d45df2973938c8e08a0f5f`.
-  - App executable SHA256: `d6d71bc82e821e5e1302b97ca745bf91308e6f6d53ca79b58fdef7ebdfd89950`.
+  - `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3.714.841 bytes, PE32+ x64, NSIS v3.13).
+  - Installer SHA256: `b0f0f6a9e6a6737438aaeee166bc376c077dc53b6d36a0622325ee388ecf669f`.
+  - App executable SHA256: `ae223e2533e5925106c2e36ce5bc881622e6bade4587e03cff6607e7fd1276eb`.
 - Handoff & Đẩy nhánh: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không merge/push main.
 

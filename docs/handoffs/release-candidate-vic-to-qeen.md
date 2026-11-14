@@ -35,13 +35,13 @@
 - **Application Executable**:
   - Path: `src-tauri\target\x86_64-pc-windows-msvc\release\zonendpoint.exe`
   - PE Machine: `0x8664` (PE32+ x64 / AMD64)
-  - SHA256: `D6D71BC82E821E5E1302B97CA745BF91308E6F6D53CA79B58FDEF7EBDFD89950`
+  - SHA256: `AE223E2533E5925106C2E36CE5BC881622E6BADE4587E03CFF6607E7FD1276EB`
 - **NSIS Installer Artifact**:
   - Built Path: `src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\Zonendpoint_0.3.0_x64-setup.exe`
   - Staged Path: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe`
   - Checksum Path: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe.sha256`
-  - Size: 3,714,887 bytes (~3.54 MiB)
-  - SHA256: `117DF7F33CC590C5642B51BC7803633F4E841ABEC5D45DF2973938C8E08A0F5F`
+  - Size: 3,714,841 bytes (~3.54 MiB)
+  - SHA256: `B0F0F6A9E6A6737438AAEEE166BC376C077DC53B6D36A0622325EE388ECF669F`
   - Version: `0.3.0`
   - NSIS Generator Version: `v3.13`
   - Code Signing: Unsigned (not code-signed; no release tag / publish performed)
@@ -78,6 +78,8 @@
 - **Script**: `scripts/windows/zon-tunnel.ps1`
   - Starts an independent background PowerShell Runspace upon launch.
   - Synchronizes `/var/lib/zonendpoint/status/signatures.json` to `%LOCALAPPDATA%\ZonEndpoint\server-status.json` every ~15 minutes via SSH with the same key (`~/.ssh/zonendpoint_lab`).
+  - Strict non-interactive SSH flags per Loki directive: `ssh -n -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -i <key> admzon@100.96.250.245 "cat /var/lib/zonendpoint/status/signatures.json"`.
+  - Process execution watchdog: 25-second hard execution timeout enforced via `[System.Diagnostics.Process]::WaitForExit(25000)`; kills unresponsive SSH processes cleanly to prevent hanging the background runspace or tunnel loop.
   - Strict validation: valid JSON, integer signatures `0..1e9`, valid ISO 8601 UTC timestamp.
   - Atomic write via temporary file; errors logged to `%LOCALAPPDATA%\ZonEndpoint\tunnel\tunnel.log` without exposing secrets or key paths.
   - Zero disruption to the main thread's blocking `ssh -N -L` tunnel.
@@ -116,7 +118,7 @@ All tests run against worktree `v52-cover` at version 0.3.0:
 2. Run installation tests in dedicated sandbox (`E:\Zonendpoint-tools\installer-sandbox\app`) — **DO NOT install, overwrite, or uninstall Zon's active production app**.
 3. Verify Cover badge behavior with mock and real `server-status.json` in both themes.
 4. Verify actual native File and Folder dialogs (including Cancel/Unicode paths), initial Quick scan scope, Manual Scan return, Stop→Stopping→rescan, theme/icon persistence, and bounded result window.
-5. Verify sandbox install/repair/uninstall and data preservation for artifact `117DF7F3...`.
+5. Verify sandbox install/repair/uninstall and data preservation for artifact `B0F0F6A9...`.
 6. Record logs and evidence in `docs/qa/` and `E:\Zonendpoint-tools\artifacts\`.
 
 ---
