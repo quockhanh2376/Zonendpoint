@@ -678,6 +678,61 @@ mod tests {
         let _ = std::fs::remove_dir_all(other_root);
     }
 
+    #[cfg(windows)]
+    fn is_process_elevated() -> bool {
+        use std::ffi::c_void;
+
+        #[link(name = "advapi32")]
+        unsafe extern "system" {
+            fn OpenProcessToken(
+                process_handle: *mut c_void,
+                desired_access: u32,
+                token_handle: *mut *mut c_void,
+            ) -> i32;
+            fn GetTokenInformation(
+                token_handle: *mut c_void,
+                token_information_class: u32,
+                token_information: *mut c_void,
+                token_information_length: u32,
+                return_length: *mut u32,
+            ) -> i32;
+        }
+
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetCurrentProcess() -> *mut c_void;
+            fn CloseHandle(handle: *mut c_void) -> i32;
+        }
+
+        const TOKEN_QUERY: u32 = 0x0008;
+        const TOKEN_ELEVATION: u32 = 20;
+
+        #[repr(C)]
+        struct TokenElevation {
+            token_is_elevated: u32,
+        }
+
+        unsafe {
+            let mut token: *mut c_void = std::ptr::null_mut();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+                return false;
+            }
+            let mut elevation = TokenElevation {
+                token_is_elevated: 0,
+            };
+            let mut ret_len: u32 = 0;
+            let ok = GetTokenInformation(
+                token,
+                TOKEN_ELEVATION,
+                &mut elevation as *mut _ as *mut c_void,
+                std::mem::size_of::<TokenElevation>() as u32,
+                &mut ret_len,
+            );
+            let _ = CloseHandle(token);
+            ok != 0 && elevation.token_is_elevated != 0
+        }
+    }
+
     /// (d) Folder scan of drivers still reports the denied subdir
     #[tokio::test]
     #[cfg(windows)]
@@ -697,6 +752,13 @@ mod tests {
             // Normal folder scan has NO exclusions
             let summary =
                 scan_directory(real_drivers.clone(), cancel, scan, Box::new(|_, _| {})).await;
+
+            if is_process_elevated() {
+                println!(
+                    "Skipping DriverData access-denied assertions: test process is elevated (Administrator)"
+                );
+                return;
+            }
 
             // Must be incomplete because DriverData has SYSTEM-only ACL (os error 5)
             assert!(

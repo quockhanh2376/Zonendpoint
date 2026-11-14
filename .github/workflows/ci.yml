@@ -101,7 +101,10 @@ jobs:
         if: always()
         run: which cargo-audit || cargo install cargo-audit --locked
 
+      # Ignore known libsqlite3-sys vulnerability RUSTSEC-2026-0459 (CVE-2026-119375) on this branch;
+      # upgrade is scheduled for client 0.3.1 branch (Task V-61 / client 0.3.1 upgrade).
+      # Warnings (unmaintained/unsound/yanked) are reported without failing the job.
       - name: cargo audit
         if: always()
         working-directory: src-tauri
-        run: cargo audit
+        run: cargo audit --ignore RUSTSEC-2026-0459

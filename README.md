@@ -9,7 +9,7 @@ private VPN).
 
 ## What it does
 
-- Starts with Quick scan for13 native Windows core files and the System32/drivers subtree. This is a limited file scan, not a full-system, memory or boot-integrity verdict. Selecting File/Folder changes the action to Scan; the target menu can return to Quick scan.
+- Starts with Quick scan for 13 native Windows core files and the System32/drivers subtree. This is a limited file scan, not a full-system, memory or boot-integrity verdict. Selecting File/Folder changes the action to Scan; the target menu can return to Quick scan.
 - Opens the native Windows picker for one file or folder.
 - Streams files to a ClamAV daemon with bounded `zINSTREAM` frames.
 - Shows per-file `CLEAN`, `INFECTED`, `UNKNOWN`, `ERROR`, `SKIPPED`, and
@@ -49,6 +49,6 @@ fixtures. Do not point this client at a production endpoint as part of
 development. If no lab daemon is available, real-engine integration is NOT
 RUN; protocol regression tests use a local mock daemon.
 
-Build the supported Windows x64 NSIS package with `npm.cmd run build:windows`. No32-bit/ARM Windows app package is supported; scanned file contents are not architecture-filtered. Native WebView/IPC launch, package identity, resource measurements and ClamAV integration require separate verification.
+Build the supported Windows x64 NSIS package with `npm.cmd run build:windows`. No 32-bit/ARM Windows app package is supported; scanned file contents are not architecture-filtered. Native WebView/IPC launch, package identity, resource measurements and ClamAV integration require separate verification.
 
 Start development/QA sessions at [project status](docs/project-status.md), then read [scope](docs/v1.0.0-scope.md). See [roadmap](docs/roadmap.md) for current priorities and [implementation plan](docs/implementation-plan.md) for task acceptance. Current product code and older installer evidence must not be conflated.
