@@ -1,12 +1,20 @@
 # Project status — 2026-11-14
 
-Phase: Zonendpoint 0.3.1 client optimizations and security hardening (Task V-57 per `optimisse.md`), branch `vic/031-client` (base `origin/main 908535e`, tag `v0.3.0`). Handoff: [v031-client-vic-to-qeen.md](handoffs/v031-client-vic-to-qeen.md).
+Phase: Zonendpoint 0.3.1 client performance optimization and stage timings (Task V-61 per `optimisse.md`), branch `vic/031-perf` (base `origin/vic/031-client` @ `e35f4d7`, tip V-57). Handoff: [perf-031-vic-to-qeen.md](handoffs/perf-031-vic-to-qeen.md).
 
 ## Active checkout/snapshot
-- Implementation: branch `vic/031-client` (base `origin/main 908535e`).
+- Implementation: branch `vic/031-perf` (base `origin/vic/031-client` @ `e35f4d7`).
 - Version: `0.3.1`.
-- Scope: 8 prioritized client optimization and security items from `optimisse.md` (S-1, S-7, S-6, X-5, X-7, S-4, P-1, S-5, P-5, X-6).
-- Completed items:
+- Scope: Client performance optimization items from `optimisse.md` (P-4 measurement, P-2, P-3, P-6, P-7, S-10, IDSESSION analysis).
+- Completed items in V-61:
+  1. **P-4 measurement**: Per-file stage timings across 7 stages (`wait_limiter`, `open_and_hash`, `cache_lookup`, `tcp_connect`, `send_instream`, `clamd_wait`, `cache_write`) using zero-overhead `Instant`; `folder_bench` enhanced with sum, p50, p95, max statistics. Documented in [perf-stages-0.3.1.md](qa/perf-stages-0.3.1.md).
+  2. **P-2**: Shared SQLite connection with `prepare_cached` statements and transaction batching ($\le 200$ rows or $\le 1$ second) in `spawn_blocking`; zero-loss flush on finish/cancel. Cache write speed improved 25x (-96.0%), lookup 5x (-80.2%).
+  3. **P-3**: File hashing in single `spawn_blocking` with 1 MiB `BufReader` buffer; INSTREAM transmission using 1 MiB chunk reads with bounded clamd frames. Send instream speed improved 6.1x (-83.6%).
+  4. **P-6**: Chunked `read_nul_frame` into reusable 512-byte buffer, reducing syscalls by 99% while strictly rejecting trailing data after NUL and bounding at `MAX_RESPONSE_BYTES = 4096`.
+  5. **P-7**: Pre-normalized exclusions slice for Quick Scan avoiding per-file canonicalization in traversal loops.
+  6. **S-10**: Mid-scan clamd version change detection every 100 files or on error, invalidating stale cache keys to prevent cache poisoning across daemon updates.
+  7. **IDSESSION (P-4) Analysis**: `tcp_connect` accounts for only 3.08% of wall time (18.9s on 613.7s for 12,886 files); >95% is daemon processing (`clamd_wait`) and queue wait (`wait_limiter`). With clamd `IdleTimeout 30` and `MaxThreads 12`, persistent IDSESSION carries high disconnect risk and thread lock for negligible gain ($\le 3\%$). Formal recommendation: **DO NOT implement IDSESSION**.
+- Completed items in V-57:
   1. **S-1**: ScanSummary retains only non-clean items (up to 1,000), prioritizing INFECTED entries.
   2. **S-7 + S-6**: Cache read failure treated as cache miss; corrupt cache DB auto-recovered as `cache.db.corrupt-YYYYMMDD-HHMMSS` (UTC+7); TTL expired entries (7 days) pruned on app launch.
   3. **X-5**: Cache validity bound to server signature generation (`signatures:loaded_at`), schema v3, cache disabled when server status is invalid.
@@ -15,6 +23,9 @@ Phase: Zonendpoint 0.3.1 client optimizations and security hardening (Task V-57 
   6. **S-5**: Atomic `config.json` write via temp file + `sync_all` + `rename`; corrupted config errors surfaced to UI.
   7. **P-5**: Clean scan-progress events throttled to ~10Hz (100ms); non-clean and final events emitted immediately.
   8. **X-6**: Environment override badge ("Env active") permanently visible next to server status icon.
+- Release artifacts:
+  - Installer: `E:\Zonendpoint-tools\artifacts\v61-release\Zonendpoint_0.3.1_x64-setup.exe` (3,667,853 bytes).
+  - Installer SHA256: `01793d12cede23228b4eeb3530b224ebdcd3264c22df261e3fd1b07d9af73fe7`.
 - Feeds status:
   - MalwareBazaar: 1,171,422 hashes in DB (`/opt/zonendpoint/malwarebazaar/malwarebazaar.db`), 1,171,422 loaded in clamd (`/var/lib/clamav/malwarebazaar.hsb`).
   - ThreatFox: 45,298 unique SHA-256 in DB (`/opt/zonendpoint/threatfox/threatfox.db`), 21,625 net unique signatures loaded in clamd (`/var/lib/clamav/threatfox.hsb`).

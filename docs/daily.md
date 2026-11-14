@@ -320,3 +320,25 @@
   - `npm.cmd run build`: PASS (Vite + TS 0 lỗi).
   - `node tests/native/run.mjs`: **21/21 PASS (chạy 2 lần liên tiếp đều PASS 100%)**.
 - Bàn giao: Soạn handoff `docs/handoffs/v031-client-vic-to-qeen.md`, đóng gói bản cài `Zonendpoint_0.3.1_x64-setup.exe` vào `E:\Zonendpoint-tools\artifacts\v57-release\` (3,650,792 bytes, SHA256: `1305f89913bfef92e65dc86175dde9628fa978c5b43a8ead557af70d6448f126`).
+
+## 2026-11-14 - V-61 (Bản 0.3.1: Đo đạc và tối ưu hóa hiệu năng client P-2, P-3, P-6, P-7, S-10, P-4)
+- Thực hiện theo chỉ đạo của anh Zon ngày 2026-11-14 từ tài liệu kiến trúc tối ưu `E:\Zonendpoint\optimisse.md`, trên nhánh mới `vic/031-perf` từ `origin/vic/031-client` @ `e35f4d7` (tip V-57).
+- Hoàn thành đầy đủ 6 hạng mục kỹ thuật qua các commit độc lập:
+  1. **P-4 measurement (Đo từng chặng)**: Thêm cấu trúc `StageTimings` đo đạc 7 chặng độc lập per-file bằng `Instant` không ảnh hưởng hiệu năng đường chạy chính. Nâng cấp `examples/folder_bench.rs` tính thống kê sum, p50, p95, max cho từng chặng. Ghi nhận số liệu baseline trước tối ưu vào `docs/qa/perf-stages-0.3.1.md`.
+  2. **P-2 (Shared SQLite Connection & Batch Transactions)**: Toàn bộ phiên quét dùng chung một kết nối SQLite duy nhất, kết hợp `prepare_cached` và gom transaction theo lô ($\le 200$ dòng hoặc $\le 1$ giây); flush an toàn khi kết thúc hoặc hủy quét bảo toàn 100% verdict; toàn bộ rusqlite chạy trong `spawn_blocking`. Tăng tốc ghi cache gấp 25 lần, tra cứu cache gấp 5 lần.
+  3. **P-3 (Băm tệp với đệm 1 MiB & INSTREAM Chunking)**: Băm SHA-256 trong một `spawn_blocking` duy nhất với bộ đệm `BufReader` 1 MiB; kiểm tra metadata snapshot trước/sau băm; truyền INSTREAM đọc khối $\le 1$ MiB với frame clamd chuẩn $\le 64$ KiB. Giảm 83.6% thời gian gửi dữ liệu.
+  4. **P-6 (Đọc NUL frame theo khối)**: `read_nul_frame` đọc theo khối đệm thay vì từng byte đơn lẻ, giảm 99% syscalls; bảo toàn nghiêm ngặt trần `MAX_RESPONSE_BYTES = 4096` bytes, từ chối dữ liệu thừa sau NUL và duy trì timeout 120s.
+  5. **P-7 (Chuẩn hóa trước danh sách loại trừ Quick Scan)**: Chuẩn hóa canonical danh sách loại trừ một lần duy nhất trước khi duyệt cây thư mục, tránh lặp lại cấp phát bộ nhớ và chuẩn hóa đường dẫn cho từng tệp.
+  6. **S-10 (Phát hiện phiên bản ClamAV thay đổi giữa phiên quét)**: Kiểm tra lại `zVERSION` của clamd định kỳ mỗi 100 tệp hoặc khi gặp lỗi; nếu daemon cập nhật phiên bản hoặc nạp database mới, scanner tự động cập nhật phiên bản hoạt động và ngăn chặn ghi đè verdict vào cache dưới phiên bản cũ.
+- Đo lường thực nghiệm lại bằng `folder_bench` sau khi tối ưu và phân tích IDSESSION (P-4):
+  - `C:\Program Files` (12,886 files): Wall time giảm từ 920.4s xuống 613.7s (-33.3%, tiết kiệm >5 phút), CPU time giảm từ 73.7s xuống 47.3s (-35.8%). `cache_write` giảm từ 41.7s xuống 1.66s (-96.0%), `send_instream` giảm từ 132.7s xuống 21.7s (-83.6%), `cache_lookup` giảm từ 22.4s xuống 4.4s (-80.2%).
+  - Quick Warm (589 files hit cache): Hoàn tất trong 978 ms (<1 giây, giảm 32.2%), `cache_lookup` nhanh gấp 5.2 lần.
+  - Phân tích & Đề xuất IDSESSION (P-4): Thời gian `tcp_connect` chỉ tốn 18.91s trên 613.7s (3.08%); >95% thời gian nằm ở `clamd_wait` và `wait_limiter`. clamd có `IdleTimeout 30` và `MaxThreads 12`, giữ persistent IDSESSION rủi ro cao đứt kết nối khi đọc file lớn hoặc nghẽn I/O và chiếm giữ worker thread. Đề xuất: KHÔNG LÀM IDSESSION.
+- Quality Gates:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo clippy --all-targets -- -D warnings`: PASS (0 warnings).
+  - `cargo test`: PASS 3 lần liên tiếp (100/100 tests PASS mỗi lần).
+  - `npm.cmd run build`: PASS (Vite + TS 0 lỗi).
+  - `node tests/native/run.mjs`: PASS 2 lần liên tiếp (21/21 native tests PASS mỗi lần).
+  - Đóng gói installer NSIS: `Zonendpoint_0.3.1_x64-setup.exe` (3,667,853 bytes, SHA256: `01793d12cede23228b4eeb3530b224ebdcd3264c22df261e3fd1b07d9af73fe7`) tại `E:\Zonendpoint-tools\artifacts\v61-release\`.
+- Bàn giao: Soạn handoff `docs/handoffs/perf-031-vic-to-qeen.md`, commit và push nhánh `vic/031-perf`. Không merge main. Xóa worktree sau khi hoàn tất.

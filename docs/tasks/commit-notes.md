@@ -128,4 +128,12 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/031-client | 1124ab8 | YES | fix(config): ensure atomic configuration writes and surface corruption errors (S-5) |
 | 2026-11-14 | vic/031-client | 73e672d | YES | perf(events): throttle clean progress events to 10Hz while emitting non-clean immediately (P-5) |
 | 2026-11-14 | vic/031-client | 0595ac9 | YES | feat(ui): display environment override badge alongside server status icon (X-6) |
-| 2026-11-14 | vic/031-client | e251471 | YES | chore(release): bump version to 0.3.1 and update documentation |
+| 2026-11-14 | vic/031-client | e35f4d7 | YES | chore(release): bump version to 0.3.1 and update documentation |
+| 2026-11-14 | vic/031-perf | a424739 | YES | perf(scanner): add per-file stage timings measurement and record baseline (P-4) |
+| 2026-11-14 | vic/031-perf | cec6819 | YES | perf(cache): share sqlite connection with batch transactions and cached statements (P-2) |
+| 2026-11-14 | vic/031-perf | 98805fa | YES | perf(scanner): read and hash files with 1 MiB buffer in spawn_blocking (P-3) |
+| 2026-11-14 | vic/031-perf | 811e5f7 | YES | perf(scanner): chunked read_nul_frame with framing validation (P-6) |
+| 2026-11-14 | vic/031-perf | 587131a | YES | perf(quick): pre-normalize exclusion list once before directory walk (P-7) |
+| 2026-11-14 | vic/031-perf | e9bfc17 | YES | fix(scanner): detect clamd version change mid-scan and invalidate stale cache keys (S-10) |
+| 2026-11-14 | vic/031-perf | 9966b2d | YES | docs(qa): record post-optimization perf benchmarks and P-4 IDSESSION analysis |
+| 2026-11-14 | vic/031-perf | be58cde | YES | test(native): ensure active scan in V-30 close test selects freshly written fixture |
