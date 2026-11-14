@@ -26,6 +26,7 @@ import urllib.request
 import urllib.error
 
 CURRENT_TAG_FILE = "/opt/zonendpoint/yara/current_tag.txt"
+DEFAULT_HOLD_FILE = "/opt/zonendpoint/HOLD-yara"
 FILTER_SCRIPT_PATH = "/opt/zonendpoint/yara/filter_yara_clamav.py"
 QA_CONTROL_RULE_PATH = "/opt/zonendpoint/qa/zonqa-control.yar"
 ACTIVE_YARA_PATH = "/var/lib/clamav/yara-forge-core.yar"
@@ -297,7 +298,14 @@ def main():
     parser.add_argument("--force", action="store_true", help="Force update even if tag matches current")
     parser.add_argument("--check-only", action="store_true", help="Check for updates without downloading")
     parser.add_argument("--dry-run", action="store_true", help="Download and test, but do not replace active DB or reload clamd")
+    parser.add_argument("--hold-file", default=DEFAULT_HOLD_FILE, help=f"Hold file path to skip update when rollback active (default: {DEFAULT_HOLD_FILE})")
     args = parser.parse_args()
+
+    # L-3: Check for hold file created by rollback
+    hold_file = getattr(args, "hold_file", DEFAULT_HOLD_FILE)
+    if os.path.isfile(hold_file):
+        log(f"Hold file '{hold_file}' exists (created by rollback). Skipping YARA update per Zon policy. Remove file to resume automatic updates.")
+        return 0
 
     log("Starting Zonendpoint YARA-Forge Core updater...")
     current_tag = get_current_tag()

@@ -116,6 +116,7 @@ class TestAbusechUpdate(unittest.TestCase):
         self.lock_file = self.base_path / "update.lock"
         self.last_run_file = self.base_path / "last-run.json"
         self.reload_state_file = self.base_path / "reload-state.json"
+        self.hold_file = self.base_path / "HOLD-abusech"
 
         self.mb_db = self.base_path / "malwarebazaar.db"
         self.tf_db = self.base_path / "threatfox.db"
@@ -137,6 +138,7 @@ class TestAbusechUpdate(unittest.TestCase):
         self.args.lock_file = str(self.lock_file)
         self.args.last_run_file = str(self.last_run_file)
         self.args.reload_state_file = str(self.reload_state_file)
+        self.args.hold_file = str(self.hold_file)
         self.args.min_reload_interval = 6.0
         self.args.mb_url = f"http://127.0.0.1:{self.server_port}/mb/{{auth_key}}/recent.csv"
         self.args.tf_url = f"http://127.0.0.1:{self.server_port}/tf/{{auth_key}}/recent.csv"
@@ -509,6 +511,26 @@ class TestAbusechUpdate(unittest.TestCase):
             state = json.loads(self.reload_state_file.read_text(encoding="utf-8"))
             self.assertAlmostEqual(state["last_successful_reload_timestamp"], now, delta=10)
             self.assertEqual(state["signatures_after"], 1002)
+
+    def test_17_hold_file_skips_hourly_update(self):
+        """L-3: Test that hold file (HOLD-abusech) causes updater to skip turn cleanly with 0 network calls."""
+        # Create hold file
+        self.hold_file.write_text("2026-11-14T12:00:00Z\n", encoding="utf-8")
+
+        fake_deploy = MagicMock()
+        with patch.object(update_mod, "deploy_combined_hsbs", fake_deploy):
+            ret = update_mod.run_hourly_update(self.args)
+            self.assertEqual(ret, 0)
+
+            # 0 requests to abuse.ch
+            self.assertEqual(len(MockHttpHandler.request_log), 0)
+            fake_deploy.assert_not_called()
+
+            # last-run.json records hold
+            last_run = json.loads(self.last_run_file.read_text(encoding="utf-8"))
+            self.assertFalse(last_run["reloaded"])
+            self.assertTrue(last_run["hold_active"])
+            self.assertIn("Hold active", last_run["error"])
 
 
 if __name__ == "__main__":

@@ -6,14 +6,21 @@
 
 set -euo pipefail
 
-BACKUP_DIR="/var/backups/clamav-yara"
-BACKUP_FILE="$BACKUP_DIR/yara-forge-core.yar.bak"
-PREVIOUS_TAG_FILE="$BACKUP_DIR/previous_tag.txt"
-ACTIVE_FILE="/var/lib/clamav/yara-forge-core.yar"
-CURRENT_TAG_FILE="/opt/zonendpoint/yara/current_tag.txt"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/clamav-yara}"
+BACKUP_FILE="${BACKUP_FILE:-$BACKUP_DIR/yara-forge-core.yar.bak}"
+PREVIOUS_TAG_FILE="${PREVIOUS_TAG_FILE:-$BACKUP_DIR/previous_tag.txt}"
+ACTIVE_FILE="${ACTIVE_FILE:-/var/lib/clamav/yara-forge-core.yar}"
+CURRENT_TAG_FILE="${CURRENT_TAG_FILE:-/opt/zonendpoint/yara/current_tag.txt}"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+set_hold() {
+    local hold="${HOLD_FILE:-/opt/zonendpoint/HOLD-yara}"
+    mkdir -p "$(dirname "$hold")"
+    date -u '+%Y-%m-%dT%H:%M:%SZ' > "$hold"
+    log "Created hold file $hold (daily updater will skip runs until removed)."
 }
 
 if [ "${1:-}" = "--purge" ]; then
@@ -26,6 +33,7 @@ if [ "${1:-}" = "--purge" ]; then
         log "ERROR: clamd PING check failed after purge!"
         exit 2
     fi
+    set_hold
     log "SUCCESS: YARA rules purged. clamd reloaded and verified (PONG)."
     exit 0
 fi
@@ -57,4 +65,5 @@ if [ "$RESP" != "PONG" ]; then
     exit 2
 fi
 
+set_hold
 log "SUCCESS: Rollback completed. clamd PING -> PONG verified."

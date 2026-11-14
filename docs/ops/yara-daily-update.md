@@ -230,6 +230,29 @@ Or manually:
 sudo rm -f /var/lib/clamav/yara-forge-core.yar && sudo clamdscan --reload
 ```
 
+### 5.3 Automated Hold Mechanism & Resuming Updates (L-3)
+
+Executing `zonendpoint-yara-rollback.sh` (or `--purge`) automatically creates a hold file:
+```bash
+/opt/zonendpoint/HOLD-yara
+```
+
+While this file exists:
+- `zonendpoint-yara-update.py` will detect the hold file and skip the scheduled daily run immediately.
+- Prevents the daily updater from downloading and re-installing the problematic YARA ruleset overnight.
+
+**To inspect and clear the hold state:**
+```bash
+# Check if hold is active
+ls -la /opt/zonendpoint/HOLD-yara
+
+# View timestamp when rollback occurred
+cat /opt/zonendpoint/HOLD-yara
+
+# Remove hold to allow automated daily YARA updates to resume
+sudo rm -f /opt/zonendpoint/HOLD-yara
+```
+
 ---
 
 ## 6. Safety Invariants Verification

@@ -6,9 +6,9 @@
 
 set -euo pipefail
 
-BACKUP_DIR="/var/backups/clamav-threatfox"
-BACKUP_FILE="$BACKUP_DIR/threatfox.hsb.bak"
-ACTIVE_FILE="/var/lib/clamav/threatfox.hsb"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/clamav-threatfox}"
+BACKUP_FILE="${BACKUP_FILE:-$BACKUP_DIR/threatfox.hsb.bak}"
+ACTIVE_FILE="${ACTIVE_FILE:-/var/lib/clamav/threatfox.hsb}"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -38,10 +38,18 @@ reload_clamd() {
     log "clamd health verified: PING -> PONG."
 }
 
+set_hold() {
+    local hold="${HOLD_FILE:-/opt/zonendpoint/HOLD-abusech}"
+    mkdir -p "$(dirname "$hold")"
+    date -u '+%Y-%m-%dT%H:%M:%SZ' > "$hold"
+    log "Created hold file $hold (hourly updater will skip turns until removed)."
+}
+
 if [ "${1:-}" = "--purge" ]; then
     log "Purging ThreatFox hash signatures from active clamd..."
     rm -f "$ACTIVE_FILE"
     reload_clamd
+    set_hold
     log "SUCCESS: threatfox.hsb purged. clamd reloaded and verified (PONG)."
     exit 0
 fi
@@ -59,4 +67,5 @@ chmod 0644 "$TMP_FILE"
 mv -f "$TMP_FILE" "$ACTIVE_FILE"
 
 reload_clamd
+set_hold
 log "SUCCESS: Rollback completed. clamd PING -> PONG verified."

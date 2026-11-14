@@ -60,6 +60,7 @@ DEFAULT_TF_DB = "/opt/zonendpoint/threatfox/threatfox.db"
 DEFAULT_RATE_LIMIT_FILE = DEFAULT_STATE
 DEFAULT_LOCK_FILE = "/opt/zonendpoint/abusech/update.lock"
 DEFAULT_LAST_RUN_FILE = "/opt/zonendpoint/abusech/last-run.json"
+DEFAULT_HOLD_FILE = "/opt/zonendpoint/HOLD-abusech"
 DEFAULT_RELOAD_STATE_FILE = "/opt/zonendpoint/abusech/reload-state.json"
 DEFAULT_MIN_RELOAD_INTERVAL_HOURS = 6.0
 
@@ -460,6 +461,7 @@ def run_hourly_update(args) -> int:
         },
         "reloaded": False,
         "reload_deferred": False,
+        "hold_active": False,
         "signatures_before": None,
         "signatures_after": None,
         "reload_duration_seconds": 0.0,
@@ -467,6 +469,22 @@ def run_hourly_update(args) -> int:
     }
 
     last_run_p = pathlib.Path(args.last_run_file)
+
+    # L-3: Hold file check (created by rollback scripts to prevent automated overwriting)
+    hold_p = pathlib.Path(getattr(args, "hold_file", DEFAULT_HOLD_FILE))
+    if hold_p.is_file():
+        logger.warning(
+            "Hold file '%s' exists (created by rollback). Skipping hourly update per Zon policy. "
+            "Remove '%s' to resume automatic updates.",
+            hold_p, hold_p
+        )
+        status_record["error"] = f"Hold active: {hold_p} exists (skipping turn per Zon policy)"
+        status_record["reloaded"] = False
+        status_record["hold_active"] = True
+        status_record["duration_seconds"] = round(time.time() - start_time, 2)
+        write_last_run(last_run_p, status_record, None)
+        return 0
+
     lock_p = pathlib.Path(args.lock_file)
     lock_p.parent.mkdir(parents=True, exist_ok=True)
 
@@ -783,6 +801,11 @@ def parse_args():
         "--reload-state-file",
         default=DEFAULT_RELOAD_STATE_FILE,
         help=f"Path to JSON state file tracking last successful reload timestamp (default: {DEFAULT_RELOAD_STATE_FILE})",
+    )
+    p.add_argument(
+        "--hold-file",
+        default=DEFAULT_HOLD_FILE,
+        help=f"Hold file path to skip update when rollback active (default: {DEFAULT_HOLD_FILE})",
     )
     return p.parse_args()
 

@@ -247,6 +247,29 @@ sudo /usr/local/bin/zonendpoint-malwarebazaar-rollback.sh
 sudo /usr/local/bin/zonendpoint-threatfox-rollback.sh
 ```
 
+### 5.3 Cơ chế Hold File chống ghi đè tự động (L-3)
+Khi thực thi script rollback (`zonendpoint-malwarebazaar-rollback.sh` hoặc `zonendpoint-threatfox-rollback.sh`), script sẽ tự động tạo cờ đánh dấu:
+```bash
+/opt/zonendpoint/HOLD-abusech
+```
+
+Khi file cờ này tồn tại:
+- `zonendpoint-abusech-update.py` trong mỗi lượt chạy hàng giờ sẽ phát hiện hold file ngay đầu tiên.
+- Updater sẽ **bỏ qua toàn bộ lượt chạy** (không gọi abuse.ch, không reload clamd), ghi log cảnh báo và đặt `"hold_active": true` trong `last-run.json`.
+- Giúp bảo vệ trạng thái rollback, ngăn chặn updater tự động nạp lại chữ ký lỗi vào clamd sau 61 phút.
+
+**Cách kiểm tra và gỡ hold để khôi phục cập nhật tự động:**
+```bash
+# 1. Kiểm tra sự tồn tại của hold file
+ls -la /opt/zonendpoint/HOLD-abusech
+
+# 2. Đọc thời điểm kích hoạt rollback
+cat /opt/zonendpoint/HOLD-abusech
+
+# 3. Gỡ cờ hold để cho phép updater hoạt động trở lại
+sudo rm -f /opt/zonendpoint/HOLD-abusech
+```
+
 ---
 
 ## 6. Kiểm tra An toàn & Rà soát Bí mật (Secret Audit)
