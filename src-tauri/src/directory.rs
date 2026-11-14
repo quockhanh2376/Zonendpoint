@@ -76,7 +76,10 @@ impl ScanSummary {
     pub fn record(&mut self, result: ScanResult) {
         self.scanned = self.scanned.saturating_add(1);
         match result.status {
-            ScanStatus::Clean => self.clean = self.clean.saturating_add(1),
+            ScanStatus::Clean => {
+                self.clean = self.clean.saturating_add(1);
+                return;
+            }
             ScanStatus::Infected => self.infected = self.infected.saturating_add(1),
             ScanStatus::Unknown => {
                 self.unknown = self.unknown.saturating_add(1);
@@ -98,6 +101,18 @@ impl ScanSummary {
         }
         if self.results.len() < MAX_RETAINED_RESULTS {
             self.results.push(result);
+        } else if result.status == ScanStatus::Infected {
+            if let Some(pos) = self
+                .results
+                .iter()
+                .rposition(|r| r.status != ScanStatus::Infected)
+            {
+                self.results.remove(pos);
+                self.results.push(result);
+                self.details_truncated = true;
+            } else {
+                self.details_truncated = true;
+            }
         } else {
             self.details_truncated = true;
         }
@@ -485,11 +500,11 @@ mod tests {
     async fn folder_scan_retains_per_file_error_and_unicode_path() {
         let root = test_dir();
         std::fs::write(root.join("lỗi.txt"), b"one").unwrap();
-        std::fs::write(root.join("broken.bin"), b"two").unwrap();
+        std::fs::write(root.join("harmless.bin"), b"two").unwrap();
         let (_tx, cancel) = watch::channel(false);
         let scan: ScanFn = Box::new(|path, _| {
             Box::pin(async move {
-                if path.file_name().unwrap() == "broken.bin" {
+                if path.file_name().unwrap() == "lỗi.txt" {
                     ScanResult::error(path, "mock file read failure")
                 } else {
                     ScanResult::new(
@@ -529,13 +544,81 @@ mod tests {
         }
         let (_tx, cancel) = watch::channel(false);
         let scan: ScanFn = Box::new(|path, _| {
-            Box::pin(async move { ScanResult::new(path, ScanStatus::Clean, None, None, 1) })
+            Box::pin(async move { ScanResult::error(path, "simulated error") })
         });
         let summary = scan_directory(root.clone(), cancel, scan, Box::new(|_, _| {})).await;
-        assert_eq!(summary.clean, MAX_RETAINED_RESULTS + 2);
+        assert_eq!(summary.errors, MAX_RETAINED_RESULTS + 2);
         assert_eq!(summary.results.len(), MAX_RETAINED_RESULTS);
         assert!(summary.details_truncated);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn clean_files_do_not_crowd_out_subsequent_infected_result() {
+        let mut summary = ScanSummary::default();
+        for index in 0..MAX_RETAINED_RESULTS + 10 {
+            summary.record(ScanResult::new(
+                format!("clean_{index}.txt"),
+                ScanStatus::Clean,
+                None,
+                None,
+                10,
+            ));
+        }
+        assert_eq!(summary.scanned, MAX_RETAINED_RESULTS + 10);
+        assert_eq!(summary.clean, MAX_RETAINED_RESULTS + 10);
+        assert!(summary.results.is_empty());
+        assert!(!summary.details_truncated);
+
+        // 1 infected file arrives -> path and details must be retained
+        summary.record(ScanResult::new(
+            "C:\\malware\\threat.exe",
+            ScanStatus::Infected,
+            None,
+            Some("Win.Malware.Found".into()),
+            500,
+        ));
+
+        assert_eq!(summary.scanned, MAX_RETAINED_RESULTS + 11);
+        assert_eq!(summary.clean, MAX_RETAINED_RESULTS + 10);
+        assert_eq!(summary.infected, 1);
+        assert_eq!(summary.results.len(), 1);
+        assert_eq!(summary.results[0].path, "C:\\malware\\threat.exe");
+        assert_eq!(summary.results[0].status, ScanStatus::Infected);
+        assert!(!summary.details_truncated);
+    }
+
+    #[tokio::test]
+    async fn infected_result_evicts_non_infected_when_retained_is_full() {
+        let mut summary = ScanSummary::default();
+        for index in 0..MAX_RETAINED_RESULTS {
+            summary.record(ScanResult::error(
+                format!("error_{index}.txt"),
+                "read error",
+            ));
+        }
+        assert_eq!(summary.results.len(), MAX_RETAINED_RESULTS);
+        assert_eq!(summary.errors, MAX_RETAINED_RESULTS);
+        assert!(!summary.details_truncated);
+
+        // Record an infected result when full -> evicts non-infected
+        summary.record(ScanResult::new(
+            "C:\\threats\\virus.exe",
+            ScanStatus::Infected,
+            None,
+            Some("Trojan.Generic".into()),
+            100,
+        ));
+
+        assert_eq!(summary.results.len(), MAX_RETAINED_RESULTS);
+        assert_eq!(summary.infected, 1);
+        assert!(summary.details_truncated);
+        assert!(
+            summary
+                .results
+                .iter()
+                .any(|r| r.path == "C:\\threats\\virus.exe" && r.status == ScanStatus::Infected)
+        );
     }
 
     #[tokio::test]
@@ -653,7 +736,15 @@ mod tests {
 
         let (_tx, cancel) = watch::channel(false);
         let scan: ScanFn = Box::new(|path, _| {
-            Box::pin(async move { ScanResult::new(path, ScanStatus::Clean, None, None, 1) })
+            Box::pin(async move {
+                ScanResult::new(
+                    path,
+                    ScanStatus::Infected,
+                    None,
+                    Some("not excluded threat".into()),
+                    1,
+                )
+            })
         });
 
         // Scanning the other directory must NOT exclude its DriverData folder
@@ -667,7 +758,7 @@ mod tests {
         .await;
 
         assert!(summary.complete);
-        assert_eq!(summary.clean, 1);
+        assert_eq!(summary.infected, 1);
         assert!(
             summary
                 .results

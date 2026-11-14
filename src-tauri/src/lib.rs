@@ -409,21 +409,38 @@ async fn run_scan(
 fn mark_user_cancelled(summary: &mut ScanSummary, path: &std::path::Path) {
     summary.cancelled = true;
     summary.complete = false;
-    if summary.scanned != 1 || summary.results.len() != 1 {
+    if summary.scanned != 1 {
         return;
     }
 
-    let result = &mut summary.results[0];
-    if result.status != scanner::ScanStatus::Clean {
+    if summary.clean == 1 {
+        summary.clean = 0;
+        summary.cancelled_files = summary.cancelled_files.saturating_add(1);
+        let cancelled_result = scanner::ScanResult::new(
+            path,
+            scanner::ScanStatus::Cancelled,
+            None,
+            Some("cancelled by user".into()),
+            0,
+        );
+        if summary.results.is_empty() {
+            summary.results.push(cancelled_result);
+        } else {
+            summary.results[0] = cancelled_result;
+        }
         return;
     }
-    summary.clean = summary.clean.saturating_sub(1);
-    result.path = path.to_string_lossy().into_owned();
-    result.sha256 = None;
-    result.status = scanner::ScanStatus::Cancelled;
-    result.reason = Some("cancelled by user".into());
-    result.bytes_scanned = 0;
-    summary.cancelled_files = summary.cancelled_files.saturating_add(1);
+
+    if summary.results.len() == 1 && summary.results[0].status == scanner::ScanStatus::Clean {
+        summary.clean = summary.clean.saturating_sub(1);
+        let result = &mut summary.results[0];
+        result.path = path.to_string_lossy().into_owned();
+        result.sha256 = None;
+        result.status = scanner::ScanStatus::Cancelled;
+        result.reason = Some("cancelled by user".into());
+        result.bytes_scanned = 0;
+        summary.cancelled_files = summary.cancelled_files.saturating_add(1);
+    }
 }
 
 #[tauri::command]
