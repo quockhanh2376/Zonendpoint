@@ -7,7 +7,7 @@ extracts the active signature count, timestamp, and engine version,
 and writes an atomic status file to /var/lib/zonendpoint/status/signatures.json.
 
 Format:
-  {"signatures": <int>, "loaded_at_utc": "...", "engine": "ClamAV x.y.z/<daily>"}
+  {"signatures": <int>, "loaded_at": "...", "engine": "ClamAV x.y.z/<daily>"}
 """
 
 import datetime
@@ -20,6 +20,7 @@ import sys
 OUTPUT_DIR = "/var/lib/zonendpoint/status"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "signatures.json")
 MAX_SIGNATURES = 1_000_000_000
+TZ_VN = datetime.timezone(datetime.timedelta(hours=7))
 
 SIGNATURE_REGEX = re.compile(
     r"(?:Database correctly reloaded\s*\(\s*(\d+)\s*signatures\s*\)|Loaded\s+(\d+)\s+signatures)",
@@ -30,7 +31,7 @@ ENGINE_REGEX = re.compile(r"(ClamAV\s+[0-9.]+\/[0-9]+)", re.IGNORECASE)
 
 def log(msg: str, is_error: bool = False):
     stream = sys.stderr if is_error else sys.stdout
-    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.datetime.now(TZ_VN).strftime("%Y-%m-%dT%H:%M:%S+07:00")
     print(f"[{now}] {msg}", file=stream, flush=True)
 
 
@@ -101,22 +102,22 @@ def get_latest_signature_entry():
             log(f"Signature count {sig_count} outside valid range 1..{MAX_SIGNATURES}", is_error=True)
             continue
 
-        # Extract timestamp
-        ts_utc = None
+        # Extract timestamp in UTC+7 (Asia/Ho_Chi_Minh)
+        ts_str = None
         realtime_ts = entry.get("__REALTIME_TIMESTAMP")
         if realtime_ts:
             try:
                 micros = int(realtime_ts)
-                dt = datetime.datetime.fromtimestamp(micros / 1_000_000.0, tz=datetime.timezone.utc)
-                ts_utc = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                dt = datetime.datetime.fromtimestamp(micros / 1_000_000.0, tz=TZ_VN)
+                ts_str = dt.strftime("%Y-%m-%dT%H:%M:%S+07:00")
             except Exception:
-                ts_utc = None
+                ts_str = None
 
-        if not ts_utc:
-            # Fallback to current UTC time if timestamp parsing fails
-            ts_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if not ts_str:
+            # Fallback to current UTC+7 time if timestamp parsing fails
+            ts_str = datetime.datetime.now(TZ_VN).strftime("%Y-%m-%dT%H:%M:%S+07:00")
 
-        return sig_count, ts_utc
+        return sig_count, ts_str
 
     log("Could not find matching signature pattern in journal entries", is_error=True)
     return None
@@ -128,12 +129,12 @@ def main():
         log("Signature extraction failed; keeping existing signatures.json if present", is_error=True)
         sys.exit(1)
 
-    sig_count, ts_utc = result
+    sig_count, ts_str = result
     engine_ver = get_engine_version()
 
     data = {
         "signatures": sig_count,
-        "loaded_at_utc": ts_utc,
+        "loaded_at": ts_str,
         "engine": engine_ver,
     }
 

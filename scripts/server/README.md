@@ -28,14 +28,15 @@ Extracts active ClamAV signature count and metadata from `clamav-daemon` systemd
 
 ## Output Format
 
-File `/var/lib/zonendpoint/status/signatures.json` (permissions `0644`):
+File `/var/lib/zonendpoint/status/signatures.json` (permissions `0644`), standard UTC+7 (`Asia/Ho_Chi_Minh`):
 ```json
 {
-  "signatures": 8616478,
-  "loaded_at_utc": "2026-11-14T03:39:43Z",
+  "signatures": 8616497,
+  "loaded_at": "2026-11-14T11:41:49+07:00",
   "engine": "ClamAV 1.5.4/28182"
 }
 ```
+*(Note: client/tunnel also backwards-compatibly parses legacy `loaded_at_utc` with `Z` suffix)*
 
 ## Uninstallation
 

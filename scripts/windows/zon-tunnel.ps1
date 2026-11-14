@@ -30,7 +30,7 @@ $maxLogBytes = 256 * 1024 # 256 KB
 
 function Write-TunnelLog {
     param([string]$Message)
-    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    $timestamp = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(7)).ToString("yyyy-MM-dd HH:mm:ss+07:00")
     $line = "[$timestamp] $Message"
     try {
         if ((Test-Path $logFile) -and ((Get-Item $logFile).Length -gt $maxLogBytes)) {
@@ -98,7 +98,7 @@ function Fetch-ServerStatus {
 
     $writeLog = {
         param([string]$msg)
-        $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        $ts = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(7)).ToString("yyyy-MM-dd HH:mm:ss+07:00")
         $entry = "[$ts] [StatusSync] $msg"
         try { Add-Content -Path $LogPath -Value $entry -Encoding utf8 } catch {}
     }
@@ -138,30 +138,32 @@ function Fetch-ServerStatus {
             return $false
         }
 
-        if ([string]::IsNullOrWhiteSpace($json.loaded_at_utc)) {
-            & $writeLog "Validation failed: 'loaded_at_utc' missing or empty."
+        $loadedAtRaw = if ($null -ne $json.loaded_at) { [string]$json.loaded_at } else { [string]$json.loaded_at_utc }
+        if ([string]::IsNullOrWhiteSpace($loadedAtRaw)) {
+            & $writeLog "Validation failed: 'loaded_at' / 'loaded_at_utc' missing or empty."
             return $false
         }
 
-        $isoUtcPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
-        if ($json.loaded_at_utc -notmatch $isoUtcPattern) {
-            & $writeLog "Validation failed: 'loaded_at_utc' ($($json.loaded_at_utc)) must strictly match YYYY-MM-DDTHH:MM:SSZ."
+        $loadedAtTrimmed = $loadedAtRaw.Trim()
+        $isoPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\+07:00|Z)$'
+        if ($loadedAtTrimmed -notmatch $isoPattern) {
+            & $writeLog "Validation failed: 'loaded_at' ($loadedAtTrimmed) must match YYYY-MM-DDTHH:MM:SS+07:00 or YYYY-MM-DDTHH:MM:SSZ."
             return $false
         }
 
-        $parsedDate = [DateTime]::MinValue
-        $exactFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
-        if (-not [DateTime]::TryParseExact($json.loaded_at_utc, $exactFormat, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$parsedDate)) {
-            & $writeLog "Validation failed: 'loaded_at_utc' ($($json.loaded_at_utc)) is not a valid UTC calendar date."
+        $parsedOffset = [DateTimeOffset]::MinValue
+        if (-not [DateTimeOffset]::TryParse($loadedAtTrimmed, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$parsedOffset)) {
+            & $writeLog "Validation failed: 'loaded_at' ($loadedAtTrimmed) is not a valid date."
             return $false
         }
 
-        $fetchedAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $loadedAtNormalized = $parsedOffset.ToOffset([TimeSpan]::FromHours(7)).ToString("yyyy-MM-ddTHH:mm:ss+07:00")
+        $fetchedAt = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(7)).ToString("yyyy-MM-ddTHH:mm:ss+07:00")
         $outPayload = [ordered]@{
-            signatures     = $sigLong
-            loaded_at_utc  = $json.loaded_at_utc
-            fetched_at_utc = $fetchedAtUtc
-            engine         = $json.engine
+            signatures = $sigLong
+            loaded_at  = $loadedAtNormalized
+            fetched_at = $fetchedAt
+            engine     = $json.engine
         }
         $payloadText = $outPayload | ConvertTo-Json -Compress
 
@@ -174,7 +176,7 @@ function Fetch-ServerStatus {
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($tempFile, $payloadText, $utf8NoBom)
         Move-Item -Path $tempFile -Destination $TargetFile -Force -ErrorAction Stop
-        & $writeLog "Successfully updated server status: signatures=$sigLong, loaded_at_utc=$($json.loaded_at_utc), fetched_at_utc=$fetchedAtUtc"
+        & $writeLog "Successfully updated server status: signatures=$sigLong, loaded_at=$loadedAtNormalized, fetched_at=$fetchedAt"
         return $true
     } catch {
         & $writeLog "Exception during server status sync: $($_.Exception.Message)"
@@ -252,7 +254,7 @@ $syncScript = {
         param($Key, $HostTarget, $TargetFile, $LogPath, $TimeoutSeconds)
         $writeLog = {
             param([string]$msg)
-            $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+            $ts = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(7)).ToString("yyyy-MM-dd HH:mm:ss+07:00")
             $entry = "[$ts] [StatusSync] $msg"
             try { Add-Content -Path $LogPath -Value $entry -Encoding utf8 } catch {}
         }
@@ -275,19 +277,24 @@ $syncScript = {
             if (-not ($json.signatures -is [int] -or $json.signatures -is [long])) { return }
             $sigLong = [long]$json.signatures
             if ($sigLong -lt 0 -or $sigLong -gt 1000000000) { return }
-            if ([string]::IsNullOrWhiteSpace($json.loaded_at_utc)) { return }
-            $isoUtcPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
-            if ($json.loaded_at_utc -notmatch $isoUtcPattern) { return }
-            $parsedDate = [DateTime]::MinValue
-            $exactFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
-            if (-not [DateTime]::TryParseExact($json.loaded_at_utc, $exactFormat, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$parsedDate)) { return }
 
-            $fetchedAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            $loadedAtRaw = if ($null -ne $json.loaded_at) { [string]$json.loaded_at } else { [string]$json.loaded_at_utc }
+            if ([string]::IsNullOrWhiteSpace($loadedAtRaw)) { return }
+
+            $loadedAtTrimmed = $loadedAtRaw.Trim()
+            $isoPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\+07:00|Z)$'
+            if ($loadedAtTrimmed -notmatch $isoPattern) { return }
+
+            $parsedOffset = [DateTimeOffset]::MinValue
+            if (-not [DateTimeOffset]::TryParse($loadedAtTrimmed, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$parsedOffset)) { return }
+
+            $loadedAtNormalized = $parsedOffset.ToOffset([TimeSpan]::FromHours(7)).ToString("yyyy-MM-ddTHH:mm:ss+07:00")
+            $fetchedAt = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(7)).ToString("yyyy-MM-ddTHH:mm:ss+07:00")
             $outPayload = [ordered]@{
-                signatures     = $sigLong
-                loaded_at_utc  = $json.loaded_at_utc
-                fetched_at_utc = $fetchedAtUtc
-                engine         = $json.engine
+                signatures = $sigLong
+                loaded_at  = $loadedAtNormalized
+                fetched_at = $fetchedAt
+                engine     = $json.engine
             }
             $payloadText = $outPayload | ConvertTo-Json -Compress
 
@@ -299,7 +306,7 @@ $syncScript = {
             $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
             [System.IO.File]::WriteAllText($tempFile, $payloadText, $utf8NoBom)
             Move-Item -Path $tempFile -Destination $TargetFile -Force -ErrorAction Stop
-            & $writeLog "Successfully updated server status: signatures=$sigLong, loaded_at_utc=$($json.loaded_at_utc), fetched_at_utc=$fetchedAtUtc"
+            & $writeLog "Successfully updated server status: signatures=$sigLong, loaded_at=$loadedAtNormalized, fetched_at=$fetchedAt"
         } catch {
             & $writeLog "Exception during server status sync: $($_.Exception.Message)"
         }

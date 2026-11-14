@@ -345,14 +345,15 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - App executable SHA256: `ae223e2533e5925106c2e36ce5bc881622e6bade4587e03cff6607e7fd1276eb`.
 - Handoff: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy `vic/release-candidate`. Không tag, không ký, không merge main.
 
-## V-53 — Cover Badge UTF-8 BOM Fix & Strict Validation in 0.3.0 (2026-11-14)
-- Triển khai theo yêu cầu Zon test tay 2026-11-14: khắc phục lỗi app hiện "Cover: —" khi file status chứa UTF-8 BOM (`EF BB BF`).
-- Nguyên nhân: PowerShell 5.1/.NET ghi UTF-8 có kèm BOM khi dùng `[System.Text.Encoding]::UTF8`, khiến `serde_json::from_str` lỗi parse.
-- Sửa đổi:
-  - Tunnel (`scripts/windows/zon-tunnel.ps1`): chuyển sang ghi UTF-8 không BOM qua `New-Object System.Text.UTF8Encoding($false)`. Bổ sung trường `fetched_at_utc` ghi nhận thời điểm máy trạm đồng bộ thành công.
-  - Rust Backend (`src-tauri/src/server_status.rs`): loại bỏ BOM đầu file (`trim_start_matches('\u{feff}')`) trước khi parse, đảm bảo tương thích ngược với file cũ.
-  - Siết chặt validation (theo Q-39): signatures bắt buộc là số nguyên JSON (từ chối số thập phân như `8616497.5`, chuỗi, số âm, > 1e9; tunnel không ép kiểu double->long); thời gian bắt buộc đúng chuẩn ISO-8601 UTC `YYYY-MM-DDTHH:MM:SSZ` (chiều dài 20 ký tự, không phần thập phân, không timezone offset).
-  - Trạng thái stale: tính theo `fetched_at_utc` > 2 giờ (nếu file cũ thiếu trường này thì fallback sang mtime của file). Tooltip: `"ClamAV signatures on server (loaded <loaded_at>), synced <fetched_at>"`.
+## V-53 — Cover Badge UTF-8 BOM Fix, Strict Validation & UTC+7 Timezone Standardization in 0.3.0 (2026-11-14)
+- Triển khai theo yêu cầu Zon test tay 2026-11-14: khắc phục lỗi app hiện "Cover: —" khi file status chứa UTF-8 BOM (`EF BB BF`) và chuẩn hóa toàn bộ ứng dụng sang múi giờ **UTC+7 (Asia/Ho_Chi_Minh)**.
+- Nguyên nhân BOM: PowerShell 5.1/.NET ghi UTF-8 có kèm BOM khi dùng `[System.Text.Encoding]::UTF8`, khiến `serde_json::from_str` lỗi parse.
+- Chuẩn hóa UTC+7:
+  - Lab Server (`100.96.250.245`): đổi múi giờ sang `Asia/Ho_Chi_Minh` (+0700). Ghi nhận các timer `OnCalendar` không có hậu tố UTC bị dịch 7 giờ (`dpkg-db-backup`, `sysstat-rotate`, `sysstat-summary`, `logrotate`, `zonendpoint-yara-update`, `e2scrub`, `xfs_scrub`, `fstrim`), các timer tương đối (`sigcount` 10m, `abusech` 61m, `sysstat-collect` 10m, `clamav-health` 30m) giữ nguyên chu kỳ. Script `zonendpoint-sigcount.py` ghi giờ `+07:00` và đổi trường sang `loaded_at`.
+  - Tunnel (`scripts/windows/zon-tunnel.ps1`): chuyển sang ghi UTF-8 không BOM qua `New-Object System.Text.UTF8Encoding($false)`. Format timestamp trong `tunnel.log` theo `+07:00`. Sinh trường `fetched_at` theo `+07:00` và chuẩn hóa `loaded_at` sang `+07:00`.
+  - Rust Backend (`src-tauri/src/server_status.rs`): loại bỏ BOM đầu file (`trim_start_matches('\u{feff}')`) trước khi parse. Parser nhận dạng `YYYY-MM-DDTHH:MM:SS+07:00`, tương thích ngược chuyển đổi định dạng `...Z` cũ sang `+07:00`. Tính toán `stale` dựa trên epoch seconds tuyệt đối (`local_secs - 7 * 3600`), triệt tiêu hoàn toàn nguy cơ lệch 7 giờ gây stale giả.
+  - Frontend UI: Tooltip hiển thị dạng `DD/MM/YYYY HH:mm (UTC+7)` độc lập 100% với cài đặt múi giờ/locale của hệ điều hành máy client: `"ClamAV signatures on server (loaded 14/11/2026 11:41 (UTC+7)), synced 14/11/2026 11:45 (UTC+7)"`.
+  - Siết chặt validation: signatures bắt buộc là số nguyên JSON (từ chối số thập phân như `8616497.5`, chuỗi, số âm, > 1e9); thời gian bắt buộc đúng chuẩn ISO-8601 `+07:00` (hoặc `Z` cũ), từ chối mọi offset khác (+00:00, +08:00, v.v.), phần thập phân và hậu tố lạ.
 - Phân tích rủi ro gỡ cài đặt (Mục 7):
   - Phân tích template NSIS của Tauri: lệnh gỡ chỉ xóa `zonendpoint.exe` và `uninstall.exe`, sau đó gọi `RMDir "$INSTDIR"` (không có `/r`, chỉ xóa khi thư mục rỗng).
   - Checkbox "Delete app data" chỉ xóa `%LOCALAPPDATA%\com.zonendpoint.desktop` (bundle id của WebView2), hoàn toàn không động tới `%LOCALAPPDATA%\ZonEndpoint`.
@@ -360,13 +361,11 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - Đề xuất: Chuyển thư mục cài đặt sang `%LOCALAPPDATA%\Programs\ZonEndpoint` để tách bạch rõ ràng giữa file thực thi và dữ liệu người dùng (chờ Zon quyết).
 - Quality Gates:
   - `cargo fmt -- --check`: PASS.
-  - `cargo test`: **79/79 PASS** (60 lib, 1 bin, 18 resilience).
+  - `cargo test`: **81/81 PASS** (62 lib, 1 bin, 18 resilience; 11 server_status tests gồm test chống lệch 7 giờ).
   - `cargo clippy --all-targets -- -D warnings`: PASS.
   - `npm.cmd run build`: PASS.
-  - `node tests/native/run.mjs`: **21/21 PASS** (với file giả lập có UTF-8 BOM).
-  - Đóng gói NSIS: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,714,811 bytes, PE32+ x64, NSIS v3.13).
-  - Installer SHA256: `4c9b82f507dca4a768a214909f84b218209f6822f656b395ce2c0f52fdd52f54`.
-  - Built Target Exe SHA256: `1cf16d717875a7ef6eaa9999031f1ff9b91dbb3d73684af301f0a5405fc23dea` (marker `UNK`).
-  - Installed Payload Exe SHA256: `9a09f749f81f71eced35a63f4282d33d20385d5a996ef025cb2f104b64edaf49` (marker `NSS`).
+  - `node tests/native/run.mjs`: **21/21 PASS** (mock file có UTF-8 BOM và tooltip `(UTC+7)`).
+  - Đóng gói NSIS: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,715,539 bytes, PE32+ x64, NSIS v3.13).
+  - Installer SHA256: `A6797CA3FAA4DCD4A62D2FD71E225D27F720250B776A724DE2AC0A57405D394F`.
 - Bàn giao: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
 

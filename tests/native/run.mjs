@@ -20,10 +20,20 @@ for (const name of coreNames) writeFileSync(path.join(systemRoot, name), `Benign
 writeFileSync(path.join(systemRoot, 'drivers', 'fixture.sys'), 'Benign driver fixture');
 const testAppdataZon = path.join(run, 'appdata', 'Zonendpoint');
 mkdirSync(testAppdataZon, { recursive: true });
+function formatIsoVn(date) {
+  const vnTime = new Date(date.getTime() + 7 * 3600 * 1000);
+  const yyyy = vnTime.getUTCFullYear();
+  const mm = String(vnTime.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(vnTime.getUTCDate()).padStart(2, '0');
+  const hh = String(vnTime.getUTCHours()).padStart(2, '0');
+  const min = String(vnTime.getUTCMinutes()).padStart(2, '0');
+  const ss = String(vnTime.getUTCSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}+07:00`;
+}
 const mockServerStatus = {
   signatures: 8616464,
-  loaded_at_utc: new Date(Date.now() - 30 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
-  fetched_at_utc: new Date(Date.now() - 5 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  loaded_at: formatIsoVn(new Date(Date.now() - 30 * 60 * 1000)),
+  fetched_at: formatIsoVn(new Date(Date.now() - 5 * 60 * 1000)),
   engine: "ClamAV 1.5.4/28182"
 };
 const mockStatusJson = JSON.stringify(mockServerStatus, null, 2);
@@ -337,7 +347,7 @@ try {
     }, { timeout: 10000, timeoutMsg: 'Cover badge did not display 8,616,464 within timeout' });
 
     const title = await coverEl.getAttribute('title');
-    assert.match(title, /ClamAV signatures on server.*loaded.*synced/i);
+    assert.match(title, /ClamAV signatures on server.*loaded.*\(UTC\+7\).*synced.*\(UTC\+7\)/i);
 
     // Verify in dark theme as well
     await browser.$('.theme-toggle').click();

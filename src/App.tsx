@@ -42,10 +42,18 @@ type ScanStateEvent = { scan_id: string; state: ScanLifecycle };
 type Theme = "light" | "dark";
 type ServerStatusDto = {
   signatures: number | null;
-  loaded_at_utc: string | null;
-  fetched_at_utc: string | null;
+  loaded_at: string | null;
+  fetched_at: string | null;
   stale: boolean;
 };
+
+function formatVnTime(isoStr: string | null | undefined): string {
+  if (!isoStr) return "unknown time";
+  const m = isoStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return "unknown time";
+  const [, yyyy, mm, dd, hh, min] = m;
+  return `${dd}/${mm}/${yyyy} ${hh}:${min} (UTC+7)`;
+}
 
 const THEME_KEY = "zonendpoint-theme";
 
@@ -388,18 +396,8 @@ function App() {
     if (!signatureStatus || signatureStatus.signatures == null) {
       return "ClamAV signatures on server: status unavailable";
     }
-    const loadedStr = signatureStatus.loaded_at_utc
-      ? new Date(signatureStatus.loaded_at_utc).toLocaleString("en-US", {
-          dateStyle: "medium",
-          timeStyle: "short",
-        })
-      : "unknown time";
-    const syncedStr = signatureStatus.fetched_at_utc
-      ? new Date(signatureStatus.fetched_at_utc).toLocaleString("en-US", {
-          dateStyle: "medium",
-          timeStyle: "short",
-        })
-      : loadedStr;
+    const loadedStr = formatVnTime(signatureStatus.loaded_at);
+    const syncedStr = formatVnTime(signatureStatus.fetched_at || signatureStatus.loaded_at);
 
     if (signatureStatus.stale) {
       return `ClamAV signatures on server (stale, >2h) (loaded ${loadedStr}), synced ${syncedStr}`;
