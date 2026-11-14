@@ -1,11 +1,11 @@
-# Handoff: Task V-51 / V-52 / V-53 / V-54 — Release Candidate 0.3.0 NSIS Build (Vic to Qeen)
+# Handoff: Task V-51 / V-52 / V-53 / V-54 / V-55 — Release Candidate 0.3.0 NSIS Build (Vic to Qeen)
 
 **Date**: 2026-11-14  
 **From**: Victor (Vic)  
 **To**: Qeen  
-**Task**: V-51 / V-52 / V-53 / V-54 (Release Candidate 0.3.0 with Cover Badge, V-53 UTF-8 BOM Fix, UTC+7 Timezone Standardization, and V-54 Server Row Hide When Connected OK)  
+**Task**: V-51 / V-52 / V-53 / V-54 / V-55 (Release Candidate 0.3.0 with Cover Badge, V-53 UTF-8 BOM Fix, UTC+7 Timezone Standardization, V-54 Server Row Hide When Connected OK, and V-55 Auto-Compact Window to Content Height)  
 **Execution Context**: Execution of steps 1, 2, 6 of `Current execution handoff — V/Q-RELEASE-CURRENT` in `docs/implementation-plan.md`  
-**Approval**: Zon approved 2026-11-13 (P0 release candidate prioritized; version 0.3.0), 2026-11-14 ("Vào 0.3.0" for Task V-52 Cover badge & server integration), 2026-11-14 (Task V-53 UTF-8 BOM and validation fix), 2026-11-14 (V-53 UTC+7 Vietnam timezone standardization), and 2026-11-14 (Task V-54 Ẩn ô Server khi kết nối OK)  
+**Approval**: Zon approved 2026-11-13 (P0 release candidate prioritized; version 0.3.0), 2026-11-14 ("Vào 0.3.0" for Task V-52 Cover badge & server integration), 2026-11-14 (Task V-53 UTF-8 BOM and validation fix), 2026-11-14 (V-53 UTC+7 Vietnam timezone standardization), 2026-11-14 (Task V-54 Ẩn ô Server khi kết nối OK), and 2026-11-14 (Task V-55 Co gọn cửa sổ sau scan All Good)  
 **Branch**: `vic/release-candidate`  
 **Base Commit**: `f3e959d` (origin/main) merged with `6e652c3` (origin/main SecuriteInfo docs)  
 **Status**: READY FOR QEEN TESTING (Pushed branch `vic/release-candidate`; DO NOT push or merge to `main`)  
@@ -14,8 +14,8 @@
 
 ## 1. Source & Build Environment Identity
 
-- **Branch**: `vic/release-candidate` (includes V-51 release candidate, 0.3.0 version bump `80d2a7a`, merge of `origin/main` `6e652c3`, Task V-52 Cover badge, Task V-53 BOM/validation fix, V-53 UTC+7 standardization, and Task V-54 Server row visibility)
-- **Worktree**: `E:\Zonendpoint-worktrees\v54-server-row`
+- **Branch**: `vic/release-candidate` (includes V-51 release candidate, 0.3.0 version bump `80d2a7a`, merge of `origin/main` `6e652c3`, Task V-52 Cover badge, Task V-53 BOM/validation fix, V-53 UTC+7 standardization, Task V-54 Server row visibility, and Task V-55 scan results window auto-compact)
+- **Worktree**: `E:\Zonendpoint-worktrees\v55-compact`
 - **Toolchain**:
   - `rustc`: 1.99.1 (58cf8f9c3 2026-10-13)
   - `cargo`: 1.99.1 (5f94df478 2026-08-27)
@@ -41,8 +41,8 @@
   - Built Path: `src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\Zonendpoint_0.3.0_x64-setup.exe`
   - Staged Path: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe`
   - Checksum Path: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe.sha256`
-  - Size: 3,716,290 bytes (~3.54 MiB)
-  - SHA256: `8AF8B82DEC059D138338DA880DB41BA2E2D54950ADDC33E6690430AB3B90F426`
+  - Size: 3,715,823 bytes (~3.54 MiB)
+  - SHA256: `fa0495faf4ae9faea6fc84fe962e6b5eac3be14ea789768490206d3b3c8c3e03`
   - Version: `0.3.0`
   - NSIS Generator Version: `v3.13`
   - Code Signing: Unsigned (not code-signed; no release tag / publish performed)
@@ -54,7 +54,8 @@
 ### A. Server (Lab 100.96.250.245)
 - **Timezone**: Changed to `Asia/Ho_Chi_Minh` (`+0700`) via `sudo timedatectl set-timezone Asia/Ho_Chi_Minh`.
 - **Systemd Timers Shift Impact**:
-  - *Shifted by 7 hours (calendar-based without UTC qualifier)*: `dpkg-db-backup.timer` (00:00:00 +07), `sysstat-rotate.timer` (00:00:00 +07), `sysstat-summary.timer` (00:07:00 +07), `logrotate.timer` (00:35:50 +07), `zonendpoint-yara-update.timer` (03:16:38 +07), `e2scrub_all.timer`/`xfs_scrub_all.timer` (03:10 +07), `fstrim.timer` (00:43:03 +07).
+  - *Shifted by 7 hours (calendar-based without UTC qualifier)*: `dpkg-db-backup.timer` (00:00:00 +07), `sysstat-rotate.timer` (00:00:00 +07), `sysstat-summary.timer` (00:07:00 +07), `logrotate.timer` (00:35:50 +07), `e2scrub_all.timer`/`xfs_scrub_all.timer` (03:10 +07), `fstrim.timer` (00:43:03 +07).
+  - *Invariant schedule / UTC-pinned*: `zonendpoint-yara-update.timer` (defined as `OnCalendar=*-*-* 20:00:00 UTC`; explicitly pinned to UTC, running between ~03:00–05:00 +07 due to randomized delay — **NOT shifted** by the server timezone change to `Asia/Ho_Chi_Minh`).
   - *Invariant cycle (relative interval timers)*: `zonendpoint-sigcount.timer` (every 10m), `zonendpoint-abusech-update.timer` (every 61m), `sysstat-collect.timer` (every 10m), `clamav-check-update-health.timer` (every 30m).
 - **Script**: `scripts/server/zonendpoint-sigcount.py`
   - Runs via systemd timer (`zonendpoint-sigcount.timer`) every 10 minutes as root.
@@ -95,11 +96,30 @@
 - **Layout & Responsiveness**:
   - Compact window geometry (800x240) preserved across both Light and Dark themes.
 
+### E. Auto-Compact Scan Results Window (Task V-55)
+- **Problem Statement (Q-40 Defect)**: Release candidate scan results window remained at ~800px tall after clean scan ("All Good"), leaving a large empty gap beneath the scan summary card.
+- **Root Cause**:
+  1. `src/App.tsx` previously used `Math.max(window.innerHeight, ...)` and guarded window resizing behind `if (height > window.innerHeight)`. This made window resizing strictly one-way (expand-only), preventing the window from ever contracting back to compact size.
+  2. The desired height calculation used `.app-shell.scrollHeight`. Because `.selection-panel` has CSS `min-height: max(208px, calc(100vh - 32px))`, the panel naturally expands to fill the entire viewport, meaning `scrollHeight >= window.innerHeight` at all times.
+- **Implementation**:
+  1. Implemented `measureContentHeight()`: accurately computes the bottom coordinate of all rendered descendant elements (`.brand-heading` and `.selection-panel` descendants plus margins and padding), independent of viewport-stretched container heights.
+  2. In the `useEffect([summary])` resize handler:
+     - When `isClean` (scan complete, `scanned > 0`, `clean === scanned`, 0 threats/errors/cancelled): target height is set directly to compact standard `240px`.
+     - When non-clean (threats detected, errors, or cancellation): target height is dynamically computed as `Math.max(240, measureContentHeight())` and bounded by monitor `workArea`.
+     - Replaced one-way condition with bidirectional resize check: `if (!disposed && Math.abs(targetHeight - window.innerHeight) > 2)`.
+  3. Rescan Behavior: When running a second scan that results in All Good after an earlier scan that produced a tall threat list, the window cleanly and automatically shrinks back to 240px.
+  4. Manual User Resize: Dragging or resizing the window manually is preserved and not abruptly reset until a new scan completes.
+- **Test Verification**:
+  - Native test suite updated with assertions for both behaviors:
+    - Non-clean threat results expand window: `innerHeight > 300px`.
+    - Clean All Good results compact window: `innerHeight <= 300px` and empty space gap beneath the card `< 80px`.
+  - Ran native test suite **2 consecutive times** (`node tests/native/run.mjs`): **21/21 PASS** on both runs with 0 flakes.
+
 ---
 
 ## 4. Pre-Build Quality Gates Verification
 
-All tests run against worktree `v54-server-row` at version 0.3.0:
+All tests run against worktree `v55-compact` at version 0.3.0:
 
 | Gate | Command | Result | Notes |
 |---|---|---|---|
@@ -107,7 +127,7 @@ All tests run against worktree `v54-server-row` at version 0.3.0:
 | Rust Unit & Resilience | `cargo test` | **PASS** | **81/81 PASS** (62 lib, 1 bin, 18 resilience; 11 server_status tests including anti-skew 7h test) |
 | Rust Clippy | `cargo clippy --all-targets -- -D warnings` | **PASS** | 0 warnings |
 | Frontend Build | `npm.cmd run build` | **PASS** | Vite v8.3.5, 23 modules, 0 TS/CSS errors |
-| Native Test Suite | `node tests/native/run.mjs` | **PASS** | **21/21 checks PASS** (Verified: 1) connected OK -> server row hidden, 2) offline/fail -> server row visible, 3) icon click -> toggle show/hide; V-30 window close clean exit with 0 orphans) |
+| Native Test Suite | `node tests/native/run.mjs` | **PASS** | **21/21 PASS (Run 1: PASS, Run 2: PASS)** (Verified: 1) connected OK -> server row hidden, 2) offline/fail -> server row visible, 3) icon click -> toggle show/hide; 4) All Good compact <= 300px with gap < 80px; 5) non-clean results expand > 300px; 6) V-30 window close clean exit with 0 orphans) |
 
 ---
 

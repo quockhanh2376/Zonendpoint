@@ -451,6 +451,9 @@ try {
       assert.doesNotMatch(await item.$('.status').getText(), /Clean/);
     }
     assert.match(await browser.$('.results').getText(), /Native-Mock-Signature/);
+    await browser.waitUntil(async () => (await browser.execute(() => window.innerHeight)) > 300, { timeout: 10000 });
+    const heightWithThreats = await browser.execute(() => window.innerHeight);
+    assert.ok(heightWithThreats > 300, `Window innerHeight must expand for non-clean results (got ${heightWithThreats})`);
     mode = 'clean';
     writeFileSync(path.join(systemRoot, 'ci.dll'), 'Restored harmless ci fixture');
   });
@@ -629,6 +632,16 @@ try {
       assert.match(await browser.$('main').getText(), /clean 0/);
       mode = 'clean';
       await scan('Scan complete');
+      await browser.waitUntil(async () => (await browser.execute(() => window.innerHeight)) <= 300, { timeout: 10000 });
+      const heightAfterAllGood = await browser.execute(() => window.innerHeight);
+      assert.ok(heightAfterAllGood <= 300, `Window innerHeight after All Good must be compact <= 300px (got ${heightAfterAllGood})`);
+
+      // Verify no excessive empty space under card (< 80px gap)
+      const gap = await browser.execute(() => {
+        const card = document.querySelector('.all-good-card');
+        return card ? window.innerHeight - card.getBoundingClientRect().bottom : null;
+      });
+      assert.ok(gap !== null && gap >= 0 && gap < 80, `No large empty space under All Good card (gap: ${gap}px)`);
     });
 
     await check('offline never becomes CLEAN', async () => {
@@ -724,7 +737,9 @@ try {
       const appPid2 = parseInt(findRes2.stdout.trim().split(/\s+/)[0], 10);
       assert.ok(appPid2, 'Second test application PID must be found');
 
-      await (await button('Start scan')).click();
+      const startBtn = await button('Start scan');
+      await startBtn.waitForEnabled({ timeout: 10000 });
+      await startBtn.click();
       await browser.waitUntil(async () => {
         const h2 = await browser.$('h2');
         return (await h2.isExisting()) && (await h2.getText()) === 'Scanning';

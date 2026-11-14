@@ -77,6 +77,42 @@ const labels: Record<Status, string> = {
   CANCELLED: "Cancelled",
 };
 
+function measureContentHeight(): number {
+  const brand = document.querySelector<HTMLElement>(".brand-heading");
+  const panel = document.querySelector<HTMLElement>(".selection-panel");
+  const shell = document.querySelector<HTMLElement>(".app-shell");
+
+  const brandHeight = brand ? brand.getBoundingClientRect().height : 200;
+
+  let panelHeight = 208;
+  if (panel) {
+    const panelTop = panel.getBoundingClientRect().top;
+    let maxBottom = panelTop;
+    const descendants = panel.querySelectorAll<HTMLElement>("*");
+    for (const el of Array.from(descendants)) {
+      const rect = el.getBoundingClientRect();
+      if (rect.height > 0 || rect.width > 0) {
+        const style = window.getComputedStyle(el);
+        const marginBottom = parseFloat(style.marginBottom) || 0;
+        const bottom = rect.bottom + marginBottom;
+        if (bottom > maxBottom) {
+          maxBottom = bottom;
+        }
+      }
+    }
+    const panelStyle = window.getComputedStyle(panel);
+    const paddingBottom = parseFloat(panelStyle.paddingBottom) || 18;
+    panelHeight = Math.max(208, Math.ceil(maxBottom - panelTop + paddingBottom));
+  }
+
+  const shellStyle = shell ? window.getComputedStyle(shell) : null;
+  const shellPadding = shellStyle
+    ? (parseFloat(shellStyle.paddingTop) || 16) + (parseFloat(shellStyle.paddingBottom) || 16)
+    : 32;
+
+  return Math.ceil(Math.max(brandHeight, panelHeight) + shellPadding);
+}
+
 function App() {
   const [targetMenuOpen, setTargetMenuOpen] = useState(false);
   const targetPickerRef = useRef<HTMLDivElement>(null);
@@ -205,7 +241,8 @@ function App() {
     if (!summary) return;
     let disposed = false;
     const frame = requestAnimationFrame(() => {
-      const desired = Math.ceil(document.querySelector<HTMLElement>(".app-shell")?.scrollHeight ?? 240);
+      const isClean = !summary.cancelled && summary.complete && summary.scanned > 0 && summary.clean === summary.scanned;
+      const desired = isClean ? 240 : Math.max(240, measureContentHeight());
       void (async () => {
         const appWindow = getCurrentWindow();
         const monitor = await currentMonitor();
@@ -215,9 +252,9 @@ function App() {
         const available = monitor
           ? (monitor.workArea.position.y + monitor.workArea.size.height - position.y) / monitor.scaleFactor - 48
           : window.screen.availHeight - 80;
-        const height = Math.max(window.innerHeight, Math.min(desired, available));
-        if (!disposed && height > window.innerHeight) {
-          await appWindow.setSize(new LogicalSize(size.width / scale, height));
+        const targetHeight = Math.min(desired, available);
+        if (!disposed && Math.abs(targetHeight - window.innerHeight) > 2) {
+          await appWindow.setSize(new LogicalSize(size.width / scale, targetHeight));
         }
       })().catch((reason) => console.error("Could not resize scan results window", reason));
     });

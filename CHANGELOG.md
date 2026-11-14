@@ -13,6 +13,7 @@ All notable changes to Zonendpoint are documented in this file.
 - **Công cụ đo kiểm hiệu năng (Folder Benchmark)**: Bổ sung benchmark nội bộ (`folder_bench`) phục vụ đo đạc tốc độ quét thư mục cục bộ (J-04).
 
 ### Changed
+- **Co gọn cửa sổ kết quả quét về chiều cao nội dung (V-55)**: Khi quét xong trả về kết quả "All Good" (hoàn tất, 0 phát hiện mã độc/lỗi/không xác định/hủy bỏ), cửa sổ ứng dụng tự động co gọn về chiều cao chuẩn compact (~240px, loại bỏ hoàn toàn khoảng trống thừa dưới card All Good); khi có mối đe dọa hoặc kết quả lỗi cần xem xét, cửa sổ vẫn tự động nới cao theo nội dung thực tế (được giới hạn an toàn theo vùng làm việc `workArea` của màn hình); hỗ trợ co lại chuẩn xác khi quét lại All Good sau một lần kết quả dài.
 - **Ẩn ô cấu hình Server khi kết nối OK (V-54)**: Ẩn tự động hàng cấu hình Server (ô nhập địa chỉ và nút Save) khi kết nối tới ClamAV daemon thành công hoặc trong trạng thái đang kiểm tra lần đầu; tự động hiển thị khi mất kết nối/lỗi để người dùng cấu hình; hỗ trợ bấm vào biểu tượng trạng thái kết nối để bật/tắt thủ công; giữ hiển thị khi người dùng đang thao tác trong ô nhập.
 
 ### Fixed
