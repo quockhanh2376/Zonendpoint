@@ -307,29 +307,39 @@ async fn read_nul_frame<R: AsyncRead + Unpin>(
     initial_timeout: Duration,
 ) -> Result<Vec<u8>, String> {
     let mut response = Vec::with_capacity(64);
+    let mut buf = [0u8; 256];
     loop {
-        if response.len() == limit {
+        if response.len() >= limit {
             return Err("server response exceeded limit".into());
         }
-        let mut byte = [0];
-        let byte_timeout = if response.is_empty() {
+        let chunk_timeout = if response.is_empty() {
             initial_timeout
         } else {
             RESPONSE_CHUNK_TIMEOUT
         };
-        let read_result = timeout(byte_timeout, reader.read(&mut byte)).await;
+        let read_result = timeout(chunk_timeout, reader.read(&mut buf)).await;
         let count = match read_result {
             Ok(Ok(n)) => n,
             Ok(Err(error)) => return Err(format!("read server response: {error}")),
             Err(_) => return Err("read server response timed out".into()),
         };
-        match count {
-            0 => return Err("server closed before response terminator".into()),
-            _ if byte[0] == 0 => {
-                response.push(0);
-                return Ok(response);
+        if count == 0 {
+            return Err("server closed before response terminator".into());
+        }
+        if let Some(nul_idx) = buf[..count].iter().position(|&b| b == 0) {
+            if response.len() + nul_idx + 1 > limit {
+                return Err("server response exceeded limit".into());
             }
-            _ => response.push(byte[0]),
+            if nul_idx + 1 < count {
+                return Err("server sent unexpected extra data after response terminator".into());
+            }
+            response.extend_from_slice(&buf[..=nul_idx]);
+            return Ok(response);
+        } else {
+            if response.len() + count >= limit {
+                return Err("server response exceeded limit".into());
+            }
+            response.extend_from_slice(&buf[..count]);
         }
     }
 }
@@ -1911,5 +1921,48 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_read_nul_frame_multiple_chunks_and_extra_data() {
+        // 1. Normal read with chunking
+        let mut reader: &[u8] = b"stream: OK\0";
+        let res = read_nul_frame(&mut reader, 1024, Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert_eq!(res, b"stream: OK\0");
+
+        // 2. Fragmented stream delivered across multiple chunk writes
+        let (mut writer, mut duplex) = tokio::io::duplex(64);
+        tokio::spawn(async move {
+            for chunk in b"stream: OK\0".chunks(2) {
+                writer.write_all(chunk).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        });
+        let res = read_nul_frame(&mut duplex, 1024, Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert_eq!(res, b"stream: OK\0");
+
+        // 3. Extra data after NUL rejected immediately in same buffer
+        let mut reader_extra: &[u8] = b"stream: OK\0extra-bytes-detected";
+        let err = read_nul_frame(&mut reader_extra, 1024, Duration::from_secs(1))
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("unexpected extra data after response terminator"),
+            "got error: {err}"
+        );
+
+        // 4. Exceeding max response bytes limit rejected
+        let mut reader_oversize: &[u8] = b"12345678901234567890";
+        let err = read_nul_frame(&mut reader_oversize, 10, Duration::from_secs(1))
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("server response exceeded limit"),
+            "got error: {err}"
+        );
     }
 }
