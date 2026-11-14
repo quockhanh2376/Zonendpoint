@@ -737,6 +737,8 @@ try {
       const appPid2 = parseInt(findRes2.stdout.trim().split(/\s+/)[0], 10);
       assert.ok(appPid2, 'Second test application PID must be found');
 
+      writeFileSync(fixture, `delay close ${Date.now()}`);
+      await select();
       const startBtn = await button('Start scan');
       await startBtn.waitForEnabled({ timeout: 10000 });
       await startBtn.click();
