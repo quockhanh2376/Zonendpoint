@@ -25,6 +25,7 @@ import argparse
 import subprocess
 import urllib.request
 import urllib.error
+import urllib.parse
 import pathlib
 import fcntl
 from typing import Optional, Tuple, Dict, Any, List
@@ -56,7 +57,8 @@ DEFAULT_ACTIVE_DIR = "/var/lib/clamav"
 DEFAULT_BACKUP_DIR = "/var/backups/clamav-sanesecurity"
 DEFAULT_CLAMD_LOG = "/var/log/clamav/clamav.log"
 
-MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MiB per file
+MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MiB per database file
+MAX_PUBKEY_BYTES = 64 * 1024  # 64 KiB for GPG public key (Q-49)
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MIN_CHECK_INTERVAL_HOURS = 2.0
 DEFAULT_MIN_RELOAD_INTERVAL_HOURS = 6.0
@@ -66,6 +68,41 @@ USER_AGENT = "Zonendpoint-Sanesecurity-Updater/1.0 (+https://github.com/quockhan
 def log(msg: str):
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {msg}", flush=True)
+
+
+class StrictRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    Q-49: Rejects redirects that downgrade to non-HTTPS or point to an unauthorized host.
+    """
+    def __init__(self, allowed_hosts: List[str]):
+        super().__init__()
+        self.allowed_hosts = [h.lower() for h in allowed_hosts]
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parsed = urllib.parse.urlparse(newurl)
+        is_test_env = os.environ.get("ZONENDPOINT_TEST_ENV") == "1"
+        is_local_mock = is_test_env and (parsed.hostname in ("127.0.0.1", "localhost"))
+        if not is_local_mock and parsed.scheme.lower() != "https":
+            raise ValueError(f"Insecure redirect rejected (must use HTTPS): '{newurl}'")
+
+        if parsed.netloc.lower() not in self.allowed_hosts:
+            raise ValueError(
+                f"Cross-host redirect rejected: '{newurl}' (target host '{parsed.netloc}' not in allowed {self.allowed_hosts})"
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def build_secure_opener(allowed_hosts: List[str]) -> urllib.request.OpenerDirector:
+    """Creates a urllib OpenerDirector enforcing StrictRedirectHandler."""
+    return urllib.request.build_opener(StrictRedirectHandler(allowed_hosts))
+
+
+def _place_hold(hold_file: str):
+    """Atomically places HOLD file (Task L-3 / Q-49)."""
+    pathlib.Path(hold_file).parent.mkdir(parents=True, exist_ok=True)
+    with open(hold_file, "w", encoding="utf-8") as f:
+        f.write(time.strftime("%Y-%m-%dT%H:%M:%SZ\n"))
+    log(f"Placed HOLD file: {hold_file}")
 
 
 def check_safety_guard(host: Optional[str] = None, port: Optional[int] = None, clamdscan_bin: Optional[str] = None):
@@ -190,38 +227,95 @@ def write_last_run(last_run_file: str, data: Dict[str, Any]):
     os.replace(tmp_path, last_run_file)
 
 
-def setup_gnupg_keyring(gnupg_home: str, pubkey_source: Optional[str] = None) -> bool:
-    """Sets up isolated GPG keyring and validates official Sanesecurity fingerprint."""
+def get_keyring_fingerprints(gnupg_home: str) -> List[str]:
+    """Returns list of primary key fingerprints currently present in gnupg_home."""
+    cmd = ["gpg", "--homedir", gnupg_home, "--batch", "--with-colons", "--list-keys"]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        return []
+    fprs: List[str] = []
+    is_pub = False
+    for line in res.stdout.splitlines():
+        if line.startswith("pub:"):
+            is_pub = True
+        elif is_pub and line.startswith("fpr:"):
+            parts = line.split(":")
+            if len(parts) >= 10:
+                fprs.append(parts[9].strip().upper())
+            is_pub = False
+    return fprs
+
+
+def setup_gnupg_keyring(
+    gnupg_home: str,
+    pubkey_source: Optional[str] = None,
+    allowed_hosts: Optional[List[str]] = None,
+) -> bool:
+    """
+    Q-49: Sets up isolated GPG keyring.
+    Enforces that:
+    1. Keyring must contain ONLY the official Sanesecurity key (EXPECTED_FINGERPRINT).
+       Any foreign/unauthorized key present in the keyring causes immediate termination.
+    2. Public key download size is strictly bounded by MAX_PUBKEY_BYTES (64 KiB).
+    3. Download cannot follow redirects to HTTP or unauthorized hosts.
+    """
     os.makedirs(gnupg_home, mode=0o700, exist_ok=True)
     try:
         os.chmod(gnupg_home, 0o700)
     except OSError:
         pass
 
-    # Check if key is already imported with correct fingerprint
-    cmd = ["gpg", "--homedir", gnupg_home, "--batch", "--with-colons", "--list-keys"]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    if res.returncode == 0:
-        for line in res.stdout.splitlines():
-            if line.startswith("fpr:"):
-                parts = line.split(":")
-                if len(parts) >= 10:
-                    fpr = parts[9].strip().upper()
-                    if fpr == EXPECTED_FINGERPRINT:
-                        return True
+    # Check existing keys in keyring
+    existing_fprs = get_keyring_fingerprints(gnupg_home)
+    if existing_fprs:
+        unauthorized = [f for f in existing_fprs if f != EXPECTED_FINGERPRINT]
+        if unauthorized:
+            raise RuntimeError(
+                f"GPG keyring '{gnupg_home}' contains unauthorized key(s): {unauthorized}! "
+                f"Keyring must ONLY contain official key {EXPECTED_FINGERPRINT}."
+            )
+        if EXPECTED_FINGERPRINT in existing_fprs:
+            return True
 
     # Import public key
     log(f"Importing Sanesecurity public key into isolated keyring {gnupg_home}...")
-    pubkey_data = None
+    pubkey_data = b""
     if pubkey_source and os.path.exists(pubkey_source):
+        sz = os.path.getsize(pubkey_source)
+        if sz > MAX_PUBKEY_BYTES:
+            raise ValueError(f"Local public key size {sz} exceeds limit {MAX_PUBKEY_BYTES} bytes")
         with open(pubkey_source, "rb") as pf:
-            pubkey_data = pf.read()
+            pubkey_data = pf.read(MAX_PUBKEY_BYTES + 1)
+            if len(pubkey_data) > MAX_PUBKEY_BYTES:
+                raise ValueError(f"Local public key size exceeds limit {MAX_PUBKEY_BYTES} bytes")
     else:
         url = pubkey_source or PUBKEY_URL
         log(f"Fetching GPG public key from {url}...")
+        parsed_url = urllib.parse.urlparse(url)
+        hosts = allowed_hosts or [parsed_url.netloc]
+        opener = build_secure_opener(hosts)
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
-            pubkey_data = resp.read()
+        with opener.open(req, timeout=DEFAULT_TIMEOUT) as resp:
+            final_url = resp.geturl()
+            parsed_final = urllib.parse.urlparse(final_url)
+            is_test_env = os.environ.get("ZONENDPOINT_TEST_ENV") == "1"
+            is_local_mock = is_test_env and (parsed_final.hostname in ("127.0.0.1", "localhost"))
+            if not is_local_mock and parsed_final.scheme.lower() != "https":
+                raise ValueError(f"Insecure public key final URL (must use HTTPS): '{final_url}'")
+            if parsed_final.netloc.lower() not in [h.lower() for h in hosts]:
+                raise ValueError(f"Cross-host public key final URL rejected: '{final_url}' (not in {hosts})")
+
+            cl = resp.headers.get("Content-Length")
+            if cl and int(cl) > MAX_PUBKEY_BYTES:
+                raise ValueError(f"Public key Content-Length {cl} exceeds limit {MAX_PUBKEY_BYTES} bytes")
+
+            while True:
+                chunk = resp.read(4096)
+                if not chunk:
+                    break
+                pubkey_data += chunk
+                if len(pubkey_data) > MAX_PUBKEY_BYTES:
+                    raise ValueError(f"Public key size exceeded limit {MAX_PUBKEY_BYTES} bytes")
 
     with tempfile.NamedTemporaryFile("wb", delete=False) as tf:
         tf.write(pubkey_data)
@@ -248,6 +342,15 @@ def setup_gnupg_keyring(gnupg_home: str, pubkey_source: Optional[str] = None) ->
         res_import = subprocess.run(cmd_import, capture_output=True, text=True)
         if res_import.returncode != 0:
             raise RuntimeError(f"GPG key import failed: {res_import.stderr}")
+
+        # Post-check: Keyring must contain ONLY EXPECTED_FINGERPRINT
+        post_fprs = get_keyring_fingerprints(gnupg_home)
+        unauthorized_post = [f for f in post_fprs if f != EXPECTED_FINGERPRINT]
+        if unauthorized_post or EXPECTED_FINGERPRINT not in post_fprs:
+            raise RuntimeError(
+                f"GPG keyring verification failed after import! Found keys: {post_fprs}, expected ONLY {EXPECTED_FINGERPRINT}"
+            )
+
         log(f"Successfully imported and verified Sanesecurity public key (fingerprint: {EXPECTED_FINGERPRINT}).")
         return True
     finally:
@@ -258,12 +361,35 @@ def setup_gnupg_keyring(gnupg_home: str, pubkey_source: Optional[str] = None) ->
 
 
 def verify_gpg_signature(gnupg_home: str, file_path: str, sig_path: str) -> bool:
-    """Verifies detached GPG signature against isolated keyring."""
-    cmd = ["gpg", "--homedir", gnupg_home, "--batch", "--verify", sig_path, file_path]
+    """
+    Q-49: Verifies detached GPG signature using --status-fd 1.
+    Requires that the signer fingerprint (VALIDSIG) matches EXPECTED_FINGERPRINT exactly.
+    """
+    cmd = ["gpg", "--homedir", gnupg_home, "--batch", "--status-fd", "1", "--verify", sig_path, file_path]
     res = subprocess.run(cmd, capture_output=True, text=True)
-    if res.returncode == 0 and ("Good signature" in res.stderr or "Good signature" in res.stdout):
+    if res.returncode != 0:
+        log(f"GPG verification exit {res.returncode} for {os.path.basename(file_path)}: {res.stderr.strip()}")
+        return False
+
+    valid_sig = False
+    signer_fpr = None
+    for line in res.stdout.splitlines():
+        if line.startswith("[GNUPG:] VALIDSIG "):
+            parts = line.split()
+            if len(parts) >= 3:
+                signer_fpr = parts[2].strip().upper()
+                primary_fpr = parts[11].strip().upper() if len(parts) >= 12 else ""
+                if signer_fpr == EXPECTED_FINGERPRINT or primary_fpr == EXPECTED_FINGERPRINT:
+                    valid_sig = True
+                    break
+
+    if valid_sig:
         return True
-    log(f"GPG verification FAILED for {os.path.basename(file_path)}: {res.stderr.strip()}")
+
+    log(
+        f"GPG verification FAILED for {os.path.basename(file_path)}: "
+        f"signer fingerprint '{signer_fpr}' does not match expected {EXPECTED_FINGERPRINT}"
+    )
     return False
 
 
@@ -284,6 +410,8 @@ def safe_atomic_write(
     user: str = "clamav",
     group: str = "clamav",
     mode: int = 0o644,
+    uid: Optional[int] = None,
+    gid: Optional[int] = None,
 ):
     """Safely copies source_file to target_path using mkstemp, fchown, fchmod, fsync, and replace (Task L-11)."""
     target_dir = os.path.dirname(target_path)
@@ -300,13 +428,21 @@ def safe_atomic_write(
                     break
                 os.write(fd, chunk)
         if os.name == "posix":
-            try:
-                import pwd, grp
-                uid = pwd.getpwnam(user).pw_uid
-                gid = grp.getgrnam(group).gr_gid
-                os.fchown(fd, uid, gid)
-            except Exception:
-                pass
+            target_uid = uid
+            target_gid = gid
+            if target_uid is None or target_gid is None:
+                try:
+                    import pwd, grp
+                    target_uid = pwd.getpwnam(user).pw_uid
+                    target_gid = grp.getgrnam(group).gr_gid
+                except Exception:
+                    target_uid = None
+                    target_gid = None
+            if target_uid is not None and target_gid is not None:
+                try:
+                    os.fchown(fd, target_uid, target_gid)
+                except OSError:
+                    pass
         try:
             os.fchmod(fd, mode)
         except OSError:
@@ -324,9 +460,12 @@ def download_conditional(
     last_modified: Optional[str] = None,
     max_bytes: int = MAX_FILE_BYTES,
     timeout: float = DEFAULT_TIMEOUT,
+    allowed_hosts: Optional[List[str]] = None,
+    opener: Optional[urllib.request.OpenerDirector] = None,
 ) -> Tuple[bool, Optional[str], Optional[str]]:
     """
     Downloads file with If-None-Match / If-Modified-Since headers.
+    Q-49: Enforces StrictRedirectHandler and validates final URL scheme and host.
     Returns: (is_modified, new_etag, new_last_modified).
     """
     headers = {"User-Agent": USER_AGENT}
@@ -335,9 +474,23 @@ def download_conditional(
     if last_modified:
         headers["If-Modified-Since"] = last_modified
 
+    parsed_req = urllib.parse.urlparse(url)
+    hosts = allowed_hosts or [parsed_req.netloc]
+    if opener is None:
+        opener = build_secure_opener(hosts)
+
     req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with opener.open(req, timeout=timeout) as resp:
+            final_url = resp.geturl()
+            parsed_final = urllib.parse.urlparse(final_url)
+            is_test_env = os.environ.get("ZONENDPOINT_TEST_ENV") == "1"
+            is_local_mock = is_test_env and (parsed_final.hostname in ("127.0.0.1", "localhost"))
+            if not is_local_mock and parsed_final.scheme.lower() != "https":
+                raise ValueError(f"Insecure final URL (must use HTTPS): '{final_url}'")
+            if parsed_final.netloc.lower() not in [h.lower() for h in hosts]:
+                raise ValueError(f"Cross-host final URL rejected: '{final_url}' (not in {hosts})")
+
             new_etag = resp.headers.get("ETag")
             new_lm = resp.headers.get("Last-Modified")
             cl = resp.headers.get("Content-Length")
@@ -359,6 +512,132 @@ def download_conditional(
         if e.code == 304:
             return False, etag, last_modified
         raise
+
+
+def deploy_batch(
+    staged_files: List[str],
+    active_dir: str,
+    backup_dir: str,
+    hold_file: str,
+    reload_state_file: str,
+    last_run_file: str,
+    clamdscan_bin: str = "clamdscan",
+    clamd_host: str = "127.0.0.1",
+    clamd_port: int = 3310,
+    user: str = "clamav",
+    group: str = "clamav",
+    default_mode: int = 0o644,
+) -> List[str]:
+    """
+    Q-49: Atomically deploys all staged files as a batch.
+    If backup, installation, or writing fails on any file:
+    1. Immediately creates HOLD file.
+    2. Restores all files in the batch back to their previous state (preserving mode and owner).
+    3. Removes any newly created files that did not previously exist.
+    4. Triggers emergency reload.
+    5. Writes last-run.json and raises RuntimeError.
+    """
+    os.makedirs(backup_dir, exist_ok=True)
+    os.makedirs(active_dir, exist_ok=True)
+
+    snapshot_manifest: Dict[str, Dict[str, Any]] = {}
+
+    # Step 1: Pre-snapshot all target files in active_dir
+    try:
+        for staged_path in staged_files:
+            fname = os.path.basename(staged_path)
+            active_path = os.path.join(active_dir, fname)
+            backup_path = os.path.join(backup_dir, f"{fname}.bak")
+
+            if os.path.exists(active_path):
+                st = os.stat(active_path)
+                mode = st.st_mode & 0o777
+                uid = st.st_uid
+                gid = st.st_gid
+                shutil.copyfile(active_path, backup_path)
+                try:
+                    os.chmod(backup_path, mode)
+                    if os.name == "posix":
+                        os.chown(backup_path, uid, gid)
+                except OSError:
+                    pass
+                snapshot_manifest[fname] = {
+                    "existed": True,
+                    "backup_path": backup_path,
+                    "mode": mode,
+                    "uid": uid,
+                    "gid": gid,
+                }
+                log(f"Backed up {fname} -> {backup_path} (mode={oct(mode)})")
+            else:
+                snapshot_manifest[fname] = {
+                    "existed": False,
+                }
+    except Exception as e:
+        log(f"ERROR during batch pre-backup phase: {e}. Setting HOLD.")
+        _place_hold(hold_file)
+        raise RuntimeError(f"Batch pre-backup failed: {e}")
+
+    # Step 2: Deploy files one by one with rollback on error
+    deployed_files: List[str] = []
+    try:
+        for staged_path in staged_files:
+            fname = os.path.basename(staged_path)
+            active_path = os.path.join(active_dir, fname)
+            safe_atomic_write(
+                target_path=active_path,
+                source_file=staged_path,
+                user=user,
+                group=group,
+                mode=default_mode,
+            )
+            deployed_files.append(fname)
+            log(f"Atomically deployed {fname} -> {active_path}")
+        return deployed_files
+    except Exception as e:
+        log(f"CRITICAL: Batch deployment failed at file '{fname}': {e}. Initiating batch rollback...")
+        # 1. Place HOLD file first
+        _place_hold(hold_file)
+
+        # 2. Restore all files from snapshot
+        for fn, info in snapshot_manifest.items():
+            ap = os.path.join(active_dir, fn)
+            if info["existed"]:
+                bp = info["backup_path"]
+                try:
+                    safe_atomic_write(
+                        target_path=ap,
+                        source_file=bp,
+                        mode=info["mode"],
+                        uid=info.get("uid"),
+                        gid=info.get("gid"),
+                    )
+                    log(f"Batch rollback restored {fn} from {bp} (mode={oct(info['mode'])})")
+                except Exception as restore_err:
+                    log(f"ERROR restoring {fn} during rollback: {restore_err}")
+            else:
+                if os.path.exists(ap):
+                    try:
+                        os.remove(ap)
+                        log(f"Batch rollback removed unbacked {fn}")
+                    except OSError as rm_err:
+                        log(f"Warning removing {ap}: {rm_err}")
+
+        # 3. Trigger emergency clamd reload
+        try:
+            subprocess.run([clamdscan_bin, "--reload"], capture_output=True, text=True)
+            record_reload_state(reload_state_file, caller="sanesecurity_batch_rollback", forced=True)
+        except Exception as clamd_err:
+            log(f"Warning during batch rollback clamd reload: {clamd_err}")
+
+        write_last_run(last_run_file, {
+            "timestamp": time.time(),
+            "status": "batch_deploy_failed",
+            "error": str(e),
+            "failed_file": fname,
+            "rollback": "restored"
+        })
+        raise RuntimeError(f"Batch deployment failed at '{fname}' and was rolled back: {e}")
 
 
 def run_clamscan(args: List[str], clamscan_bin: str = "clamscan", timeout: float = 120.0) -> subprocess.CompletedProcess:
@@ -477,10 +756,7 @@ def reload_clamd_and_verify(
 def emergency_rollback(backup_dir: str, active_dir: str, hold_file: str, reload_state_file: str, clamdscan_bin: str, clamd_host: str, clamd_port: int):
     """Executes emergency rollback on post-reload failure and sets HOLD file."""
     log("CRITICAL: Executing emergency rollback and setting HOLD file...")
-    pathlib.Path(hold_file).parent.mkdir(parents=True, exist_ok=True)
-    with open(hold_file, "w", encoding="utf-8") as f:
-        f.write(time.strftime("%Y-%m-%dT%H:%M:%SZ\n"))
-    log(f"Placed HOLD file: {hold_file}")
+    _place_hold(hold_file)
 
     if os.path.exists(backup_dir):
         for fname in os.listdir(backup_dir):
@@ -488,8 +764,18 @@ def emergency_rollback(backup_dir: str, active_dir: str, hold_file: str, reload_
                 orig_name = fname[:-4]
                 src = os.path.join(backup_dir, fname)
                 dst = os.path.join(active_dir, orig_name)
-                safe_atomic_write(dst, src)
-                log(f"Restored {orig_name} from backup.")
+                try:
+                    st = os.stat(src)
+                    safe_atomic_write(
+                        target_path=dst,
+                        source_file=src,
+                        mode=st.st_mode & 0o777,
+                        uid=st.st_uid,
+                        gid=st.st_gid,
+                    )
+                    log(f"Restored {orig_name} from backup (mode={oct(st.st_mode)}).")
+                except Exception as e:
+                    log(f"Error restoring {orig_name}: {e}")
 
     subprocess.run([clamdscan_bin, "--reload"], capture_output=True, text=True)
     record_reload_state(reload_state_file, caller="sanesecurity_emergency_rollback", forced=True)
@@ -552,6 +838,16 @@ def main():
     try:
         # Validate mirror URL
         mirror_url = validate_mirror_url(args.mirror)
+        mirror_host = urllib.parse.urlparse(mirror_url).netloc
+        allowed_hosts = [mirror_host]
+        if args.public_key:
+            pk_host = urllib.parse.urlparse(args.public_key).netloc
+            if pk_host and pk_host not in allowed_hosts:
+                allowed_hosts.append(pk_host)
+        else:
+            def_pk_host = urllib.parse.urlparse(PUBKEY_URL).netloc
+            if def_pk_host and def_pk_host not in allowed_hosts:
+                allowed_hosts.append(def_pk_host)
 
         # 3. Min check interval
         if not args.force_check and not args.check_only:
@@ -565,8 +861,8 @@ def main():
                 })
                 sys.exit(0)
 
-        # 4. Setup GPG keyring and verify fingerprint
-        setup_gnupg_keyring(args.gnupg_home, pubkey_source=args.public_key)
+        # 4. Setup GPG keyring and verify fingerprint (Q-49: max size 64KiB & strict host check)
+        setup_gnupg_keyring(args.gnupg_home, pubkey_source=args.public_key, allowed_hosts=allowed_hosts)
 
         state = load_state(args.state_file)
         files_state = state.get("files", {})
@@ -596,16 +892,20 @@ def main():
 
                 try:
                     is_mod, new_etag, new_lm = download_conditional(
-                        file_url, dest_file, etag=prev_etag, last_modified=prev_lm
+                        file_url, dest_file, etag=prev_etag, last_modified=prev_lm,
+                        allowed_hosts=[mirror_host]
                     )
                     if not is_mod:
                         unchanged_file_names.append(fname)
                         continue
 
                     # File modified upstream, download corresponding .sig
-                    download_conditional(sig_url, dest_sig, max_bytes=1024 * 1024)
+                    download_conditional(
+                        sig_url, dest_sig, max_bytes=1024 * 1024,
+                        allowed_hosts=[mirror_host]
+                    )
 
-                    # GPG verification
+                    # GPG verification (Q-49: signer fingerprint must match EXPECTED_FINGERPRINT via --status-fd 1)
                     if not verify_gpg_signature(args.gnupg_home, dest_file, dest_sig):
                         log(f"WARNING: GPG verification failed for {fname}. Rejecting update, retaining existing copy.")
                         failed_gpg_files.append(fname)
@@ -651,21 +951,18 @@ def main():
                 })
                 sys.exit(1)
 
-            # 7. Atomic deployment & backup
-            os.makedirs(args.backup_dir, exist_ok=True)
-            os.makedirs(args.active_dir, exist_ok=True)
-
-            for staged_path in staged_files:
-                fname = os.path.basename(staged_path)
-                active_path = os.path.join(args.active_dir, fname)
-                backup_path = os.path.join(args.backup_dir, f"{fname}.bak")
-
-                if os.path.exists(active_path):
-                    shutil.copyfile(active_path, backup_path)
-                    log(f"Backed up {fname} -> {backup_path}")
-
-                safe_atomic_write(active_path, staged_path)
-                log(f"Atomically deployed {fname} -> {active_path}")
+            # 7. Atomic batch deployment & backup (Q-49: all-or-nothing rollback + HOLD on error)
+            deployed_files = deploy_batch(
+                staged_files=staged_files,
+                active_dir=args.active_dir,
+                backup_dir=args.backup_dir,
+                hold_file=args.hold_file,
+                reload_state_file=args.reload_state_file,
+                last_run_file=args.last_run_file,
+                clamdscan_bin=args.clamdscan_bin,
+                clamd_host=args.clamd_host,
+                clamd_port=args.clamd_port,
+            )
 
             # 8. Reload check and execution
             reload_deferred = False

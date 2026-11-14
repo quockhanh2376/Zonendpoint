@@ -241,17 +241,10 @@ While this file exists:
 - `zonendpoint-yara-update.py` will detect the hold file and skip the scheduled daily run immediately.
 - Prevents the daily updater from downloading and re-installing the problematic YARA ruleset overnight.
 
-**To inspect and clear the hold state:**
-```bash
-# Check if hold is active
-ls -la /opt/zonendpoint/HOLD-yara
-
-# View timestamp when rollback occurred
-cat /opt/zonendpoint/HOLD-yara
-
-# Remove hold to allow automated daily YARA updates to resume
-sudo rm -f /opt/zonendpoint/HOLD-yara
-```
+**Chính sách Quản lý Khóa & Gỡ bỏ HOLD:**
+- Khóa triển khai (`/run/lock/zonendpoint-clamd-deploy.lock`): Không bao giờ xóa lock bằng `rm -f`. Khóa kernel `flock` tự động giải phóng khi tiến trình nắm giữ kết thúc.
+- File HOLD (`/opt/zonendpoint/HOLD-yara`): HOLD chỉ gỡ thủ công sau khi kiểm tra có biên bản điều tra nguyên nhân sự cố. Tuyệt đối không xóa tùy tiện trong quá trình vận hành.
+- Triển khai lab dùng duy nhất `E:\Zonendpoint-tools\coordination\deploy\deploy-feeds.sh` (Loki, sau khi Qeen nghiệm thu).
 
 ---
 

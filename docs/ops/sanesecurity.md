@@ -135,52 +135,14 @@ sudo /usr/local/bin/zonendpoint-sanesecurity-rollback.sh --purge
 
 Script sẽ tạo HOLD file, xóa toàn bộ 9 file Sanesecurity trong `/var/lib/clamav/`, và reload lại clamd.
 
-### 5.3 Cách Gỡ bỏ HOLD để Tiếp tục Cập nhật
-Sau khi đã điều tra và xử lý xong sự cố, người quản trị xóa file HOLD để cho phép dịch vụ tự động hoạt động trở lại:
-
-```bash
-sudo rm -f /opt/zonendpoint/HOLD-sanesecurity
-```
+### 5.3 Chính sách Quản lý Khóa & Gỡ bỏ HOLD
+- **Khóa triển khai (`/run/lock/zonendpoint-clamd-deploy.lock`):** Tuyệt đối không bao giờ xóa lock bằng `rm -f`. Khóa kernel `flock` sẽ tự động giải phóng khi tiến trình nắm giữ kết thúc.
+- **File HOLD (`/opt/zonendpoint/HOLD-sanesecurity`):** HOLD chỉ gỡ thủ công sau khi kiểm tra có biên bản điều tra nguyên nhân sự cố. Tuyệt đối không xóa tùy tiện trong quá trình vận hành.
 
 ---
 
-## 6. Kế hoạch Triển khai Lên Server Lab (Gộp chung V-58/V-62/V-68)
+## 6. Chính sách Triển khai Lên Server Lab (Chính sách Hợp nhất)
 
-Theo phê duyệt của Zon, toàn bộ việc triển khai live sẽ được thực hiện đồng thời cho các feed (MalwareBazaar, ThreatFox, YARA-Forge, Sanesecurity) sau khi Qeen nghiệm thu.
+Triển khai lab dùng duy nhất `E:\Zonendpoint-tools\coordination\deploy\deploy-feeds.sh` (Loki, sau khi Qeen nghiệm thu); không bao giờ xóa lock; HOLD chỉ gỡ thủ công sau khi kiểm tra có biên bản.
 
-### Các bước thực hiện tuần tự:
-1. **Dừng toàn bộ timer hiện tại:**
-   ```bash
-   sudo systemctl stop zonendpoint-abusech-update.timer zonendpoint-yara-update.timer
-   ```
-2. **Sao lưu & Ghi nhận SHA-256 các file hiện hữu:**
-   ```bash
-   sudo mkdir -p /var/backups/pre-v68-hardening
-   sudo sha256sum /var/lib/clamav/* > /var/backups/pre-v68-hardening/clamav-sha256.txt
-   ```
-3. **Cài đặt scripts & units mới:**
-   - Sao chép `zonendpoint-sanesecurity.py` vào `/usr/local/bin/` (`0755 root:root`).
-   - Sao chép `zonendpoint-sanesecurity-rollback.sh` vào `/usr/local/bin/` (`0755 root:root`).
-   - Sao chép `zonendpoint-sanesecurity.service` và `zonendpoint-sanesecurity.timer` vào `/etc/systemd/system/` (`0644 root:root`).
-   - Tạo các thư mục cần thiết:
-     ```bash
-     sudo mkdir -p /var/backups/clamav-sanesecurity /opt/zonendpoint/sanesecurity/gnupg
-     sudo chown -R clamav:clamav /var/backups/clamav-sanesecurity
-     sudo chown -R root:root /opt/zonendpoint/sanesecurity
-     sudo chmod 700 /opt/zonendpoint/sanesecurity/gnupg
-     ```
-4. **Tải cấu hình systemd:**
-   ```bash
-   sudo systemctl daemon-reload
-   ```
-5. **Chạy thử lần đầu bằng lệnh thủ công:**
-   ```bash
-   sudo /usr/local/bin/zonendpoint-sanesecurity.py --force-check --force-reload
-   ```
-   Kiểm tra journalctl và đếm số lượng chữ ký tăng thêm trong clamd.
-6. **Kích hoạt các timers:**
-   ```bash
-   sudo systemctl enable --now zonendpoint-abusech-update.timer
-   sudo systemctl enable --now zonendpoint-yara-update.timer
-   sudo systemctl enable --now zonendpoint-sanesecurity.timer
-   ```
+Tuyệt đối không áp dụng quy trình cài đặt/sao chép thủ công. Mọi thao tác sao lưu, cài đặt nguyên tử và quản lý timer được điều phối tập trung qua `deploy-feeds.sh`.

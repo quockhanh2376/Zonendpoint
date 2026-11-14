@@ -147,149 +147,22 @@ sudo journalctl -u clamav-daemon --since '2026-11-14 21:50:00' --no-pager
 
 ---
 
-## 3. Quy trình Triển khai Chuẩn trên Lab (Cần anh Zon duyệt)
+## 3. Quy trình Triển khai Chuẩn trên Lab (Chính sách Hợp nhất)
 
-Khi anh Zon phê duyệt triển khai, quy trình thực hiện tuần tự như sau (tuân thủ nghiêm ngặt nguyên tắc an toàn, **không dùng git checkout trên lab**):
+Triển khai lab dùng duy nhất `E:\Zonendpoint-tools\coordination\deploy\deploy-feeds.sh` (Loki, sau khi Qeen nghiệm thu); không bao giờ xóa lock; HOLD chỉ gỡ thủ công sau khi kiểm tra có biên bản.
 
-### Bước 1: Dừng Timer và chờ service dừng hẳn
-```bash
-# 1.1 Dừng timer (chỉ stop, TUYỆT ĐỐI KHÔNG disable)
-sudo systemctl stop zonendpoint-abusech-update.timer
-sudo systemctl stop zonendpoint-yara-update.timer
-sudo systemctl stop zonendpoint-sanesecurity.timer 2>/dev/null || true
-
-# 1.2 Chờ cho các service hoàn tất lượt chạy (nếu đang chạy)
-sudo systemctl is-active zonendpoint-abusech-update.service
-sudo systemctl is-active zonendpoint-yara-update.service
-sudo systemctl is-active zonendpoint-sanesecurity.service 2>/dev/null || true
-```
-
-### Bước 2: Tạo thư mục Backup có gắn ngày và lưu mã băm SHA256
-```bash
-BACKUP_DIR="/var/backups/zonendpoint-install-$(date +%Y%m%d-%H%M%S)"
-sudo mkdir -p "$BACKUP_DIR"
-
-# Sao lưu các file đang cài đặt hiện tại
-sudo cp -a /usr/local/bin/zonendpoint-*.py "$BACKUP_DIR/" 2>/dev/null || true
-sudo cp -a /usr/local/bin/zonendpoint-*.sh "$BACKUP_DIR/" 2>/dev/null || true
-sudo cp -a /opt/zonendpoint/yara/filter_yara_clamav.py "$BACKUP_DIR/" 2>/dev/null || true
-sudo cp -a /etc/systemd/system/zonendpoint-*.service "$BACKUP_DIR/" 2>/dev/null || true
-sudo cp -a /etc/systemd/system/zonendpoint-*.timer "$BACKUP_DIR/" 2>/dev/null || true
-
-# Tạo manifest SHA256 cho toàn bộ file trước khi thay thế
-cd "$BACKUP_DIR" && sudo sha256sum * > manifest-before.sha256
-```
-
-### Bước 3: Cài đặt bản mới vào vị trí đích
-```bash
-# 3.1 Cài đặt Python scripts & Shell scripts
-sudo cp scripts/feeds/zonendpoint-abusech-update.py /usr/local/bin/
-sudo cp scripts/feeds/zonendpoint-malwarebazaar.py /usr/local/bin/
-sudo cp scripts/feeds/zonendpoint-threatfox.py /usr/local/bin/
-sudo cp scripts/feeds/zonendpoint-yara-update.py /usr/local/bin/
-sudo cp scripts/feeds/zonendpoint-sanesecurity.py /usr/local/bin/
-sudo cp scripts/feeds/abusech_rate_limit.py /usr/local/bin/
-sudo cp scripts/feeds/filter_yara_clamav.py /opt/zonendpoint/yara/
-sudo cp scripts/server/zonendpoint-sigcount.py /usr/local/bin/
-
-sudo cp scripts/feeds/zonendpoint-malwarebazaar-rollback.sh /usr/local/bin/
-sudo cp scripts/feeds/zonendpoint-threatfox-rollback.sh /usr/local/bin/
-sudo cp scripts/feeds/zonendpoint-yara-rollback.sh /usr/local/bin/
-sudo cp scripts/feeds/zonendpoint-sanesecurity-rollback.sh /usr/local/bin/
-
-sudo chmod 0755 /usr/local/bin/zonendpoint-*.py /usr/local/bin/zonendpoint-*.sh /opt/zonendpoint/yara/filter_yara_clamav.py
-
-# 3.2 Tạo các thư mục backup phân quyền theo L-12
-sudo mkdir -p /var/backups/clamav-malwarebazaar /var/backups/clamav-threatfox /var/backups/clamav-yara /var/backups/clamav-sanesecurity
-sudo chmod 0750 /var/backups/clamav-*
-sudo mkdir -p /opt/zonendpoint/sanesecurity/gnupg
-sudo chmod 0700 /opt/zonendpoint/sanesecurity/gnupg
-
-# 3.3 Cài đặt systemd units đã sandbox
-sudo cp scripts/feeds/zonendpoint-abusech-update.service /etc/systemd/system/
-sudo cp scripts/feeds/zonendpoint-abusech-update.timer /etc/systemd/system/
-sudo cp scripts/feeds/zonendpoint-yara-update.service /etc/systemd/system/
-sudo cp scripts/feeds/zonendpoint-yara-update.timer /etc/systemd/system/
-sudo cp scripts/feeds/zonendpoint-sanesecurity.service /etc/systemd/system/
-sudo cp scripts/feeds/zonendpoint-sanesecurity.timer /etc/systemd/system/
-sudo cp scripts/server/zonendpoint-sigcount.service /etc/systemd/system/
-
-sudo chmod 0644 /etc/systemd/system/zonendpoint-*.service /etc/systemd/system/zonendpoint-*.timer
-```
-
-### Bước 4: Nạp lại cấu hình daemon systemd & Nghiệm thu
-```bash
-# 4.1 Reload daemon
-sudo systemctl daemon-reload
-
-# 4.2 Kiểm tra cú pháp và an ninh systemd
-systemd-analyze verify /etc/systemd/system/zonendpoint-*.service /etc/systemd/system/zonendpoint-*.timer
-systemd-analyze security --offline=true /etc/systemd/system/zonendpoint-abusech-update.service
-systemd-analyze security --offline=true /etc/systemd/system/zonendpoint-yara-update.service
-systemd-analyze security --offline=true /etc/systemd/system/zonendpoint-sanesecurity.service
-
-# 4.3 Chạy thử nghiệm Sanesecurity lần đầu bằng lệnh thủ công
-sudo /usr/local/bin/zonendpoint-sanesecurity.py --force-check --force-reload
-
-# 4.4 Chạy thử nghiệm sigcount một lần
-sudo systemctl restart zonendpoint-sigcount.service
-cat /var/lib/zonendpoint/status/signatures.json
-```
-
-### Bước 5: Kích hoạt lại các timer
-```bash
-sudo systemctl start zonendpoint-abusech-update.timer
-sudo systemctl start zonendpoint-yara-update.timer
-sudo systemctl enable --now zonendpoint-sanesecurity.timer
-
-# Kiểm tra trạng thái timer hoạt động
-systemctl list-timers zonendpoint-*
-```
+Tuyệt đối không thực hiện các quy trình thao tác thủ công (dừng/copy tay, chỉnh sửa file trực tiếp trên host). Script `deploy-feeds.sh` đảm nhiệm toàn bộ quy trình:
+1. Chiếm khóa chung `/run/lock/zonendpoint-clamd-deploy.lock` trước khi thực hiện bất kỳ thay đổi nào.
+2. Ghi nhận trạng thái timer hiện hữu, tạo backup có gắn ngày kèm manifest và mã băm SHA-256.
+3. Cài đặt các file script và service/timer sandbox đồng bộ theo MAP.
+4. Nạp lại cấu hình daemon systemd và kiểm tra sức khỏe clamd.
+5. Khôi phục lại trạng thái active của các timer ban đầu.
 
 ---
 
-## 4. Quy trình Rollback Chuẩn trên Lab (Khi cần thiết)
+## 4. Chính sách Rollback & Xử lý Khóa/HOLD
 
-Nếu có bất kỳ sự cố nào xảy ra trong quá trình triển khai hoặc vận hành:
-
-1. **Dừng timer**:
-   ```bash
-   sudo systemctl stop zonendpoint-abusech-update.timer
-   sudo systemctl stop zonendpoint-yara-update.timer
-   sudo systemctl stop zonendpoint-sanesecurity.timer
-   ```
-
-2. **Khôi phục nguyên trạng từ thư mục backup có ngày** (TUYỆT ĐỐI KHÔNG DÙNG `git checkout` TRÊN LAB):
-   ```bash
-   # Giả sử thư mục backup là /var/backups/zonendpoint-install-YYYYMMDD-HHMMSS/
-   RESTORE_DIR="/var/backups/zonendpoint-install-YYYYMMDD-HHMMSS"
-   
-   # Xác minh tính toàn vẹn bản backup
-   cd "$RESTORE_DIR" && sha256sum -c manifest-before.sha256
-   
-   # Khôi phục file nhị phân và script
-   sudo cp -a "$RESTORE_DIR"/zonendpoint-*.py /usr/local/bin/
-   sudo cp -a "$RESTORE_DIR"/zonendpoint-*.sh /usr/local/bin/
-   sudo cp -a "$RESTORE_DIR"/filter_yara_clamav.py /opt/zonendpoint/yara/ 2>/dev/null || true
-   sudo chmod 0755 /usr/local/bin/zonendpoint-*
-   
-   # Khôi phục service units
-   sudo cp -a "$RESTORE_DIR"/zonendpoint-*.service /etc/systemd/system/
-   sudo cp -a "$RESTORE_DIR"/zonendpoint-*.timer /etc/systemd/system/
-   sudo chmod 0644 /etc/systemd/system/zonendpoint-*
-   ```
-
-3. **Nạp lại daemon và khởi động lại timer**:
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl start zonendpoint-abusech-update.timer
-   sudo systemctl start zonendpoint-yara-update.timer
-   ```
-   *Ghi chú*: Giữ nguyên trạng thái `enabled` của timer (không bị ảnh hưởng bởi quá trình rollback).
-
-4. **Dọn dẹp lock hoặc hold file tồn dư (nếu cần gỡ chặn)**:
-   ```bash
-   sudo rm -f /run/lock/zonendpoint-clamd-deploy.lock
-   sudo rm -f /opt/zonendpoint/HOLD-abusech /opt/zonendpoint/HOLD-yara /opt/zonendpoint/HOLD-sanesecurity
-   ```
+- **Rollback:** Nếu xảy ra sự cố trong quá trình triển khai hoặc nghiệm thu, sử dụng cơ chế rollback tự động hoặc lệnh rollback tích hợp của `deploy-feeds.sh`.
+- **Khóa triển khai (`/run/lock/zonendpoint-clamd-deploy.lock`):** Không bao giờ xóa lock thủ công bằng `rm -f`. Khóa sử dụng cơ chế `flock` của Linux kernel, sẽ tự động giải phóng khi tiến trình nắm giữ kết thúc.
+- **File HOLD (`HOLD-abusech`, `HOLD-yara`, `HOLD-sanesecurity`):** HOLD chỉ gỡ thủ công sau khi kiểm tra có biên bản điều tra nguyên nhân sự cố. Tuyệt đối không xóa tùy tiện trong quá trình vận hành.
 

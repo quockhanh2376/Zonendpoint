@@ -14,6 +14,7 @@ import pathlib
 import tempfile
 import unittest
 import subprocess
+import urllib.request
 import importlib.util
 from unittest.mock import patch, MagicMock
 
@@ -133,11 +134,15 @@ class TestSanesecurityUpdater(unittest.TestCase):
     def test_06_gpg_fingerprint_mismatch_aborts_immediately(self):
         """GPG: Key with wrong fingerprint causes immediate failure."""
         mock_resp = MagicMock()
-        mock_resp.read.return_value = b"fake-key-block"
+        mock_resp.geturl.return_value = "http://127.0.0.1/fake.gpg"
+        mock_resp.headers = {"Content-Length": "15"}
+        mock_resp.read.side_effect = [b"fake-key-block", b""]
+        mock_opener = MagicMock()
+        mock_opener.open.return_value.__enter__.return_value = mock_resp
 
         with patch("subprocess.run") as mock_run, \
-             patch("urllib.request.urlopen") as mock_url:
-            mock_url.return_value.__enter__.return_value = mock_resp
+             patch.object(ss_mod, "build_secure_opener", return_value=mock_opener), \
+             patch.object(ss_mod, "get_keyring_fingerprints", return_value=[]):
 
             # Mock gpg --show-keys returning wrong fingerprint
             mock_res = MagicMock()
@@ -186,9 +191,11 @@ class TestSanesecurityUpdater(unittest.TestCase):
         """Limit: Content-Length > 20 MiB raises ValueError."""
         mock_resp = MagicMock()
         mock_resp.headers = {"Content-Length": str(25 * 1024 * 1024)}  # 25 MiB
+        mock_resp.geturl.return_value = "http://127.0.0.1/huge.hdb"
         mock_resp.read.side_effect = [b"chunk", b""]
-        with patch("urllib.request.urlopen") as mock_url:
-            mock_url.return_value.__enter__.return_value = mock_resp
+        mock_opener = MagicMock()
+        mock_opener.open.return_value.__enter__.return_value = mock_resp
+        with patch.object(ss_mod, "build_secure_opener", return_value=mock_opener):
             with self.assertRaises(ValueError) as ctx:
                 ss_mod.download_conditional("http://127.0.0.1/huge.hdb", str(self.base_path / "huge.hdb"))
             self.assertIn("exceeds limit", str(ctx.exception))
@@ -295,6 +302,130 @@ class TestSanesecurityUpdater(unittest.TestCase):
         can_check, elapsed = ss_mod.check_min_check_interval(str(self.state_file), min_interval_hours=2.0)
         self.assertFalse(can_check)
         self.assertAlmostEqual(elapsed, 0.5, delta=0.1)
+
+    def test_15_keyring_unauthorized_key_aborts_immediately(self):
+        """Q-49: Keyring containing foreign/unauthorized key causes immediate failure."""
+        foreign_fpr = "1111222233334444555566667777888899990000"
+        with patch.object(ss_mod, "get_keyring_fingerprints", return_value=[ss_mod.EXPECTED_FINGERPRINT, foreign_fpr]):
+            with self.assertRaises(RuntimeError) as ctx:
+                ss_mod.setup_gnupg_keyring(str(self.gnupg_home))
+            self.assertIn("unauthorized key", str(ctx.exception))
+
+    def test_16_signer_fingerprint_mismatch_rejects_signature(self):
+        """Q-49: Signature verified with foreign signer fingerprint in VALIDSIG is rejected."""
+        mock_res_valid = MagicMock()
+        mock_res_valid.returncode = 0
+        mock_res_valid.stdout = (
+            f"[GNUPG:] NEWSIG\n"
+            f"[GNUPG:] GOODSIG 97CD8EE6 Sanesecurity\n"
+            f"[GNUPG:] VALIDSIG {ss_mod.EXPECTED_FINGERPRINT} 2026-11-14 1763138888 0 4 0 1 10 00 {ss_mod.EXPECTED_FINGERPRINT}\n"
+        )
+        mock_res_valid.stderr = ""
+
+        mock_res_foreign = MagicMock()
+        mock_res_foreign.returncode = 0
+        mock_res_foreign.stdout = (
+            "[GNUPG:] NEWSIG\n"
+            "[GNUPG:] GOODSIG 11223344 Foreign Signer\n"
+            "[GNUPG:] VALIDSIG 1111222233334444555566667777888899990000 2026-11-14 1763138888 0 4 0 1 10 00 1111222233334444555566667777888899990000\n"
+        )
+        mock_res_foreign.stderr = ""
+
+        with patch("subprocess.run") as mock_run:
+            # Case 1: Matching fingerprint -> True
+            mock_run.return_value = mock_res_valid
+            self.assertTrue(ss_mod.verify_gpg_signature(str(self.gnupg_home), "/tmp/test.hdb", "/tmp/test.hdb.sig"))
+
+            # Case 2: Foreign fingerprint -> False
+            mock_run.return_value = mock_res_foreign
+            self.assertFalse(ss_mod.verify_gpg_signature(str(self.gnupg_home), "/tmp/test.hdb", "/tmp/test.hdb.sig"))
+
+            # Case 3: Missing VALIDSIG -> False
+            mock_res_invalid = MagicMock(returncode=1, stdout="[GNUPG:] BADSIG\n", stderr="Bad signature")
+            mock_run.return_value = mock_res_invalid
+            self.assertFalse(ss_mod.verify_gpg_signature(str(self.gnupg_home), "/tmp/test.hdb", "/tmp/test.hdb.sig"))
+
+    def test_17_reject_redirect_to_http(self):
+        """Q-49: Redirect downgrading to non-HTTPS scheme is rejected."""
+        handler = ss_mod.StrictRedirectHandler(allowed_hosts=["mirror.seichter.de"])
+        req = urllib.request.Request("https://mirror.seichter.de/sanesecurity/rogue.hdb")
+        with patch.dict(os.environ, {"ZONENDPOINT_TEST_ENV": "0"}):
+            with self.assertRaises(ValueError) as ctx:
+                handler.redirect_request(req, None, 302, "Found", {}, "http://mirror.seichter.de/sanesecurity/rogue.hdb")
+            self.assertIn("must use HTTPS", str(ctx.exception))
+
+    def test_18_reject_cross_host_redirect(self):
+        """Q-49: Redirect switching to unauthorized foreign host is rejected."""
+        handler = ss_mod.StrictRedirectHandler(allowed_hosts=["mirror.seichter.de"])
+        req = urllib.request.Request("https://mirror.seichter.de/sanesecurity/rogue.hdb")
+        with self.assertRaises(ValueError) as ctx:
+            handler.redirect_request(req, None, 302, "Found", {}, "https://evil-mirror.attacker.com/sanesecurity/rogue.hdb")
+        self.assertIn("Cross-host redirect rejected", str(ctx.exception))
+
+    def test_19_pubkey_size_exceeded_aborts(self):
+        """Q-49: Public key exceeding 64 KiB size limit raises ValueError."""
+        huge_key_file = self.base_path / "huge_key.gpg"
+        huge_key_file.write_bytes(b"A" * (65 * 1024))  # 65 KiB
+        with self.assertRaises(ValueError) as ctx:
+            ss_mod.setup_gnupg_keyring(str(self.gnupg_home), pubkey_source=str(huge_key_file))
+        self.assertIn("exceeds limit 65536 bytes", str(ctx.exception))
+
+    def test_20_batch_deploy_failure_at_file_n_restores_all_and_holds(self):
+        """Q-49: Failure at Nth file in batch triggers immediate HOLD and restores all files from snapshot."""
+        staged_1 = self.base_path / "rogue.hdb"
+        staged_1.write_text("new_rogue_sig\n")
+        staged_2 = self.base_path / "malwarehash.hsb"
+        staged_2.write_text("new_malware_sig\n")
+
+        # Active dir initially has rogue.hdb with special mode, but not malwarehash.hsb
+        active_1 = self.active_dir / "rogue.hdb"
+        active_1.write_text("old_rogue_sig\n")
+        active_1.chmod(0o600)
+
+        active_2 = self.active_dir / "malwarehash.hsb"
+        self.assertFalse(active_2.exists())
+
+        # Mock safe_atomic_write to fail when target is active_2 (2nd file in batch)
+        orig_safe_atomic = ss_mod.safe_atomic_write
+
+        def failing_atomic_write(target_path, source_file, **kwargs):
+            if "malwarehash.hsb" in target_path:
+                raise IOError("Simulated disk error on 2nd file")
+            orig_safe_atomic(target_path, source_file, **kwargs)
+
+        with patch.object(ss_mod, "safe_atomic_write", side_effect=failing_atomic_write), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+
+            with self.assertRaises(RuntimeError) as ctx:
+                ss_mod.deploy_batch(
+                    staged_files=[str(staged_1), str(staged_2)],
+                    active_dir=str(self.active_dir),
+                    backup_dir=str(self.backup_dir),
+                    hold_file=str(self.hold_file),
+                    reload_state_file=str(self.reload_state_file),
+                    last_run_file=str(self.last_run_file),
+                    clamdscan_bin="echo",
+                    clamd_host="127.0.0.1",
+                    clamd_port=9999,
+                )
+            self.assertIn("Batch deployment failed", str(ctx.exception))
+
+            # 1. HOLD file was placed
+            self.assertTrue(self.hold_file.is_file())
+
+            # 2. 1st file was restored back to old content
+            self.assertEqual(active_1.read_text(), "old_rogue_sig\n")
+            if os.name == "posix":
+                self.assertEqual(active_1.stat().st_mode & 0o777, 0o600)
+
+            # 3. 2nd file is not present in active dir
+            self.assertFalse(active_2.exists())
+
+            # 4. last-run.json recorded failure
+            last_run = json.loads(self.last_run_file.read_text(encoding="utf-8"))
+            self.assertEqual(last_run["status"], "batch_deploy_failed")
+            self.assertEqual(last_run["failed_file"], "malwarehash.hsb")
 
 
 if __name__ == "__main__":

@@ -381,3 +381,19 @@
 - Tài liệu & Bàn giao:
   - Tạo tài liệu vận hành chi tiết `docs/ops/sanesecurity.md`.
   - Cập nhật handoff `docs/handoffs/feeds-hardening-vic-to-qeen.md` với mục V-68 và quy trình triển khai gộp chung V-58/V-62/V-68 (dừng timer, backup+sha256, cài đặt, daemon-reload, verify, kích hoạt timer).
+
+## 2026-11-14 - V-71 (Sửa lỗi Q-49 cho V-68 - Sanesecurity)
+- Thực hiện theo chỉ đạo của anh Zon ngày 2026-11-14 (Branch `vic/feed-sanesecurity-impl`, worktree `v71-sanesecurity`, cô lập trong repo, không triển khai lab):
+  - Khắc phục triệt để 5 phát hiện kiểm thử của Qeen trong báo cáo Q-49 (phần B):
+    1. GPG VALIDSIG: Bóc tách `gpg --status-fd 1` lấy chính xác `VALIDSIG <signer_fpr>`. Bắt buộc vân tay người ký phải khớp 100% với khóa Sanesecurity chính thức `890D413C9E6EFD809D0EE892D6F4C53697CD8EE6`. Đồng thời kiểm tra isolated keyring không chứa bất kỳ khóa lạ nào (nếu phát hiện khóa khác thì dừng ngay, từ chối triển khai). Thêm unit test kiểm tra keyring có khóa lạ và chữ ký hợp lệ bởi khóa lạ bị từ chối.
+    2. Chống Open Redirect: Tích hợp `StrictRedirectHandler` và `build_secure_opener` chặn triệt để mọi hành vi chuyển hướng hạ cấp HTTP hoặc chuyển hướng sang host khác ngoài mirror đã cấu hình. Thêm 2 unit test kiểm tra redirect HTTP và cross-host.
+    3. Giới hạn kích thước tải Public Key: Bổ sung giới hạn cứng tối đa 64 KiB (`MAX_PUBKEY_BYTES = 64 * 1024`) khi nạp public key. Thêm unit test từ chối key vượt quá 64 KiB.
+    4. Cài đặt theo lô nguyên tử (Batch Deployment with Full Rollback): Khi backup/cài đặt/verify bất kỳ file nào trong lô bị lỗi giữa chừng (kể cả file thứ N), hàm `deploy_batch` lập tức tạo file HOLD `/opt/zonendpoint/HOLD-sanesecurity` trước tiên, khôi phục toàn bộ lô về trạng thái cũ bảo toàn mode và owner/group (`safe_atomic_write` với uid/gid), dọn dẹp các file mới tạo, reload clamd khẩn cấp và ném lỗi dừng quy trình. Thêm unit test kiểm tra cài lô lỗi ở file thứ 2.
+    5. Chuẩn hóa Handoff & Docs Ops: Xóa bỏ triệt để mọi hướng dẫn triển khai/rollback thủ công cũ (stop/copy tay, `rm -f` lock hoặc HOLD) trong `docs/handoffs/feeds-hardening-vic-to-qeen.md`, `docs/ops/sanesecurity.md`, `docs/ops/abusech-timer.md`, `docs/ops/yara-daily-update.md`. Thống nhất chỉ thị chính sách: *"Triển khai lab dùng duy nhất E:\Zonendpoint-tools\coordination\deploy\deploy-feeds.sh (Loki, sau khi Qeen nghiệm thu); không bao giờ xóa lock; HOLD chỉ gỡ thủ công sau khi kiểm tra có biên bản."*
+- Quality Gates & Testing trên Lab (`udevlevel73`, Ubuntu 24.04, Python 3.14.4 trong `/tmp/v71`):
+  - `test_zonendpoint_sanesecurity.py`: Nâng lên **20/20 unit tests PASS 100%** (bổ sung 6 test cases mới cho 5 lỗi Q-49).
+  - Toàn bộ suite `scripts/feeds/`: **128/128 unit tests PASS 100%** (0 cuộc gọi mạng thật, mock hoàn chỉnh).
+  - `systemd-analyze verify`: **PASS (exit code 0)** trên bản copy của service và timer.
+  - `systemd-analyze security --offline=true`: Đạt mức **7.1 MEDIUM** :-|.
+  - Bằng chứng zero reload clamd thật: clamd MainPID giữ nguyên `132505`; `journalctl -u clamav-daemon.service --since '2026-11-14 22:56:03'` trả về `-- No entries --` (zero real reloads). Đối chiếu `freshclam.log` chứng minh lần reload lúc 22:40 trong Q-49 là do daemon freshclam cập nhật `securiteinfoold.hdb`, không phải do test suite gây ra.
+- Dọn dẹp: Đã xóa thư mục `/tmp/v71` trên máy chủ lab và dọn dẹp worktree sau khi hoàn tất.

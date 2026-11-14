@@ -258,17 +258,10 @@ Khi file cờ này tồn tại:
 - Updater sẽ **bỏ qua toàn bộ lượt chạy** (không gọi abuse.ch, không reload clamd), ghi log cảnh báo và đặt `"hold_active": true` trong `last-run.json`.
 - Giúp bảo vệ trạng thái rollback, ngăn chặn updater tự động nạp lại chữ ký lỗi vào clamd sau 61 phút.
 
-**Cách kiểm tra và gỡ hold để khôi phục cập nhật tự động:**
-```bash
-# 1. Kiểm tra sự tồn tại của hold file
-ls -la /opt/zonendpoint/HOLD-abusech
-
-# 2. Đọc thời điểm kích hoạt rollback
-cat /opt/zonendpoint/HOLD-abusech
-
-# 3. Gỡ cờ hold để cho phép updater hoạt động trở lại
-sudo rm -f /opt/zonendpoint/HOLD-abusech
-```
+**Chính sách Quản lý Khóa & Gỡ bỏ HOLD:**
+- Khóa triển khai (`/run/lock/zonendpoint-clamd-deploy.lock`): Không bao giờ xóa lock bằng `rm -f`. Khóa kernel `flock` tự động giải phóng khi tiến trình nắm giữ kết thúc.
+- File HOLD (`/opt/zonendpoint/HOLD-abusech`): HOLD chỉ gỡ thủ công sau khi kiểm tra có biên bản điều tra nguyên nhân sự cố. Tuyệt đối không xóa tùy tiện trong quá trình vận hành.
+- Triển khai lab dùng duy nhất `E:\Zonendpoint-tools\coordination\deploy\deploy-feeds.sh` (Loki, sau khi Qeen nghiệm thu).
 
 ---
 
