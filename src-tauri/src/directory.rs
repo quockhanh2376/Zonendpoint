@@ -165,6 +165,7 @@ pub async fn scan_roots_with_exclusions(
     scan: ScanFn,
     progress: ProgressFn,
 ) -> ScanSummary {
+    let normalized_exclusions = crate::quick::normalize_exclusions(&exclusions);
     let root = roots.first().cloned().unwrap_or_default();
     let (tx, mut rx) = mpsc::channel(QUEUE_CAPACITY);
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -172,7 +173,8 @@ pub async fn scan_roots_with_exclusions(
     let producer_cancelled = cancelled.clone();
     let producer = tokio::task::spawn_blocking(move || {
         for producer_root in roots {
-            if !exclusions.is_empty() && crate::quick::is_path_excluded(&producer_root, &exclusions)
+            if !normalized_exclusions.is_empty()
+                && crate::quick::is_path_excluded(&producer_root, &normalized_exclusions)
             {
                 continue;
             }
@@ -192,8 +194,8 @@ pub async fn scan_roots_with_exclusions(
                 let item = match entry {
                     Ok(entry) => {
                         let path = entry.path();
-                        if !exclusions.is_empty()
-                            && crate::quick::is_path_excluded(path, &exclusions)
+                        if !normalized_exclusions.is_empty()
+                            && crate::quick::is_path_excluded(path, &normalized_exclusions)
                         {
                             if entry.file_type().is_dir() {
                                 it.skip_current_dir();
@@ -213,8 +215,8 @@ pub async fn scan_roots_with_exclusions(
                     }
                     Err(error) => {
                         if error.path().is_some_and(|err_path| {
-                            !exclusions.is_empty()
-                                && crate::quick::is_path_excluded(err_path, &exclusions)
+                            !normalized_exclusions.is_empty()
+                                && crate::quick::is_path_excluded(err_path, &normalized_exclusions)
                         }) {
                             continue;
                         }

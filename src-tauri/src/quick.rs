@@ -82,16 +82,20 @@ fn normalize_components(path: &Path) -> PathBuf {
     strip_verbatim_prefix(&normalized)
 }
 
-/// Check if `path` matches any exclusion in `exclusions`.
+/// Pre-normalizes a list of exclusions so they are canonicalized once up front (P-7).
+pub fn normalize_exclusions(exclusions: &[PathBuf]) -> Vec<PathBuf> {
+    exclusions.iter().map(|ex| canonical_path(ex)).collect()
+}
+
+/// Check if `path` matches any pre-normalized exclusion in `normalized_exclusions`.
 /// Matches case-insensitively on canonical absolute paths component-by-component.
 /// A match requires that `path` equals the exclusion path or is a descendant within it.
 /// It does NOT perform a substring or generic file-name match elsewhere.
-pub fn is_path_excluded(path: &Path, exclusions: &[PathBuf]) -> bool {
+pub fn is_path_excluded(path: &Path, normalized_exclusions: &[PathBuf]) -> bool {
     let norm_path = canonical_path(path);
-    exclusions.iter().any(|ex| {
-        let norm_ex = canonical_path(ex);
-        path_matches_exclusion(&norm_path, &norm_ex)
-    })
+    normalized_exclusions
+        .iter()
+        .any(|norm_ex| path_matches_exclusion(&norm_path, norm_ex))
 }
 
 pub fn path_matches_exclusion(path: &Path, exclusion: &Path) -> bool {
@@ -174,7 +178,7 @@ mod tests {
     #[test]
     fn quick_exclusion_resolves_only_driverdata_under_drivers() {
         let root = PathBuf::from(r"C:\Windows\System32");
-        let exclusions = exclusions_for_root(&root);
+        let exclusions = normalize_exclusions(&exclusions_for_root(&root));
         assert_eq!(exclusions.len(), 1);
         assert_eq!(
             exclusions[0],
@@ -208,5 +212,23 @@ mod tests {
         // Other directories under drivers MUST NOT be excluded
         let other_dir = PathBuf::from(r"C:\Windows\System32\drivers\etc");
         assert!(!is_path_excluded(&other_dir, &exclusions));
+    }
+
+    #[test]
+    fn test_normalize_exclusions_and_is_path_excluded() {
+        let raw = vec![
+            PathBuf::from(r"C:\Windows\System32\..\System32\drivers\DriverData"),
+            PathBuf::from(r"C:\Program Files\Common Files"),
+        ];
+        let normalized = normalize_exclusions(&raw);
+        assert_eq!(normalized.len(), 2);
+        assert!(!normalized[0].to_string_lossy().contains(".."));
+
+        // Match against normalized exclusions
+        let target = PathBuf::from(r"c:\windows\system32\drivers\driverdata\log.txt");
+        assert!(is_path_excluded(&target, &normalized));
+
+        let non_target = PathBuf::from(r"c:\windows\system32\drivers\other.sys");
+        assert!(!is_path_excluded(&non_target, &normalized));
     }
 }
