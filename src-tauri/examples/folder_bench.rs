@@ -202,23 +202,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let limiter = Arc::new(scanner::ScanLimiter::new(concurrency));
     let file_metrics = Arc::new(Mutex::new(Vec::new()));
     let stage_metrics = Arc::new(Mutex::new(Vec::new()));
-    let scan_cache = cache_path.clone();
+    let cache_session = Arc::new(cache::CacheSession::open(&cache_path)?);
+    let scan_session = cache_session.clone();
     let scan_limiter = limiter.clone();
     let scan_engine = engine;
     let scan_addr = addr;
     let scan_times = file_metrics.clone();
     let scan_stages = stage_metrics.clone();
     let scan: directory::ScanFn = Box::new(move |path, cancel| {
-        let cache = scan_cache.clone();
+        let session = scan_session.clone();
         let limiter = scan_limiter.clone();
         let engine = scan_engine.clone();
         let times = scan_times.clone();
         let stages = scan_stages.clone();
         Box::pin(async move {
             let started = Instant::now();
-            let result = scanner::scan_file_with_engine_override(
+            let result = scanner::scan_file_with_session(
                 path,
-                cache,
+                Some(session),
                 scan_addr,
                 Some(engine),
                 cancel,
@@ -266,6 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(|_, _| {}),
     )
     .await;
+    let _ = cache_session.flush().await;
     let elapsed_ms = started.elapsed().as_millis();
     let cancel_latency_ms = if let Some(trigger) = trigger {
         if trigger.is_finished() {

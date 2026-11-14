@@ -1,7 +1,11 @@
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use crate::scanner::ScanStatus;
 
@@ -157,6 +161,280 @@ pub fn stats(path: &Path) -> Result<CacheStats> {
     })
 }
 
+pub const BATCH_MAX_ROWS: usize = 200;
+pub const BATCH_MAX_DURATION: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Debug)]
+pub struct PendingCachePut {
+    pub sha256: [u8; 32],
+    pub engine_version: String,
+    pub sig_generation: String,
+    pub policy_version: String,
+    pub status: ScanStatus,
+    pub threat_name: Option<String>,
+    pub scanned_at: i64,
+}
+
+pub struct CacheSessionInner {
+    conn: Connection,
+    pending: Vec<PendingCachePut>,
+    last_flush: Instant,
+}
+
+impl CacheSessionInner {
+    fn flush(&mut self) -> Result<()> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO scan_cache(sha256, engine_version, sig_generation, policy_version, status, threat_name, scanned_at)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(sha256, engine_version, sig_generation, policy_version)
+                 DO UPDATE SET status=excluded.status, threat_name=excluded.threat_name, scanned_at=excluded.scanned_at",
+            )?;
+            for item in self.pending.drain(..) {
+                stmt.execute(params![
+                    item.sha256.as_slice(),
+                    item.engine_version,
+                    item.sig_generation,
+                    item.policy_version,
+                    item.status.cache_value()?,
+                    item.threat_name,
+                    item.scanned_at,
+                ])?;
+            }
+        }
+        tx.commit()?;
+        self.last_flush = Instant::now();
+        Ok(())
+    }
+}
+
+impl Drop for CacheSessionInner {
+    fn drop(&mut self) {
+        let _ = self.flush();
+    }
+}
+
+#[derive(Clone)]
+pub struct CacheSession {
+    inner: Arc<Mutex<CacheSessionInner>>,
+}
+
+impl CacheSession {
+    pub fn open(path: &Path) -> Result<Self> {
+        let conn = open(path)?;
+        Ok(Self {
+            inner: Arc::new(Mutex::new(CacheSessionInner {
+                conn,
+                pending: Vec::with_capacity(BATCH_MAX_ROWS),
+                last_flush: Instant::now(),
+            })),
+        })
+    }
+
+    pub fn get_sync(
+        &self,
+        sha256: &[u8; 32],
+        engine_version: &str,
+        sig_generation: &str,
+        policy_version: &str,
+        now: i64,
+        ttl_seconds: i64,
+    ) -> Result<Option<CachedVerdict>> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|e| anyhow::anyhow!("cache lock poisoned: {e}"))?;
+        let cutoff = now.saturating_sub(ttl_seconds.max(0));
+
+        // 1. Check pending in-memory batch first
+        for item in inner.pending.iter().rev() {
+            if &item.sha256 == sha256
+                && item.engine_version == engine_version
+                && item.sig_generation == sig_generation
+                && item.policy_version == policy_version
+                && item.scanned_at >= cutoff
+                && item.scanned_at <= now
+            {
+                if item.status == ScanStatus::Infected {
+                    let valid_threat = item
+                        .threat_name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(ToString::to_string);
+                    return Ok(valid_threat.map(|name| CachedVerdict {
+                        status: item.status,
+                        threat_name: Some(name),
+                    }));
+                } else {
+                    return Ok(Some(CachedVerdict {
+                        status: item.status,
+                        threat_name: None,
+                    }));
+                }
+            }
+        }
+
+        // 2. Query SQLite connection with prepare_cached
+        let mut stmt = inner.conn.prepare_cached(
+            "SELECT status, threat_name FROM scan_cache
+             WHERE sha256=?1 AND engine_version=?2 AND sig_generation=?3 AND policy_version=?4 AND scanned_at BETWEEN ?5 AND ?6",
+        )?;
+        let row: Option<(String, Option<String>)> = stmt
+            .query_row(
+                params![
+                    sha256.as_slice(),
+                    engine_version,
+                    sig_generation,
+                    policy_version,
+                    cutoff,
+                    now
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+
+        match row {
+            Some((status_str, threat_name)) => {
+                let status = ScanStatus::from_cache(&status_str)?;
+                if status == ScanStatus::Infected {
+                    let valid_threat = threat_name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(ToString::to_string);
+                    match valid_threat {
+                        Some(name) => Ok(Some(CachedVerdict {
+                            status,
+                            threat_name: Some(name),
+                        })),
+                        None => Ok(None),
+                    }
+                } else {
+                    Ok(Some(CachedVerdict {
+                        status,
+                        threat_name: None,
+                    }))
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn put_sync(
+        &self,
+        sha256: [u8; 32],
+        engine_version: &str,
+        sig_generation: &str,
+        policy_version: &str,
+        status: ScanStatus,
+        threat_name: Option<&str>,
+        scanned_at: i64,
+    ) -> Result<()> {
+        let clean_threat_name = if status == ScanStatus::Infected {
+            let name = threat_name.map(str::trim).filter(|s| !s.is_empty());
+            if name.is_none() {
+                bail!("infected verdict requires a threat name to be cached");
+            }
+            name.map(ToString::to_string)
+        } else {
+            None
+        };
+
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| anyhow::anyhow!("cache lock poisoned: {e}"))?;
+
+        inner.pending.push(PendingCachePut {
+            sha256,
+            engine_version: engine_version.to_owned(),
+            sig_generation: sig_generation.to_owned(),
+            policy_version: policy_version.to_owned(),
+            status,
+            threat_name: clean_threat_name,
+            scanned_at,
+        });
+
+        if inner.pending.len() >= BATCH_MAX_ROWS || inner.last_flush.elapsed() >= BATCH_MAX_DURATION
+        {
+            inner.flush()?;
+        }
+        Ok(())
+    }
+
+    pub fn flush_sync(&self) -> Result<()> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| anyhow::anyhow!("cache lock poisoned: {e}"))?;
+        inner.flush()
+    }
+
+    pub async fn get(
+        &self,
+        sha256: [u8; 32],
+        engine_version: String,
+        sig_generation: String,
+        policy_version: String,
+        now: i64,
+        ttl_seconds: i64,
+    ) -> Result<Option<CachedVerdict>> {
+        let this = self.clone();
+        tokio::task::spawn_blocking(move || {
+            this.get_sync(
+                &sha256,
+                &engine_version,
+                &sig_generation,
+                &policy_version,
+                now,
+                ttl_seconds,
+            )
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn put(
+        &self,
+        sha256: [u8; 32],
+        engine_version: String,
+        sig_generation: String,
+        policy_version: String,
+        status: ScanStatus,
+        threat_name: Option<String>,
+        scanned_at: i64,
+    ) -> Result<()> {
+        let this = self.clone();
+        tokio::task::spawn_blocking(move || {
+            this.put_sync(
+                sha256,
+                &engine_version,
+                &sig_generation,
+                &policy_version,
+                status,
+                threat_name.as_deref(),
+                scanned_at,
+            )
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))?
+    }
+
+    pub async fn flush(&self) -> Result<()> {
+        let this = self.clone();
+        tokio::task::spawn_blocking(move || this.flush_sync())
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))?
+    }
+}
+
 pub fn get(
     path: &Path,
     sha256: &[u8; 32],
@@ -166,49 +444,15 @@ pub fn get(
     now: i64,
     ttl_seconds: i64,
 ) -> Result<Option<CachedVerdict>> {
-    let db = open(path)?;
-    let cutoff = now.saturating_sub(ttl_seconds.max(0));
-    let row: Option<(String, Option<String>)> = db
-        .query_row(
-            "SELECT status, threat_name FROM scan_cache
-             WHERE sha256=?1 AND engine_version=?2 AND sig_generation=?3 AND policy_version=?4 AND scanned_at BETWEEN ?5 AND ?6",
-            params![
-                sha256.as_slice(),
-                engine_version,
-                sig_generation,
-                policy_version,
-                cutoff,
-                now
-            ],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-
-    match row {
-        Some((status_str, threat_name)) => {
-            let status = ScanStatus::from_cache(&status_str)?;
-            if status == ScanStatus::Infected {
-                let valid_threat = threat_name
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(ToString::to_string);
-                match valid_threat {
-                    Some(name) => Ok(Some(CachedVerdict {
-                        status,
-                        threat_name: Some(name),
-                    })),
-                    None => Ok(None),
-                }
-            } else {
-                Ok(Some(CachedVerdict {
-                    status,
-                    threat_name: None,
-                }))
-            }
-        }
-        None => Ok(None),
-    }
+    let session = CacheSession::open(path)?;
+    session.get_sync(
+        sha256,
+        engine_version,
+        sig_generation,
+        policy_version,
+        now,
+        ttl_seconds,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -222,33 +466,17 @@ pub fn put(
     threat_name: Option<&str>,
     scanned_at: i64,
 ) -> Result<()> {
-    let db = open(path)?;
-    let clean_threat_name = if status == ScanStatus::Infected {
-        let name = threat_name.map(str::trim).filter(|s| !s.is_empty());
-        if name.is_none() {
-            bail!("infected verdict requires a threat name to be cached");
-        }
-        name
-    } else {
-        None
-    };
-
-    db.execute(
-        "INSERT INTO scan_cache(sha256, engine_version, sig_generation, policy_version, status, threat_name, scanned_at)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT(sha256, engine_version, sig_generation, policy_version)
-         DO UPDATE SET status=excluded.status, threat_name=excluded.threat_name, scanned_at=excluded.scanned_at",
-        params![
-            sha256.as_slice(),
-            engine_version,
-            sig_generation,
-            policy_version,
-            status.cache_value()?,
-            clean_threat_name,
-            scanned_at
-        ],
+    let session = CacheSession::open(path)?;
+    session.put_sync(
+        *sha256,
+        engine_version,
+        sig_generation,
+        policy_version,
+        status,
+        threat_name,
+        scanned_at,
     )?;
-    Ok(())
+    session.flush_sync()
 }
 
 pub fn cleanup_expired(path: &Path, now: i64, ttl_seconds: i64) -> Result<usize> {
@@ -914,5 +1142,149 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_cache_session_batching_flush_on_cancel_preserves_verdicts() {
+        let db_path = test_path("batch-cancel");
+
+        let session = CacheSession::open(&db_path).unwrap();
+        let engine = "ClamAV 1.5.4/28183";
+        let sig_gen = "8616901:2026-11-14T20:59:49+07:00";
+        let policy = "zonendpoint-0.3.1-v1";
+        let now = 1794665700;
+
+        // Put 10 verdicts (well below 200 batch threshold)
+        for i in 0..10u8 {
+            let mut hash = [0u8; 32];
+            hash[0] = i;
+            session
+                .put(
+                    hash,
+                    engine.to_string(),
+                    sig_gen.to_string(),
+                    policy.to_string(),
+                    ScanStatus::Clean,
+                    None,
+                    now,
+                )
+                .await
+                .unwrap();
+        }
+
+        // Verify they are visible via get in the same session even before flush
+        let mut hash5 = [0u8; 32];
+        hash5[0] = 5;
+        let cached = session
+            .get(
+                hash5,
+                engine.to_string(),
+                sig_gen.to_string(),
+                policy.to_string(),
+                now,
+                3600,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            cached,
+            Some(CachedVerdict {
+                status: ScanStatus::Clean,
+                threat_name: None,
+            })
+        );
+
+        // Before flush, check that raw DB on disk has 0 entries (still in memory batch)
+        {
+            let raw_conn = Connection::open(&db_path).unwrap();
+            let count: i64 = raw_conn
+                .query_row("SELECT COUNT(*) FROM scan_cache", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                count, 0,
+                "verdicts should be buffered in memory before batch threshold or flush"
+            );
+        }
+
+        // Simulate scan cancellation triggering flush: no verdicts should be lost
+        session.flush().await.unwrap();
+
+        // Now verify that a completely separate connection from disk sees all 10 entries
+        {
+            let raw_conn = Connection::open(&db_path).unwrap();
+            let count: i64 = raw_conn
+                .query_row("SELECT COUNT(*) FROM scan_cache", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                count, 10,
+                "all verdicts must be safely persisted on cancel flush"
+            );
+        }
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
+    async fn test_cache_session_auto_flushes_at_200_items() {
+        let db_path = test_path("batch-200");
+
+        let session = CacheSession::open(&db_path).unwrap();
+        let engine = "ClamAV 1.5.4/28183";
+        let sig_gen = "8616901:2026-11-14T20:59:49+07:00";
+        let policy = "zonendpoint-0.3.1-v1";
+        let now = 1794665700;
+
+        for i in 0..199u16 {
+            let mut hash = [0u8; 32];
+            hash[0..2].copy_from_slice(&i.to_be_bytes());
+            session
+                .put(
+                    hash,
+                    engine.to_string(),
+                    sig_gen.to_string(),
+                    policy.to_string(),
+                    ScanStatus::Clean,
+                    None,
+                    now,
+                )
+                .await
+                .unwrap();
+        }
+        {
+            let raw_conn = Connection::open(&db_path).unwrap();
+            let count: i64 = raw_conn
+                .query_row("SELECT COUNT(*) FROM scan_cache", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 0, "199 items should still be in memory batch");
+        }
+
+        // 200th item triggers auto-flush
+        let mut hash200 = [0u8; 32];
+        hash200[0..2].copy_from_slice(&200u16.to_be_bytes());
+        session
+            .put(
+                hash200,
+                engine.to_string(),
+                sig_gen.to_string(),
+                policy.to_string(),
+                ScanStatus::Clean,
+                None,
+                now,
+            )
+            .await
+            .unwrap();
+
+        {
+            let raw_conn = Connection::open(&db_path).unwrap();
+            let count: i64 = raw_conn
+                .query_row("SELECT COUNT(*) FROM scan_cache", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                count, 200,
+                "200 items must be automatically flushed to sqlite in a single transaction"
+            );
+        }
+
+        let _ = std::fs::remove_file(&db_path);
     }
 }

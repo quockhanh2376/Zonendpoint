@@ -598,6 +598,26 @@ pub async fn scan_file(
     scan_file_with_engine_override(path, cache_path, addr, None, cancel, semaphore).await
 }
 
+pub async fn scan_file_with_session(
+    path: PathBuf,
+    session: Option<Arc<crate::cache::CacheSession>>,
+    addr: SocketAddr,
+    engine_override: Option<String>,
+    cancel: watch::Receiver<bool>,
+    semaphore: Arc<ScanLimiter>,
+) -> ScanResult {
+    scan_file_with_session_timeout_checked(
+        path,
+        session,
+        addr,
+        engine_override,
+        cancel,
+        semaphore,
+        default_scan_timeout(),
+    )
+    .await
+}
+
 pub async fn scan_file_with_engine_override(
     path: PathBuf,
     cache_path: PathBuf,
@@ -638,9 +658,9 @@ pub async fn scan_file_with_timeout(
     .await
 }
 
-async fn scan_file_with_engine_timeout_checked(
+async fn scan_file_with_session_timeout_checked(
     path: PathBuf,
-    cache_path: PathBuf,
+    session: Option<Arc<crate::cache::CacheSession>>,
     addr: SocketAddr,
     engine_override: Option<String>,
     cancel: watch::Receiver<bool>,
@@ -687,9 +707,9 @@ async fn scan_file_with_engine_timeout_checked(
         Ok(_) => {}
         Err(error) => return ScanResult::error(path, format!("read file metadata: {error}")),
     }
-    scan_file_with_engine_timeout(
+    scan_file_with_session_timeout(
         path,
-        cache_path,
+        session,
         addr,
         engine_override,
         cancel,
@@ -699,9 +719,73 @@ async fn scan_file_with_engine_timeout_checked(
     .await
 }
 
+async fn scan_file_with_engine_timeout_checked(
+    path: PathBuf,
+    cache_path: PathBuf,
+    addr: SocketAddr,
+    engine_override: Option<String>,
+    cancel: watch::Receiver<bool>,
+    semaphore: Arc<ScanLimiter>,
+    total_timeout: Duration,
+) -> ScanResult {
+    let (session, open_err) = match crate::cache::CacheSession::open(&cache_path) {
+        Ok(s) => (Some(Arc::new(s)), None),
+        Err(e) => (None, Some(format!("cache read error: {e}"))),
+    };
+    let mut res = scan_file_with_session_timeout_checked(
+        path,
+        session.clone(),
+        addr,
+        engine_override,
+        cancel,
+        semaphore,
+        total_timeout,
+    )
+    .await;
+    if let Some(err) = open_err {
+        res.reason.get_or_insert(err);
+    }
+    if let Some(s) = session {
+        let _ = s.flush().await;
+    }
+    res
+}
+
 pub async fn scan_file_with_engine_timeout(
     path: PathBuf,
     cache_path: PathBuf,
+    addr: SocketAddr,
+    engine_override: Option<String>,
+    cancel: watch::Receiver<bool>,
+    semaphore: Arc<ScanLimiter>,
+    total_timeout: Duration,
+) -> ScanResult {
+    let (session, open_err) = match crate::cache::CacheSession::open(&cache_path) {
+        Ok(s) => (Some(Arc::new(s)), None),
+        Err(e) => (None, Some(format!("cache read error: {e}"))),
+    };
+    let mut res = scan_file_with_session_timeout(
+        path,
+        session.clone(),
+        addr,
+        engine_override,
+        cancel,
+        semaphore,
+        total_timeout,
+    )
+    .await;
+    if let Some(err) = open_err {
+        res.reason.get_or_insert(err);
+    }
+    if let Some(s) = session {
+        let _ = s.flush().await;
+    }
+    res
+}
+
+pub async fn scan_file_with_session_timeout(
+    path: PathBuf,
+    session: Option<Arc<crate::cache::CacheSession>>,
     addr: SocketAddr,
     engine_override: Option<String>,
     cancel: watch::Receiver<bool>,
@@ -735,17 +819,26 @@ pub async fn scan_file_with_engine_timeout(
         let sig_generation = server_status.signature_generation();
 
         let (cached_verdict, cache_read_error) = if let Some(sig_gen) = &sig_generation {
-            match crate::cache::get(
-                &cache_path,
-                &hash,
-                &engine_version,
-                sig_gen,
-                POLICY_VERSION,
-                now,
-                CACHE_TTL_SECONDS,
-            ) {
-                Ok(cached) => (cached, None),
-                Err(error) => (None, Some(format!("cache read error: {error}"))),
+            if let Some(ref s) = session {
+                match s
+                    .get(
+                        hash,
+                        engine_version.clone(),
+                        sig_gen.clone(),
+                        POLICY_VERSION.to_string(),
+                        now,
+                        CACHE_TTL_SECONDS,
+                    )
+                    .await
+                {
+                    Ok(cached) => (cached, None),
+                    Err(error) => (None, Some(format!("cache read error: {error}"))),
+                }
+            } else {
+                (
+                    None,
+                    Some("cache read error: cache session unavailable".into()),
+                )
             }
         } else {
             (None, None)
@@ -900,17 +993,18 @@ pub async fn scan_file_with_engine_timeout(
             }
             result.engine_version = Some(engine_version.clone());
             let t_write_start = Instant::now();
-            if let Some(sig_gen) = &sig_generation {
-                let put_result = crate::cache::put(
-                    &cache_path,
-                    &hash,
-                    &engine_version,
-                    sig_gen,
-                    POLICY_VERSION,
-                    outcome.status,
-                    outcome.reason.as_deref(),
-                    now,
-                );
+            if let (Some(sig_gen), Some(s)) = (&sig_generation, session.as_ref()) {
+                let put_result = s
+                    .put(
+                        hash,
+                        engine_version.clone(),
+                        sig_gen.clone(),
+                        POLICY_VERSION.to_string(),
+                        outcome.status,
+                        outcome.reason.clone(),
+                        now,
+                    )
+                    .await;
                 if let Err(error) = put_result {
                     result.reason = Some(format!(
                         "{}; cache write failed: {error}",

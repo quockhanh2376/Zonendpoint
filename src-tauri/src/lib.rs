@@ -355,20 +355,22 @@ async fn run_scan(
     let cancellation_path = target.clone();
     let result = async {
         let cache_path = cache::default_path().map_err(|error| error.to_string())?;
+        let cache_session =
+            Arc::new(cache::CacheSession::open(&cache_path).map_err(|error| error.to_string())?);
         let semaphore = manager.semaphore.clone();
         let scan_addr = addr;
-        let scan_cache = cache_path.clone();
+        let scan_session = cache_session.clone();
         let scan_semaphore = semaphore.clone();
         let scan_version = engine_version.clone();
         let scan: ScanFn = Box::new(move |file, cancel| {
-            let cache_path = scan_cache.clone();
+            let session = scan_session.clone();
             let semaphore = scan_semaphore.clone();
             let addr = scan_addr;
             let version = scan_version.clone();
             Box::pin(async move {
-                scanner::scan_file_with_engine_override(
+                scanner::scan_file_with_session(
                     file,
-                    cache_path,
+                    Some(session),
                     addr,
                     Some(version),
                     cancel,
@@ -402,6 +404,7 @@ async fn run_scan(
                 progress,
             )
             .await;
+            let _ = cache_session.flush().await;
             throttler.flush();
             return Ok(summary);
         }
@@ -415,19 +418,21 @@ async fn run_scan(
                     progress,
                 )
                 .await;
+                let _ = cache_session.flush().await;
                 throttler.flush();
                 Ok(summary)
             }
             _ => {
-                let result = scanner::scan_file_with_engine_override(
+                let result = scanner::scan_file_with_session(
                     target,
-                    cache_path,
+                    Some(cache_session.clone()),
                     addr,
                     Some(engine_version),
                     cancel_rx.clone(),
                     semaphore,
                 )
                 .await;
+                let _ = cache_session.flush().await;
                 let mut summary = ScanSummary::default();
                 summary.record(result.clone());
                 let _ = app.emit(
