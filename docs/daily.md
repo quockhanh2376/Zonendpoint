@@ -300,3 +300,20 @@
   - `cargo test`: **10 / 10 lượt liên tiếp PASS 100% (810/810 test runs PASS)**.
   - `npm.cmd run build`: PASS (Vite + TS 0 lỗi).
 - Bàn giao: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+## 2026-11-14 - V-58 (Hardening các script và service feed trên server theo optimisse.md §5)
+- Thực hiện theo chỉ đạo của anh Zon ngày 2026-11-14 (Branch `vic/feeds-hardening`, cô lập trong repo, không triển khai lab):
+  - L-1: `zonendpoint-abusech-update.py` gặp RateLimitError hoặc HTTP 429/401/403 tại MalwareBazaar -> dừng toàn bộ lượt chạy ngay lập tức, KHÔNG gọi ThreatFox (0 request), hủy slot đã bảo lưu trong rate_limit.json, ghi last-run.json lý do. Giữ test 503 retry có giới hạn hiện có.
+  - L-2: Đặt mặc định `max_retries=0` cho mọi endpoint abuse.ch (`_post`, `fetch_recent`, `fetch_full_dump`). Đảm bảo số request gửi thực tế bằng đúng số lượt đếm.
+  - L-8: Tham số `--min-reload-interval` (giờ, mặc định 6.0) kèm state file ghi nguyên tử `/opt/zonendpoint/abusech/reload-state.json`. Khi chưa đủ thời gian tối thiểu, vẫn nạp feed vào SQLite nhưng hoãn export và clamd reload (`reload_deferred=True`).
+  - L-3: Cơ chế file hold (`/opt/zonendpoint/HOLD-abusech`, `/opt/zonendpoint/HOLD-yara`): cả 3 script rollback tạo file hold khi chạy; các updater phát hiện file hold thì log cảnh báo và bỏ qua lượt chạy cleanly (exit 0). Cập nhật tài liệu ops hướng dẫn kiểm tra và gỡ hold.
+  - L-4: `zonendpoint-yara-update.py` chỉ ghi tag mới vào `current_tag.txt` sau khi thấy `"Database correctly reloaded"` trong log clamd và PING thành công; nhánh rollback giữ nguyên tag cũ; thay `sleep(8)` bằng chờ log clamd có timeout và xử lý xoay vòng log.
+  - L-6: Khóa `flock` độc quyền dùng chung `/run/lock/zonendpoint-clamd-deploy.lock` giữa abusech-update, yara-update và 3 script rollback. Không lấy được khóa -> bỏ lượt, thoát mã lỗi khác 0 (sửa luôn fail-open ở abusech-update).
+  - L-11: Loại bỏ file tạm đoán trước được trong `/var/lib/clamav` và rollback. Dùng `tempfile.mkstemp`, `os.fchown`, `os.fchmod`, `os.fsync`, và `os.replace` (Python) và `mktemp -p "$TARGET_DIR"` + `sync` + `mv -f` (Shell).
+  - L-12: Sandbox systemd cho 3 file `.service`: `ProtectSystem=strict`, `ReadWritePaths=`, `PrivateDevices=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectControlGroups=yes`, `RestrictAddressFamilies`, `NoNewPrivileges=yes`, `PrivateTmp=yes`. Riêng `zonendpoint-sigcount.service` chuyển sang `DynamicUser=yes`, `SupplementaryGroups=systemd-journal`, `StateDirectory=zonendpoint/status`. Đã verify bằng `systemd-analyze verify`.
+  - L-7: Thêm `timeout=120` cho tất cả tiến trình `clamscan` con; tính delta chữ ký mong đợi dựa trên số bản ghi thực tế đã sinh ra trong staging content thay vì `COUNT(*)` từ SQLite.
+- Quality Gates & Testing:
+  - Chạy toàn bộ 76 test trong thư mục tạm `/tmp/v58` trên máy chủ lab (`udevlevel73`): **76/76 PASS 100%** (29 MB, 10 TF, 18 abusech, 5 yara hold/reload, 5 deploy lock, 4 secure temp).
+  - `systemd-analyze verify` cho 3 file service: **PASS (exit code 0)**.
+  - Dọn dẹp sạch sẽ `/tmp/v58` sau khi kiểm thử. Không chạm vào các file thật trên server.
+- Bàn giao: Tạo `docs/handoffs/feeds-hardening-vic-to-qeen.md` chi tiết từng mục, quy trình triển khai lab đề xuất và kế hoạch rollback.

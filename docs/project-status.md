@@ -415,3 +415,21 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
   - Đóng gói NSIS release: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3,715,823 bytes, PE32+ x64, NSIS v3.13).
   - Installer SHA256: `fa0495faf4ae9faea6fc84fe962e6b5eac3be14ea789768490206d3b3c8c3e03`.
 - Bàn giao: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+## V-58 — Server Feeds & Services Hardening (2026-11-14)
+- Triển khai theo chỉ đạo của anh Zon ngày 2026-11-14 dựa trên `E:\Zonendpoint\optimisse.md` phần 5 (Branch `vic/feeds-hardening`, base `origin/main 908535e`). Cô lập 100% trong repo và test môi trường tạm `/tmp/v58` trên lab; không triển khai lab thật.
+- Các hạng mục hoàn thành (mỗi mục một commit riêng biệt):
+  1. **L-1 (`e0b659b`)**: MalwareBazaar gặp 429/401/403/RateLimitError lập tức ngắt lượt chạy, hủy slot đã bảo lưu trong rate_limit.json, 0 request gửi sang ThreatFox, ghi rõ lỗi vào `last-run.json`. Giữ test 503 retry.
+  2. **L-2 (`3735dc5`)**: Đặt mặc định `max_retries=0` cho mọi endpoint abuse.ch (`_post`, `fetch_recent`, `fetch_full_dump`). Số request gửi ngoài bằng đúng số đếm limiter.
+  3. **L-8 (`19f0967`)**: Tham số `--min-reload-interval` (giờ, mặc định 6.0) kèm state file ghi nguyên tử `/opt/zonendpoint/abusech/reload-state.json`. Chưa đủ khoảng cách tối thiểu thì nạp SQLite bình thường nhưng hoãn reload clamd (`reload_deferred=True`).
+  4. **L-3 (`1711522`)**: File hold (`/opt/zonendpoint/HOLD-abusech`, `/opt/zonendpoint/HOLD-yara`): cả 3 script rollback tạo file hold khi chạy; các updater phát hiện file hold thì log cảnh báo và bỏ qua lượt chạy cleanly (exit 0). Cập nhật tài liệu ops hướng dẫn gỡ hold.
+  5. **L-4 (`2412db6`)**: `zonendpoint-yara-update.py` chỉ ghi tag mới vào `current_tag.txt` sau khi thấy `"Database correctly reloaded"` trong log clamd và PING thành công; nhánh rollback giữ nguyên tag cũ; thay `sleep(8)` bằng chờ log clamd có timeout và xử lý xoay vòng log.
+  6. **L-6 (`1fcbb04`)**: Khóa `flock` độc quyền dùng chung `/run/lock/zonendpoint-clamd-deploy.lock` giữa abusech-update, yara-update và 3 script rollback. Không lấy được khóa -> bỏ lượt, thoát mã lỗi khác 0; sửa dứt điểm lỗi fail-open ở abusech-update.
+  7. **L-11 (`c8ea858`)**: Loại bỏ file tạm đoán trước được trong `/var/lib/clamav` và rollback. Sử dụng `tempfile.mkstemp`, `os.fchown`, `os.fchmod`, `os.fsync`, và `os.replace` (Python) và `mktemp -p "$TARGET_DIR"` + `sync` + `mv -f` (Shell).
+  8. **L-12 (`5979ae2`)**: Sandbox systemd cho 3 file `.service`: `ProtectSystem=strict`, `ReadWritePaths=`, `PrivateDevices=yes`, `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectControlGroups=yes`, `RestrictAddressFamilies`, `NoNewPrivileges=yes`, `PrivateTmp=yes`. Riêng `zonendpoint-sigcount.service` chuyển sang `DynamicUser=yes`, `SupplementaryGroups=systemd-journal`, `StateDirectory=zonendpoint/status`. Đã verify bằng `systemd-analyze verify`.
+  9. **L-7 (`b17b94b`)**: Thêm `timeout=120` cho tất cả tiến trình `clamscan` con; tính delta chữ ký mong đợi dựa trên số bản ghi thực tế đã sinh ra trong staging content thay vì `COUNT(*)` từ SQLite.
+- Quality Gates & Testing:
+  - Máy chủ lab (`udevlevel73`, Ubuntu 24.04, Python 3.14.4): **76/76 unit tests PASS** (29 MB, 10 TF, 18 abusech, 5 yara hold/reload, 5 deploy lock, 4 secure temp) trong 42.9s.
+  - `systemd-analyze verify /tmp/v58/services/*.service`: **PASS (exit code 0)**.
+  - Đã dọn dẹp sạch sẽ thư mục `/tmp/v58` trên lab.
+- Bàn giao: Tạo `docs/handoffs/feeds-hardening-vic-to-qeen.md`. Đẩy nhánh `vic/feeds-hardening`. Không merge main.

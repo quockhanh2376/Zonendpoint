@@ -120,3 +120,12 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/release-candidate | d3c33c4 | YES | feat(ui): hide server config row when connected OK and toggle via status icon (Task V-54) |
 | 2026-11-14 | vic/release-candidate | d91279d | YES | feat(ui): auto-compact scan results window to content height (Task V-55) |
 | 2026-11-14 | vic/release-candidate | 02cc273 | YES | test(core): eliminate test directory race conditions across parallel runners (Task V-56) |
+| 2026-11-14 | vic/feeds-hardening | e0b659b | YES | feat(feeds): L-1 abort run on MalwareBazaar 401/403/429 without querying ThreatFox |
+| 2026-11-14 | vic/feeds-hardening | 3735dc5 | YES | feat(feeds): L-2 default max_retries=0 for all abuse.ch calls ensuring sent equals recorded |
+| 2026-11-14 | vic/feeds-hardening | 19f0967 | YES | feat(feeds): L-8 add --min-reload-interval deferring clamd reload and tracking last reload state |
+| 2026-11-14 | vic/feeds-hardening | 1711522 | YES | feat(feeds): L-3 add hold files on rollback to skip updater runs and document unhold steps |
+| 2026-11-14 | vic/feeds-hardening | 2412db6 | YES | feat(feeds): L-4 write YARA tag only after verified reload and handle log rotation |
+| 2026-11-14 | vic/feeds-hardening | 1fcbb04 | YES | feat(feeds): L-6 implement shared flock across updaters and rollback scripts |
+| 2026-11-14 | vic/feeds-hardening | c8ea858 | YES | feat(feeds): L-11 use secure mkstemp, fchown, fchmod, fsync and mktemp for clamav and rollback files |
+| 2026-11-14 | vic/feeds-hardening | 5979ae2 | YES | feat(feeds): L-12 add systemd sandbox hardening and sigcount DynamicUser |
+| 2026-11-14 | vic/feeds-hardening | b17b94b | YES | feat(feeds): L-7 add timeout to clamscan calls and use actual generated signature count for delta |
