@@ -193,3 +193,20 @@
   - Soạn tài liệu bàn giao `docs/handoffs/release-candidate-vic-to-qeen.md`.
   - Đẩy nhánh `vic/release-candidate` lên origin. Không merge/push main.
 
+## 2026-11-14 - V-52 (Cover Signature Badge & Server Integration in 0.3.0)
+- Thực hiện theo phê duyệt của anh Zon ngày 2026-11-14 ("Vào 0.3.0"): bổ sung ô hiển thị "Cover: <số chữ ký>" vào bản 0.3.0 dưới slogan bên trái, viền cam bo tròn.
+- Merge nhánh `origin/main` (`6e652c3`) vào `vic/release-candidate` tại worktree `v52-cover`.
+- Triển khai thành công 3 tầng kiến trúc:
+  - Server (lab): Viết script `zonendpoint-sigcount.py` + systemd timer `zonendpoint-sigcount.timer` (10 phút/lần, root). Đọc journal clamd dòng reload/load mới nhất, ghi nguyên tử `/var/lib/zonendpoint/status/signatures.json` quyền 0644. Đã cài đặt, kích hoạt timer và kiểm chứng thành công trên lab (`8,616,478 signatures`).
+  - Client supervisor: Mở rộng `scripts/windows/zon-tunnel.ps1` với background runspace định kỳ sync status qua SSH (~15 phút/lần) về `%LOCALAPPDATA%\ZonEndpoint\server-status.json`. Đảm bảo không làm gián đoạn tunnel chính. Đã thử nghiệm bằng tiến trình tạm `-SyncOnce` độc lập, không đụng tới Scheduled Task đang chạy của anh Zon.
+  - App backend & UI: Module Rust `server_status.rs` đọc và kiểm tra nghiêm ngặt file status (kích thước <=64KB, signatures 0..1e9, stale nếu >2h). Giao diện frontend bổ sung badge `.brand-cover` ("Cover: 8,616,464", tooltip cập nhật, xử lý stale, hỗ trợ 2 theme và co giãn cửa sổ hẹp).
+- Kiểm thử & Chất lượng:
+  - Rust tests: **77/77 PASS** (58 lib, 1 bin, 18 resilience).
+  - Native tests: **21/21 PASS** (bổ sung test hiển thị Cover badge với file giả, xác nhận không rò rỉ tiến trình con khi đóng app V-30).
+  - Clippy: 0 warnings; Fmt: PASS; Build frontend: PASS.
+- Đóng gói bản cài NSIS 0.3.0:
+  - `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3.714.887 bytes, PE32+ x64, NSIS v3.13).
+  - Installer SHA256: `117df7f33cc590c5642b51bc7803633f4e841abec5d45df2973938c8e08a0f5f`.
+  - App executable SHA256: `d6d71bc82e821e5e1302b97ca745bf91308e6f6d53ca79b58fdef7ebdfd89950`.
+- Handoff & Đẩy nhánh: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không merge/push main.
+

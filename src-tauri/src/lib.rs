@@ -3,6 +3,7 @@ pub mod config;
 pub mod directory;
 pub mod quick;
 pub mod scanner;
+pub mod server_status;
 pub mod watcher;
 
 #[cfg(all(target_os = "windows", not(target_arch = "x86_64")))]
@@ -260,6 +261,11 @@ fn get_server_config() -> Result<config::ServerConfigDto, String> {
 async fn save_server_config(addr: String) -> Result<config::ServerConfigDto, String> {
     config::save_server_address(&addr)?;
     config::get_server_config()
+}
+
+#[tauri::command]
+fn get_server_status() -> server_status::ServerStatusDto {
+    server_status::load_server_status()
 }
 
 async fn run_scan(
@@ -546,6 +552,7 @@ pub fn run() {
             set_guard,
             set_window_theme_icon,
             check_server_status,
+            get_server_status,
             get_server_config,
             save_server_config
         ])

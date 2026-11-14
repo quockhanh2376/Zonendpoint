@@ -18,6 +18,14 @@ writeFileSync(path.join(systemRoot, 'drivers', 'DriverData', 'ignored.bin'), 'ex
 const coreNames = ['ntoskrnl.exe', 'ntdll.dll', 'kernel32.dll', 'kernelbase.dll', 'ci.dll', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe', 'lsass.exe', 'svchost.exe', 'winlogon.exe', 'winload.efi'];
 for (const name of coreNames) writeFileSync(path.join(systemRoot, name), `Benign system fixture ${name}`);
 writeFileSync(path.join(systemRoot, 'drivers', 'fixture.sys'), 'Benign driver fixture');
+const testAppdataZon = path.join(run, 'appdata', 'Zonendpoint');
+mkdirSync(testAppdataZon, { recursive: true });
+const mockServerStatus = {
+  signatures: 8616464,
+  loaded_at_utc: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+  engine: "ClamAV 1.5.4/28182"
+};
+writeFileSync(path.join(testAppdataZon, 'server-status.json'), JSON.stringify(mockServerStatus, null, 2));
 const real = process.argv.includes('--real');
 const results = [];
 let browser, driver, server, serverPort, mode = 'clean', versionDelayMs = 0;
@@ -312,6 +320,25 @@ try {
 
     await browser.$('.theme-toggle').click();
     assert.equal(await browser.execute(() => document.documentElement.dataset.theme), 'light');
+  });
+
+  await check('server status Cover badge displays formatted signatures from local file (V-52)', async () => {
+    const coverEl = await browser.$('.brand-cover');
+    assert.equal(await coverEl.isExisting(), true, 'Cover badge element must exist');
+    await browser.waitUntil(async () => {
+      const txt = await coverEl.getText();
+      return txt.includes('Cover:') && txt.includes('8,616,464');
+    }, { timeout: 10000, timeoutMsg: 'Cover badge did not display 8,616,464 within timeout' });
+
+    const title = await coverEl.getAttribute('title');
+    assert.match(title, /ClamAV signatures on server, updated/i);
+
+    // Verify in dark theme as well
+    await browser.$('.theme-toggle').click();
+    assert.equal(await coverEl.isExisting(), true);
+    const darkTxt = await coverEl.getText();
+    assert.ok(darkTxt.includes('8,616,464'), 'Cover badge must remain visible and populated in dark theme');
+    await browser.$('.theme-toggle').click(); // switch back to light
   });
 
   await check('keyboard focus order', async () => {

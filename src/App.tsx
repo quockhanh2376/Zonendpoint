@@ -40,6 +40,11 @@ type SelectedTarget = { id: string; path: string };
 type ScanLifecycle = "scanning" | "cancelling" | "idle";
 type ScanStateEvent = { scan_id: string; state: ScanLifecycle };
 type Theme = "light" | "dark";
+type ServerStatusDto = {
+  signatures: number | null;
+  loaded_at_utc: string | null;
+  stale: boolean;
+};
 
 const THEME_KEY = "zonendpoint-theme";
 
@@ -91,6 +96,22 @@ function App() {
   const [serverSaving, setServerSaving] = useState(false);
   const [serverConfigMsg, setServerConfigMsg] = useState<{ text: string; error: boolean } | null>(null);
   const [appVersion, setAppVersion] = useState("");
+  const [signatureStatus, setSignatureStatus] = useState<ServerStatusDto | null>(null);
+
+  const fetchSignatureStatus = () => {
+    void invoke<ServerStatusDto>("get_server_status")
+      .then((data) => setSignatureStatus(data))
+      .catch((err) => {
+        console.error("Failed to load server signature status:", err);
+        setSignatureStatus(null);
+      });
+  };
+
+  useEffect(() => {
+    fetchSignatureStatus();
+    const interval = setInterval(fetchSignatureStatus, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     void getVersion()
@@ -140,6 +161,7 @@ function App() {
         serverStatusRef.current = "connected";
         setServerStatus("connected");
       }
+      fetchSignatureStatus();
       return true;
     } catch {
       if (serverStatusRef.current !== "disconnected") {
@@ -356,6 +378,27 @@ function App() {
         ? "Cannot connect to ZonEndpoint server. Check your connection."
         : "Checking connection…";
 
+  const coverCount =
+    signatureStatus?.signatures != null
+      ? signatureStatus.signatures.toLocaleString("en-US")
+      : "—";
+
+  const coverTooltip = (() => {
+    if (!signatureStatus || signatureStatus.signatures == null) {
+      return "ClamAV signatures on server: status unavailable";
+    }
+    const timeStr = signatureStatus.loaded_at_utc
+      ? new Date(signatureStatus.loaded_at_utc).toLocaleString("en-US", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : "unknown time";
+    if (signatureStatus.stale) {
+      return `ClamAV signatures on server (stale, >2h), updated ${timeStr}`;
+    }
+    return `ClamAV signatures on server, updated ${timeStr}`;
+  })();
+
   const displayedResults = summary
     ? isAllClean
       ? []
@@ -447,6 +490,16 @@ function App() {
             </div>
           </div>
           <p className="brand-slogan">Protect your digital life</p>
+          <div className="brand-cover-row">
+            <div
+              className={`brand-cover${signatureStatus?.stale ? " stale" : ""}`}
+              title={coverTooltip}
+              aria-label={coverTooltip}
+            >
+              <span className="brand-cover-label">Cover:</span>
+              <span className="brand-cover-count">{coverCount}</span>
+            </div>
+          </div>
         </div>
 
         <section className="panel selection-panel" aria-label="Scan selection">

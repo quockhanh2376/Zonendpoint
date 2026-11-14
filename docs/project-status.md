@@ -318,3 +318,29 @@ Branch `vic/feed-yaraforge` (`E:\Zonendpoint-vic-feed`), base `ed1088c`. Staging
 - No install/overwrite on user system. Ready for Qeen testing (steps 3–5 of `V/Q-RELEASE-CURRENT`).
 - Handoff doc: [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Branch `vic/release-candidate` pushed; no merge to main.
 
+## V-52 — Cover Signature Badge & Server Integration in 0.3.0 (2026-11-14)
+- Phê duyệt: Anh Zon duyệt 2026-11-14 ("Vào 0.3.0"), tích hợp ô "Cover: <số chữ ký>" dưới logo/slogan bên trái, khung viền cam bo tròn.
+- Merged `origin/main` (`6e652c3`, SecuriteInfo docs) vào `vic/release-candidate` (commit `e15b864`).
+- Server (Lab):
+  - `scripts/server/zonendpoint-sigcount.py` + `zonendpoint-sigcount.service` + `zonendpoint-sigcount.timer` (10 phút/lần, root).
+  - Đọc dòng reload/load ClamAV mới nhất trong journal (`journalctl -u clamav-daemon.service -r -g signatures -n 10 -o json`).
+  - Ghi nguyên tử `/var/lib/zonendpoint/status/signatures.json` quyền 0644 (`{"signatures": 8616478, "loaded_at_utc": "...", "engine": "ClamAV 1.5.4/28182"}`).
+  - Đã cài đặt, kích hoạt timer và kiểm chứng trực tiếp trên lab server.
+- Client Tunnel Supervisor:
+  - Mở rộng `scripts/windows/zon-tunnel.ps1`: chạy runspace nền đồng bộ `/var/lib/zonendpoint/status/signatures.json` qua SSH mỗi ~15 phút về `%LOCALAPPDATA%\ZonEndpoint\server-status.json`.
+  - Kiểm tra tính hợp lệ nghiêm ngặt (JSON, signatures int 0..1e9, ISO UTC timestamp), ghi nguyên tử; không làm gián đoạn vòng lặp `ssh -N`.
+  - Đã test thử nghiệm bằng tiến trình tạm (`-SyncOnce`), ghi log tunnel sạch, không sửa Scheduled Task hiện tại của anh Zon.
+- App Backend & UI:
+  - Rust module `src-tauri/src/server_status.rs` với lệnh `get_server_status`: kiểm tra untrusted data (file <=64KB, signatures 0..1e9, stale nếu >2 giờ).
+  - Frontend UI: badge `.brand-cover` dưới slogan, hiển thị `Cover: 8,616,464`, tooltip chi tiết, stale styling, tương thích 2 theme và layout co giãn.
+- Quality Gates & Packaging:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo test`: **77/77 PASS** (58 lib, 1 bin, 18 resilience).
+  - `cargo clippy --all-targets -- -D warnings`: PASS.
+  - `npm.cmd run build`: PASS.
+  - `node tests/native/run.mjs`: **21/21 PASS** (thêm test Cover badge, 0 tiến trình mồ côi).
+  - Release build NSIS: `E:\Zonendpoint-tools\artifacts\v51-release\Zonendpoint_0.3.0_x64-setup.exe` (3.714.887 bytes, PE x64, NSIS v3.13).
+  - Installer SHA256: `117df7f33cc590c5642b51bc7803633f4e841abec5d45df2973938c8e08a0f5f`.
+  - App executable SHA256: `d6d71bc82e821e5e1302b97ca745bf91308e6f6d53ca79b58fdef7ebdfd89950`.
+- Handoff: Cập nhật [release-candidate-vic-to-qeen.md](handoffs/release-candidate-vic-to-qeen.md). Đẩy `vic/release-candidate`. Không tag, không ký, không merge main.
+

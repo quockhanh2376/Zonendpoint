@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ZonEndpoint ClamAV Signature Count Extractor periodically
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

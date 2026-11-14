@@ -112,3 +112,5 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-13 | vic/release-candidate | bba9e39 | YES | docs(v51): update release candidate handoff and notes for 0.3.0 rebuild |
 | 2026-11-13 | vic/release-candidate | 631dabe | YES | docs(tasks): track Task V-51 snapshot SHA in commit-notes |
 | 2026-11-14 | main | 6e652c3 | YES | Merge vic/securiteinfo docs (V-31 SecuriteInfo Basic runbook) into main (Zon approved "Merge tài liệu") |
+| 2026-11-14 | vic/release-candidate | e15b864 | YES | Merge branch 'origin/main' into vic/release-candidate |
+| 2026-11-14 | vic/release-candidate | pending | YES | feat(cover): add ClamAV signature cover badge and server extraction (Task V-52) |
