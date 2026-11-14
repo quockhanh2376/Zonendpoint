@@ -34,6 +34,7 @@ BACKUP_DIR = "/var/backups/clamav-yara"
 BACKUP_YARA_PATH = "/var/backups/clamav-yara/yara-forge-core.yar.bak"
 PREVIOUS_TAG_FILE = "/var/backups/clamav-yara/previous_tag.txt"
 WORK_DIR = "/opt/zonendpoint/yara/work"
+CLAMD_LOG_FILE = "/var/log/clamav/clamav.log"
 
 REPO_API_URL = "https://api.github.com/repos/YARAHQ/yara-forge/releases/latest"
 USER_AGENT = "Zonendpoint-Feed-Updater/1.0 (+https://github.com/quockhanh2376/Zonendpoint)"
@@ -226,7 +227,13 @@ def verify_on_temp_db(staging_yar: str, accepted_count: int):
     log("All temporary DB pre-flight checks PASSED successfully.")
 
 
-def deploy_and_reload(staging_yar: str, new_tag: str, accepted_count: int):
+def deploy_and_reload(
+    staging_yar: str,
+    new_tag: str,
+    accepted_count: int,
+    log_file: str = CLAMD_LOG_FILE,
+    reload_timeout: float = 120.0,
+):
     log("=== Deploying Filtered Ruleset Atomically ===")
     os.makedirs(BACKUP_DIR, exist_ok=True)
 
@@ -240,7 +247,16 @@ def deploy_and_reload(staging_yar: str, new_tag: str, accepted_count: int):
                 f.write(current_tag + "\n")
             log(f"Recorded previous release tag: {current_tag}")
 
-    # 2. Atomic replacement
+    # 2. Record clamd log offset before reload for reload line detection
+    log_pos_before = 0
+    if log_file and os.path.exists(log_file):
+        try:
+            log_pos_before = os.path.getsize(log_file)
+            log(f"clamd log initial offset: {log_pos_before} on '{log_file}'")
+        except Exception as e:
+            log(f"Warning: could not get initial clamd log size: {e}")
+
+    # 3. Atomic replacement
     tmp_dest = ACTIVE_YARA_PATH + ".tmp"
     shutil.copyfile(staging_yar, tmp_dest)
     try:
@@ -251,36 +267,67 @@ def deploy_and_reload(staging_yar: str, new_tag: str, accepted_count: int):
     os.replace(tmp_dest, ACTIVE_YARA_PATH)
     log(f"Atomically updated {ACTIVE_YARA_PATH}.")
 
-    # 3. Update current tag
-    os.makedirs(os.path.dirname(CURRENT_TAG_FILE), exist_ok=True)
-    with open(CURRENT_TAG_FILE, "w", encoding="utf-8") as f:
-        f.write(new_tag + "\n")
-
     # 4. Reload clamd
     log("Triggering zero-downtime clamd reload via clamdscan --reload...")
     res = subprocess.run(["clamdscan", "--reload"], capture_output=True, text=True)
     if res.returncode != 0:
         log(f"Warning: clamdscan --reload exited {res.returncode}: {res.stderr}")
 
-    # Wait for reload
-    time.sleep(8)
-
-    # 5. Verify PING -> PONG
-    log("Verifying clamd health via PING...")
+    # 5. Wait for reload line 'Database correctly reloaded' with timeout and log rotation handling
+    log(f"Waiting for clamd reload and 'Database correctly reloaded' in log (timeout: {reload_timeout:.1f}s)...")
+    start_wait = time.time()
+    reload_seen = False
+    sig_count_logged = None
     ping_ok = False
-    for attempt in range(1, 4):
+
+    while (time.time() - start_wait) < reload_timeout:
+        time.sleep(1.0)
+        if log_file and os.path.exists(log_file):
+            try:
+                cur_size = os.path.getsize(log_file)
+                if cur_size < log_pos_before:
+                    log(f"Log rotation detected on '{log_file}' ({cur_size} < {log_pos_before}). Resetting read offset to 0.")
+                    log_pos_before = 0
+                with open(log_file, "r", encoding="utf-8", errors="replace") as lf:
+                    lf.seek(log_pos_before)
+                    chunk = lf.read()
+                    if "Database correctly reloaded" in chunk:
+                        reload_seen = True
+                        matches = re.findall(r"Database correctly reloaded \((\d+) signatures\)", chunk)
+                        if matches:
+                            sig_count_logged = int(matches[-1])
+            except Exception as e:
+                log(f"Warning reading clamd log: {e}")
+
         if check_clamd_ping():
             ping_ok = True
-            break
-        time.sleep(2)
+        else:
+            ping_ok = False
 
-    if not ping_ok:
+        if log_file and os.path.exists(log_file):
+            if reload_seen and ping_ok:
+                log(f"Reload confirmed in log: {sig_count_logged or 'unknown'} signatures, PING -> PONG OK.")
+                break
+        else:
+            if ping_ok and (time.time() - start_wait) >= 2.0:
+                log("PING -> PONG OK (no clamd log file specified/found).")
+                break
+
+    health_ok = ping_ok and (reload_seen if (log_file and os.path.exists(log_file)) else True)
+    if not health_ok:
         log("CRITICAL: Clamd health check failed post-reload! Initiating emergency rollback...")
         if os.path.exists(BACKUP_YARA_PATH):
             shutil.copyfile(BACKUP_YARA_PATH, ACTIVE_YARA_PATH)
             subprocess.run(["clamdscan", "--reload"], capture_output=True, text=True)
             log("Restored previous ruleset from backup.")
+        # Rollback branch does NOT modify CURRENT_TAG_FILE (remains old verified tag)
         raise RuntimeError("Post-reload health check failed! Reverted to backup.")
+
+    # 6. Update current tag ONLY after health check succeeds
+    os.makedirs(os.path.dirname(CURRENT_TAG_FILE), exist_ok=True)
+    with open(CURRENT_TAG_FILE, "w", encoding="utf-8") as f:
+        f.write(new_tag + "\n")
+    log(f"Successfully recorded new release tag: '{new_tag}' in {CURRENT_TAG_FILE}")
 
     final_hash = compute_sha256(ACTIVE_YARA_PATH)
     log("=" * 60)
@@ -299,6 +346,8 @@ def main():
     parser.add_argument("--check-only", action="store_true", help="Check for updates without downloading")
     parser.add_argument("--dry-run", action="store_true", help="Download and test, but do not replace active DB or reload clamd")
     parser.add_argument("--hold-file", default=DEFAULT_HOLD_FILE, help=f"Hold file path to skip update when rollback active (default: {DEFAULT_HOLD_FILE})")
+    parser.add_argument("--log-file", default=CLAMD_LOG_FILE, help=f"Path to clamd log file (default: {CLAMD_LOG_FILE})")
+    parser.add_argument("--reload-timeout", type=float, default=120.0, help="Timeout in seconds for clamd reload (default: 120.0)")
     args = parser.parse_args()
 
     # L-3: Check for hold file created by rollback
@@ -404,7 +453,13 @@ def main():
         log("DRY-RUN completed successfully. Active database was NOT modified.")
         sys.exit(0)
 
-    deploy_and_reload(staging_yar, latest_tag, accepted_count)
+    deploy_and_reload(
+        staging_yar,
+        latest_tag,
+        accepted_count,
+        log_file=args.log_file,
+        reload_timeout=args.reload_timeout,
+    )
 
     # Cleanup work directory
     try:
