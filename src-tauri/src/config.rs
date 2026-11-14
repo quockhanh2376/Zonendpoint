@@ -334,7 +334,10 @@ mod tests {
         }
 
         let result = get_server_config();
-        assert!(result.is_err(), "corrupted config must return Err, got: {result:?}");
+        assert!(
+            result.is_err(),
+            "corrupted config must return Err, got: {result:?}"
+        );
         let err_msg = result.unwrap_err();
         assert!(
             err_msg.contains("failed to parse config file"),

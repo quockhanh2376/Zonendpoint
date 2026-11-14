@@ -795,7 +795,7 @@ pub async fn scan_file_with_engine_timeout(
             }
             result.engine_version = Some(engine_version.clone());
             if let Some(sig_gen) = &sig_generation {
-                if let Err(error) = crate::cache::put(
+                let put_result = crate::cache::put(
                     &cache_path,
                     &hash,
                     &engine_version,
@@ -804,7 +804,8 @@ pub async fn scan_file_with_engine_timeout(
                     outcome.status,
                     outcome.reason.as_deref(),
                     now,
-                ) {
+                );
+                if let Err(error) = put_result {
                     result.reason = Some(format!(
                         "{}; cache write failed: {error}",
                         result
@@ -1411,6 +1412,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn cache_read_failure_treated_as_miss_and_scans_normally() {
         let _env_guard = crate::lock_test_env();
         let temp_dir = test_temp_dir("cache-read-err");
@@ -1466,6 +1468,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn invalid_or_missing_server_status_completely_disables_cache() {
         let _env_guard = crate::lock_test_env();
         let temp_dir = test_temp_dir("no-status-cache");
@@ -1506,6 +1509,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn valid_server_status_caches_and_sig_generation_change_bypasses_cache() {
         let _env_guard = crate::lock_test_env();
         let temp_dir = test_temp_dir("status-cache-bypass");
@@ -1598,6 +1602,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn cache_hit_detects_metadata_mtime_or_size_change() {
         let _env_guard = crate::lock_test_env();
         let temp_dir = test_temp_dir("p1-metadata-recheck");
@@ -1660,13 +1665,19 @@ mod tests {
             size: snap1.size + 1,
             modified: snap1.modified,
         };
-        assert_ne!(snap1, snap_diff_size, "size mismatch must invalidate snapshot");
+        assert_ne!(
+            snap1, snap_diff_size,
+            "size mismatch must invalidate snapshot"
+        );
 
         let snap_diff_mtime = FileSnapshot {
             size: snap1.size,
             modified: snap1.modified - Duration::from_secs(10),
         };
-        assert_ne!(snap1, snap_diff_mtime, "mtime mismatch must invalidate snapshot");
+        assert_ne!(
+            snap1, snap_diff_mtime,
+            "mtime mismatch must invalidate snapshot"
+        );
 
         unsafe {
             std::env::remove_var("ZONENDPOINT_SERVER_STATUS_FILE");

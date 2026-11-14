@@ -300,3 +300,23 @@
   - `cargo test`: **10 / 10 lượt liên tiếp PASS 100% (810/810 test runs PASS)**.
   - `npm.cmd run build`: PASS (Vite + TS 0 lỗi).
 - Bàn giao: Cập nhật handoff cho Qeen, commit và push nhánh `vic/release-candidate`. Không tag, không ký, không merge main.
+
+## 2026-11-14 - V-57 (Bản 0.3.1: Các tối ưu hóa và siết bảo mật phía client)
+- Thực hiện theo chỉ đạo của anh Zon ngày 2026-11-14 từ tài liệu kiến trúc tối ưu `E:\Zonendpoint\optimisse.md`, trên nhánh mới `vic/031-client` từ `origin/main 908535e` (tag `v0.3.0`).
+- Hoàn thành đầy đủ 8 hạng mục ưu tiên phía client qua các commit độc lập:
+  1. **S-1**: ScanSummary chỉ lưu chi tiết các mục không-CLEAN (tối đa trần 1000 mục), toàn bộ kết quả INFECTED luôn được giữ lại và ưu tiên (nếu đầy sẽ đẩy bớt mục không phải INFECTED). Bộ đếm giữ nguyên.
+  2. **S-7 + S-6**: Lỗi đọc cache xem như cache miss và tiếp tục quét bình thường; tự động phục hồi database cache hỏng/sai schema bằng cách đổi tên sang `cache.db.corrupt-YYYYMMDD-HHMMSS` (chuẩn UTC+7) rồi khởi tạo lại DB sạch; dọn dẹp các mục quá hạn TTL 7 ngày lúc mở app (`cleanup_expired`).
+  3. **X-5**: Khóa cache gắn liền với thế hệ chữ ký server (`signatures:loaded_at`), nâng cấp schema cache SQLite lên v3 (`sig_generation TEXT NOT NULL`), tăng `POLICY_VERSION` thành `zonendpoint-0.3.1-v1`. Vô hiệu hóa dùng và ghi cache khi trạng thái server không hợp lệ.
+  4. **X-7 + S-4**: Gỡ bỏ plugin `tauri-plugin-opener`, gỡ bỏ cấp quyền capabilities không sử dụng; loại bỏ đăng ký lệnh `set_guard` và `cache_stats`. Giữ nguyên `watcher.rs`.
+  5. **P-1**: Tối ưu cache hit: thay thế lượt đọc/băm SHA-256 thứ hai bằng so khớp lại metadata (`size`, `mtime`) với snapshot lúc băm lần 1; nếu tệp thay đổi đánh dấu `ScanStatus::Unknown`.
+  6. **S-5**: Ghi cấu hình `config.json` nguyên tử qua file tạm cùng thư mục + `sync_all` + `rename`; khi cấu hình bị hỏng, `get_server_config` trả lỗi rõ ràng lên UI thay vì âm thầm dùng giá trị mặc định. Bổ sung `TEST_ENV_LOCK` trong `lib.rs` bảo vệ đa luồng.
+  7. **P-5**: Điều tiết sự kiện `scan-progress` cho file Clean tối đa ~10 lần/giây (100ms) bằng `ProgressThrottler`; kết quả không-CLEAN và sự kiện cuối cùng luôn được phát ngay lập tức.
+  8. **X-6**: Huy hiệu "Env active" cố định cạnh icon trạng thái server ở thanh tiêu đề bên trái, luôn hiển thị khi có biến môi trường cấu hình server, không phụ thuộc hàng Server ẩn/hiện; tương thích cả 2 theme và kích thước compact 240px.
+- Nâng phiên bản ứng dụng lên **0.3.1** đồng bộ tại 5 vị trí (`package.json`, `package-lock.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock`) và cập nhật `CHANGELOG.md`.
+- Quality Gates:
+  - `cargo fmt -- --check`: PASS.
+  - `cargo clippy --all-targets -- -D warnings`: PASS (0 warnings).
+  - `cargo test`: **95/95 tests PASS (76 lib, 1 bin, 18 resilience)**.
+  - `npm.cmd run build`: PASS (Vite + TS 0 lỗi).
+  - `node tests/native/run.mjs`: **21/21 PASS (chạy 2 lần liên tiếp đều PASS 100%)**.
+- Bàn giao: Soạn handoff `docs/handoffs/v031-client-vic-to-qeen.md`, đóng gói bản cài `Zonendpoint_0.3.1_x64-setup.exe` vào `E:\Zonendpoint-tools\artifacts\v57-release\` (3,650,792 bytes, SHA256: `1305f89913bfef92e65dc86175dde9628fa978c5b43a8ead557af70d6448f126`).

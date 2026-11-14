@@ -1,9 +1,20 @@
-# Project status — 2026-11-12
+# Project status — 2026-11-14
 
-Phase: current scan candidate stabilization for **non-commercial use on 1–2 personal machines** (confirmed by Zon 2026-11-10; company use requires reviewing abuse.ch/Spamhaus terms). Implementation of hourly automated update scheduler for MalwareBazaar + ThreatFox (Task V-42) and Q-31/Q-32 defect resolution (Tasks V-43/V-44) on branch `vic/abusech-timer`. Base: `origin/main 1399604` (Q-30 PASS).
+Phase: Zonendpoint 0.3.1 client optimizations and security hardening (Task V-57 per `optimisse.md`), branch `vic/031-client` (base `origin/main 908535e`, tag `v0.3.0`). Handoff: [v031-client-vic-to-qeen.md](handoffs/v031-client-vic-to-qeen.md).
 
 ## Active checkout/snapshot
-- Implementation: branch `vic/abusech-timer` (base `origin/main 1399604`).
+- Implementation: branch `vic/031-client` (base `origin/main 908535e`).
+- Version: `0.3.1`.
+- Scope: 8 prioritized client optimization and security items from `optimisse.md` (S-1, S-7, S-6, X-5, X-7, S-4, P-1, S-5, P-5, X-6).
+- Completed items:
+  1. **S-1**: ScanSummary retains only non-clean items (up to 1,000), prioritizing INFECTED entries.
+  2. **S-7 + S-6**: Cache read failure treated as cache miss; corrupt cache DB auto-recovered as `cache.db.corrupt-YYYYMMDD-HHMMSS` (UTC+7); TTL expired entries (7 days) pruned on app launch.
+  3. **X-5**: Cache validity bound to server signature generation (`signatures:loaded_at`), schema v3, cache disabled when server status is invalid.
+  4. **X-7 + S-4**: Pruned unused `tauri-plugin-opener` and uninvoked `set_guard`/`cache_stats` commands.
+  5. **P-1**: Lightweight metadata verification (`size`, `mtime`) replaces second full SHA-256 hash on cache hit.
+  6. **S-5**: Atomic `config.json` write via temp file + `sync_all` + `rename`; corrupted config errors surfaced to UI.
+  7. **P-5**: Clean scan-progress events throttled to ~10Hz (100ms); non-clean and final events emitted immediately.
+  8. **X-6**: Environment override badge ("Env active") permanently visible next to server status icon.
 - Feeds status:
   - MalwareBazaar: 1,171,422 hashes in DB (`/opt/zonendpoint/malwarebazaar/malwarebazaar.db`), 1,171,422 loaded in clamd (`/var/lib/clamav/malwarebazaar.hsb`).
   - ThreatFox: 45,298 unique SHA-256 in DB (`/opt/zonendpoint/threatfox/threatfox.db`), 21,625 net unique signatures loaded in clamd (`/var/lib/clamav/threatfox.hsb`).

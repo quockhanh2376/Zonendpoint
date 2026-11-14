@@ -120,3 +120,12 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/release-candidate | d3c33c4 | YES | feat(ui): hide server config row when connected OK and toggle via status icon (Task V-54) |
 | 2026-11-14 | vic/release-candidate | d91279d | YES | feat(ui): auto-compact scan results window to content height (Task V-55) |
 | 2026-11-14 | vic/release-candidate | 02cc273 | YES | test(core): eliminate test directory race conditions across parallel runners (Task V-56) |
+| 2026-11-14 | vic/031-client | b72d7e6 | YES | fix(scan): retain only non-clean scan results prioritizing infected items (S-1) |
+| 2026-11-14 | vic/031-client | 0e2bd9b | YES | fix(cache): treat cache read failure as miss and auto-recover corrupt db with ttl cleanup (S-7, S-6) |
+| 2026-11-14 | vic/031-client | fde9a5b | YES | feat(cache): bind cache validity to server signature generation (X-5) |
+| 2026-11-14 | vic/031-client | aebb5d4 | YES | chore(security): prune unused opener plugin and uninvoked guard commands (X-7, S-4) |
+| 2026-11-14 | vic/031-client | 5039343 | YES | perf(scanner): replace second full hash with lightweight metadata verification on cache hit (P-1) |
+| 2026-11-14 | vic/031-client | 1124ab8 | YES | fix(config): ensure atomic configuration writes and surface corruption errors (S-5) |
+| 2026-11-14 | vic/031-client | 73e672d | YES | perf(events): throttle clean progress events to 10Hz while emitting non-clean immediately (P-5) |
+| 2026-11-14 | vic/031-client | 0595ac9 | YES | feat(ui): display environment override badge alongside server status icon (X-6) |
+| 2026-11-14 | vic/031-client | e251471 | YES | chore(release): bump version to 0.3.1 and update documentation |

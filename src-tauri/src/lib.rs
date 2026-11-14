@@ -601,7 +601,8 @@ pub fn run() {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs() as i64;
-                let _ = crate::cache::cleanup_expired(&path, now, crate::scanner::CACHE_TTL_SECONDS);
+                let _ =
+                    crate::cache::cleanup_expired(&path, now, crate::scanner::CACHE_TTL_SECONDS);
             }
             Ok(())
         })
@@ -744,12 +745,10 @@ mod tests {
     fn throttles_rapid_clean_progress_and_flushes_tail() {
         let emitted = Arc::new(Mutex::new(Vec::new()));
         let emitted_clone = emitted.clone();
-        let throttler = ProgressThrottler::new(Duration::from_millis(100), move |_summary, latest| {
-            emitted_clone
-                .lock()
-                .unwrap()
-                .push(latest.path.clone());
-        });
+        let throttler =
+            ProgressThrottler::new(Duration::from_millis(100), move |_summary, latest| {
+                emitted_clone.lock().unwrap().push(latest.path.clone());
+            });
 
         let mut summary = ScanSummary::default();
         for i in 0..50 {
@@ -780,12 +779,13 @@ mod tests {
     fn emits_non_clean_progress_immediately_even_within_throttle_window() {
         let emitted = Arc::new(Mutex::new(Vec::new()));
         let emitted_clone = emitted.clone();
-        let throttler = ProgressThrottler::new(Duration::from_millis(100), move |_summary, latest| {
-            emitted_clone
-                .lock()
-                .unwrap()
-                .push((latest.path.clone(), latest.status));
-        });
+        let throttler =
+            ProgressThrottler::new(Duration::from_millis(100), move |_summary, latest| {
+                emitted_clone
+                    .lock()
+                    .unwrap()
+                    .push((latest.path.clone(), latest.status));
+            });
 
         let mut summary = ScanSummary::default();
 

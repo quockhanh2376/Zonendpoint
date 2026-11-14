@@ -211,6 +211,7 @@ pub fn get(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn put(
     path: &Path,
     sha256: &[u8; 32],
@@ -802,7 +803,10 @@ mod tests {
             None,
             100,
         );
-        assert!(result.is_ok(), "corrupt db must automatically recover: {result:?}");
+        assert!(
+            result.is_ok(),
+            "corrupt db must automatically recover: {result:?}"
+        );
 
         // Cache must work properly after recovery
         let cached = get(&path, &hash, "engine-v1", TEST_SIG_GEN, "policy-1", 110, 60).unwrap();
@@ -883,14 +887,30 @@ mod tests {
         assert_eq!(deleted, 1);
 
         assert!(
-            get(&path, &hash1, "engine-v1", TEST_SIG_GEN, "policy-1", 600, 600)
-                .unwrap()
-                .is_none()
+            get(
+                &path,
+                &hash1,
+                "engine-v1",
+                TEST_SIG_GEN,
+                "policy-1",
+                600,
+                600
+            )
+            .unwrap()
+            .is_none()
         );
         assert!(
-            get(&path, &hash2, "engine-v1", TEST_SIG_GEN, "policy-1", 600, 600)
-                .unwrap()
-                .is_some()
+            get(
+                &path,
+                &hash2,
+                "engine-v1",
+                TEST_SIG_GEN,
+                "policy-1",
+                600,
+                600
+            )
+            .unwrap()
+            .is_some()
         );
 
         let _ = std::fs::remove_file(&path);

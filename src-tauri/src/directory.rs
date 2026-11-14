@@ -543,9 +543,8 @@ mod tests {
             std::fs::write(root.join(format!("{index}.bin")), b"x").unwrap();
         }
         let (_tx, cancel) = watch::channel(false);
-        let scan: ScanFn = Box::new(|path, _| {
-            Box::pin(async move { ScanResult::error(path, "simulated error") })
-        });
+        let scan: ScanFn =
+            Box::new(|path, _| Box::pin(async move { ScanResult::error(path, "simulated error") }));
         let summary = scan_directory(root.clone(), cancel, scan, Box::new(|_, _| {})).await;
         assert_eq!(summary.errors, MAX_RETAINED_RESULTS + 2);
         assert_eq!(summary.results.len(), MAX_RETAINED_RESULTS);

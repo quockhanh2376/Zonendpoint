@@ -2,6 +2,22 @@
 
 All notable changes to Zonendpoint are documented in this file.
 
+## [0.3.1] - 2026-11-14
+
+### Added
+- **Khóa cache gắn liền với thế hệ chữ ký ClamAV server (X-5)**: Nâng cấp schema cache SQLite lên phiên bản v3 với `sig_generation` gồm tổng số chữ ký và thời điểm nạp (`signatures:loaded_at`). Tự động làm mới cache khi database máy chủ cập nhật chữ ký mới; vô hiệu hóa sử dụng cache khi trạng thái máy chủ không hợp lệ.
+- **Hiển thị huy hiệu ghi đè môi trường "Env active" cố định (X-6)**: Di chuyển huy hiệu "Env active" ra cạnh icon trạng thái server ở thanh tiêu đề, luôn hiển thị khi có biến môi trường cấu hình server (`ZONENDPOINT_CLAMD`), không phụ thuộc vào hàng Server đang đóng hay mở; tương thích hoàn hảo trên cả 2 theme Sáng/Tối và kích thước compact 240px.
+
+### Changed
+- **Giới hạn lưu trữ chi tiết ScanSummary ưu tiên mối đe dọa (S-1)**: `ScanSummary` chỉ lưu chi tiết các mục không-CLEAN (tối đa 1.000 mục), toàn bộ mục `INFECTED` luôn được bảo toàn và ưu tiên (nếu danh sách đầy sẽ loại bớt các mục không phải INFECTED), giúp tiết kiệm bộ nhớ và tránh nghẽn IPC khi quét số lượng lớn file sạch.
+- **Tối ưu hóa kiểm tra Cache Hit bằng siêu dữ liệu (P-1)**: Khi cache hit, thay thế lượt đọc và băm SHA-256 thứ hai bằng so khớp lại siêu dữ liệu tệp (kích thước `size` và thời gian sửa đổi `mtime`) với snapshot lúc băm lần 1; nếu tệp bị thay đổi trong lúc quét sẽ đánh dấu `ScanStatus::Unknown`.
+- **Điều tiết sự kiện tiến trình quét UI (P-5)**: Phía backend điều tiết (throttle) các sự kiện `scan-progress` cho file sạch tối đa ~10 lần/giây (100ms) để giảm tải re-render liên tục cho giao diện WebView; các phát hiện không-CLEAN (`Infected`, `Error`, `Skipped`, `Unknown`, `Cancelled`) và sự kiện kết thúc luôn được phát ngay lập tức.
+- **Thu gọn bề mặt tấn công ứng dụng (X-7, S-4)**: Gỡ bỏ plugin `tauri-plugin-opener` và các quyền không sử dụng trong capabilities; loại bỏ đăng ký hai lệnh chưa kích hoạt `set_guard` và `cache_stats` khỏi Tauri command handler.
+
+### Fixed
+- **Tự động phục hồi cache SQLite bị hỏng và dọn dẹp TTL (S-7, S-6)**: Xử lý lỗi đọc cache như một lần cache miss và tiếp tục quét bình thường; khi file cache database bị hỏng hoặc sai schema, tự động đổi tên thành `cache.db.corrupt-YYYYMMDD-HHMMSS` (chuẩn UTC+7) rồi khởi tạo lại DB mới tinh; dọn dẹp tự động các bản ghi quá hạn TTL (7 ngày) mỗi khi khởi động ứng dụng.
+- **Ghi cấu hình Server an toàn nguyên tử (S-5)**: Ghi cấu hình `config.json` nguyên tử thông qua tệp tạm cùng thư mục + `sync_all` + `rename` chống lỗi mất dữ liệu khi mất điện/crash; khi tệp cấu hình bị hỏng, trả lỗi rõ ràng lên giao diện thay vì âm thầm rơi về giá trị mặc định.
+
 ## [0.3.0] - 2026-11-13
 
 ### Added
