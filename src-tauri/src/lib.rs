@@ -560,6 +560,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(ScanManager::new())
         .manage(Arc::new(Mutex::new(Guard::default())))
+        .setup(|_app| {
+            if let Ok(path) = crate::cache::default_path() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+                let _ = crate::cache::cleanup_expired(&path, now, crate::scanner::CACHE_TTL_SECONDS);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             select_scan_path,
             scan_path,

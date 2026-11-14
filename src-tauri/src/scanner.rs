@@ -668,16 +668,18 @@ pub async fn scan_file_with_engine_timeout(
             .duration_since(UNIX_EPOCH)
             .map_err(|error| error.to_string())?
             .as_secs() as i64;
-        if let Some(cached) = crate::cache::get(
+        let (cached_verdict, cache_read_error) = match crate::cache::get(
             &cache_path,
             &hash,
             &engine_version,
             POLICY_VERSION,
             now,
             CACHE_TTL_SECONDS,
-        )
-        .map_err(|error| format!("read scan cache: {error}"))?
-        {
+        ) {
+            Ok(cached) => (cached, None),
+            Err(error) => (None, Some(format!("cache read error: {error}"))),
+        };
+        if let Some(cached) = cached_verdict {
             let (verify_hash, verify_size, verify_snapshot) = hash_file(&path).await?;
             if verify_hash != hash || verify_size != size || verify_snapshot != file_snapshot {
                 return Ok::<ScanResult, String>(ScanResult::new(
@@ -749,9 +751,15 @@ pub async fn scan_file_with_engine_timeout(
                 &path,
                 outcome.status,
                 outcome.sha256,
-                outcome.reason,
+                outcome.reason.clone(),
                 outcome.bytes_scanned,
             );
+            if let Some(cache_err) = cache_read_error {
+                result.reason = Some(match result.reason.take() {
+                    Some(prev) => format!("{prev}; {cache_err}"),
+                    None => cache_err,
+                });
+            }
             result.engine_version = Some(engine_version.clone());
             if let Err(error) = crate::cache::put(
                 &cache_path,
@@ -759,7 +767,7 @@ pub async fn scan_file_with_engine_timeout(
                 &engine_version,
                 POLICY_VERSION,
                 outcome.status,
-                result.reason.as_deref(),
+                outcome.reason.as_deref(),
                 now,
             ) {
                 result.reason = Some(format!(
@@ -1357,6 +1365,46 @@ mod tests {
         assert_eq!(
             result.reason.as_deref(),
             Some("file exceeds scan size limit")
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn cache_read_failure_treated_as_miss_and_scans_normally() {
+        let temp_dir = test_temp_dir("cache-read-err");
+        let file_path = temp_dir.join("clean.txt");
+        std::fs::write(&file_path, b"hello safe clean content").unwrap();
+
+        // Make parent of cache_path a regular file so SQLite/FS cannot open or create it
+        let blocked_parent = temp_dir.join("blocked_file");
+        std::fs::write(&blocked_parent, b"regular file blocking path traversal").unwrap();
+        let cache_path = blocked_parent.join("cache.db");
+
+        let (addr, _daemon) = mock_clamd(vec![b"stream: OK\0".to_vec()], false).await;
+        let semaphore = Arc::new(ScanLimiter::new(1));
+        let (_tx, cancel) = watch::channel(false);
+
+        let result = scan_file_with_engine_override(
+            file_path,
+            cache_path,
+            addr,
+            Some("ClamAV 1.5.4/28182".into()),
+            cancel,
+            semaphore,
+        )
+        .await;
+
+        // Must still produce a Clean verdict from clamd without failing as ERROR
+        assert_eq!(result.status, ScanStatus::Clean);
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("cache read error:"),
+            "expected cache read error noted in reason, got: {:?}",
+            result.reason
         );
 
         let _ = std::fs::remove_dir_all(temp_dir);
