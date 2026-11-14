@@ -137,3 +137,4 @@ One line per commit, newest last: `date | branch | SHA | pushed | summary`. Vic 
 | 2026-11-14 | vic/031-perf | e9bfc17 | YES | fix(scanner): detect clamd version change mid-scan and invalidate stale cache keys (S-10) |
 | 2026-11-14 | vic/031-perf | 9966b2d | YES | docs(qa): record post-optimization perf benchmarks and P-4 IDSESSION analysis |
 | 2026-11-14 | vic/031-perf | be58cde | YES | test(native): ensure active scan in V-30 close test selects freshly written fixture |
+| 2026-11-14 | vic/031-perf | 7ae2db3 | YES | docs(handoff): hand off V-61 client performance optimization to Qeen |
